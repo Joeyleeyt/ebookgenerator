@@ -19,7 +19,10 @@ RUN corepack enable
 
 WORKDIR /app
 COPY . .
-RUN pnpm install --frozen-lockfile
+# NODE_ENV=production (set above) makes pnpm skip devDependencies, but the Next.js
+# build needs typescript + @types/* (devDeps) for its type-check step. --prod=false
+# forces a full install so the build has them.
+RUN pnpm install --frozen-lockfile --prod=false
 
 # NEXT_PUBLIC_* are inlined into the client bundle at build time, so they must be
 # real values here. Railway injects matching service variables as Docker build
