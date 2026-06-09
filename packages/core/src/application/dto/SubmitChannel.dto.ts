@@ -1,0 +1,15 @@
+import { z } from 'zod';
+
+export const SubmitChannelDto = z.object({
+  channelUrl: z.string().url(),
+  options: z
+    .object({
+      targetPages: z.number().int().min(50).max(200).default(100),
+      maxVideos: z.number().int().min(10).max(50).default(40),
+      tone: z.enum(['educational', 'conversational', 'professional']).default('professional'),
+      includeComments: z.boolean().default(true),
+    })
+    .default({}),
+});
+
+export type SubmitChannelDto = z.infer<typeof SubmitChannelDto>;

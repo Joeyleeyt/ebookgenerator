@@ -1,0 +1,90 @@
+// ── Domain: shared ──────────────────────────────────────────────────────────
+export * from './domain/shared/Result.js';
+export * from './domain/shared/Guard.js';
+export * from './domain/shared/ValueObject.js';
+export * from './domain/shared/Identifier.js';
+export * from './domain/shared/Entity.js';
+export * from './domain/shared/AggregateRoot.js';
+export * from './domain/shared/DomainEvent.js';
+
+// ── Domain: aggregates ──────────────────────────────────────────────────────
+export * from './domain/project/Project.js';
+export * from './domain/project/ProjectId.js';
+export * from './domain/project/ProjectStatus.js';
+export * from './domain/project/GenerationOptions.js';
+export * from './domain/project/events/ProjectStatusChanged.js';
+export * from './domain/channel/Channel.js';
+export * from './domain/channel/ChannelUrl.js';
+export * from './domain/channel/ChannelSummary.js';
+export * from './domain/channel/ChannelKnowledgeBase.js';
+export * from './domain/video/Video.js';
+export * from './domain/video/VideoId.js';
+export * from './domain/video/Transcript.js';
+export * from './domain/video/TranscriptSource.js';
+export * from './domain/video/Comment.js';
+export * from './domain/video/VideoSummary.js';
+export * from './domain/video/CommentInsights.js';
+export * from './domain/video/VideoSelection.js';
+export * from './domain/book/Book.js';
+export * from './domain/book/ids.js';
+export * from './domain/book/Chapter.js';
+export * from './domain/book/Section.js';
+export * from './domain/book/Outline.js';
+export * from './domain/book/PageBudget.js';
+export * from './domain/book/BookStrategy.js';
+export * from './domain/book/ChapterResearch.js';
+export * from './domain/book/BookSection.js';
+export * from './domain/book/events/ChapterGenerated.js';
+export * from './domain/export/ExportArtifact.js';
+
+// ── Application: ports ──────────────────────────────────────────────────────
+export * from './application/ports/Clock.js';
+export * from './application/ports/IdGenerator.js';
+export * from './application/ports/Logger.js';
+export * from './application/ports/Hasher.js';
+export * from './application/ports/repositories/UnitOfWork.js';
+export * from './application/ports/repositories/ProjectRepository.js';
+export * from './application/ports/repositories/VideoRepository.js';
+export * from './application/ports/repositories/BookRepository.js';
+export * from './application/ports/repositories/ChannelRepository.js';
+export * from './application/ports/repositories/KnowledgeRepository.js';
+export * from './application/ports/repositories/ExportArtifactRepository.js';
+export * from './application/ports/services/AiTextGenerator.js';
+export * from './application/ports/services/YouTubeMetadataProvider.js';
+export * from './application/ports/services/TranscriptProvider.js';
+export * from './application/ports/services/SpeechToText.js';
+export * from './application/ports/services/AudioDownloader.js';
+export * from './application/ports/services/ObjectStorage.js';
+export * from './application/ports/services/DocumentExporter.js';
+export * from './application/ports/services/JobQueue.js';
+export * from './application/ports/services/IdempotencyStore.js';
+export * from './application/ports/services/Telemetry.js';
+
+// ── Application: dto / errors / pipeline ────────────────────────────────────
+export * from './application/dto/SubmitChannel.dto.js';
+export * from './application/dto/jobs.dto.js';
+export * from './application/errors.js';
+export * from './application/pipeline/PipelineOrchestrator.js';
+
+// ── Application: use cases ──────────────────────────────────────────────────
+export * from './application/use-cases/SubmitChannelUseCase.js';
+export * from './application/use-cases/IngestChannelUseCase.js';
+export * from './application/use-cases/FetchVideoDataUseCase.js';
+export * from './application/use-cases/FetchTranscriptUseCase.js';
+export * from './application/use-cases/TranscribeAudioUseCase.js';
+export * from './application/use-cases/SummarizeVideoUseCase.js';
+export * from './application/use-cases/AnalyzeCommentsUseCase.js';
+export * from './application/use-cases/BuildKnowledgeBaseUseCase.js';
+export * from './application/use-cases/GenerateBookStrategyUseCase.js';
+export * from './application/use-cases/GenerateOutlineUseCase.js';
+export * from './application/use-cases/GenerateChapterResearchUseCase.js';
+export * from './application/use-cases/StartChapterGenerationUseCase.js';
+export * from './application/use-cases/GenerateChapterUseCase.js';
+export * from './application/use-cases/PolishBookUseCase.js';
+export * from './application/use-cases/AssembleEbookUseCase.js';
+export * from './application/use-cases/ExportEbookUseCase.js';
+export * from './application/use-cases/RegenerateChapterUseCase.js';
+export * from './application/use-cases/EditChapterUseCase.js';
+export * from './application/use-cases/AddSectionUseCase.js';
+export * from './application/use-cases/AddExtraContentUseCase.js';
+export * from './application/use-cases/GenerateExtraContentUseCase.js';

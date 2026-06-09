@@ -1,0 +1,65 @@
+import { z } from 'zod';
+import { Result } from '../../domain/shared/Result.js';
+import { VideoId } from '../../domain/video/VideoId.js';
+import { CommentInsights } from '../../domain/video/CommentInsights.js';
+import type { VideoRepository } from '../ports/repositories/VideoRepository.js';
+import type { KnowledgeRepository } from '../ports/repositories/KnowledgeRepository.js';
+import type { AiTextGenerator } from '../ports/services/AiTextGenerator.js';
+import type { Hasher } from '../ports/Hasher.js';
+import { CommentAnalysisPrompt } from '../prompts/CommentAnalysisPrompt.js';
+import { parseJsonCompletion } from '../prompts/parse.js';
+import type { VideoJob } from '../dto/jobs.dto.js';
+
+const Schema = z.object({
+  commonQuestions: z.array(z.string()),
+  frustrations: z.array(z.string()),
+  fears: z.array(z.string()),
+  myths: z.array(z.string()),
+  objections: z.array(z.string()),
+  desiredResults: z.array(z.string()),
+  recurringProblems: z.array(z.string()),
+});
+
+/** Phase 6 (Claude Haiku): mine audience psychology from a video's comments. */
+export class AnalyzeCommentsUseCase {
+  constructor(
+    private readonly videos: VideoRepository,
+    private readonly knowledge: KnowledgeRepository,
+    private readonly ai: AiTextGenerator,
+    private readonly hasher: Hasher,
+  ) {}
+
+  async execute(cmd: VideoJob): Promise<Result<void>> {
+    const videoId = VideoId.from(cmd.videoId);
+    const video = await this.videos.findById(videoId);
+    if (!video) return Result.fail('Video not found');
+
+    const comments = video.comments.map((c) => c.text);
+    const inputHash = this.hasher.hash({ comments });
+
+    const existing = await this.knowledge.getCommentInsights(videoId);
+    if (existing?.inputHash === inputHash) return Result.ok(); // idempotent
+
+    // No comments → store an empty insight so the barrier still advances.
+    if (comments.length === 0) {
+      await this.knowledge.saveCommentInsights(videoId, CommentInsights.empty(inputHash));
+      return Result.ok();
+    }
+
+    const prompt = CommentAnalysisPrompt.build({ videoTitle: video.title, comments: comments.slice(0, 80) });
+    const completion = await this.ai.generate({
+      model: 'claude-haiku-4-5',
+      system: prompt.system,
+      messages: [{ role: 'user', content: prompt.user }],
+      maxTokens: 1200,
+      metadata: { projectId: cmd.projectId, stage: 'analyze-comments' },
+    });
+    if (completion.isFail()) return Result.fail(completion.error.type);
+
+    const parsed = parseJsonCompletion(completion.value.text, Schema);
+    if (parsed.isFail()) return Result.fail(parsed.error);
+
+    await this.knowledge.saveCommentInsights(videoId, CommentInsights.create({ ...parsed.value, inputHash }));
+    return Result.ok();
+  }
+}

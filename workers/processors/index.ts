@@ -1,0 +1,245 @@
+import type { Worker } from 'bullmq';
+import type { Redis } from 'ioredis';
+import { ProjectJob, VideoJob, WhisperJob, ChapterResearchJob, ChapterJob, ExportJob, ExtraContentJob, ExportFormat, ProjectId } from '@yeg/core';
+import type { Container } from '@yeg/config';
+import { makeWorker } from '../runtime/worker-factory.js';
+import { QUEUE_CONFIG } from '@yeg/infrastructure';
+
+/**
+ * Builds every stage worker for the full 15-phase pipeline. Each processor stays
+ * thin: validate (schema in the factory) → call the use case → advance the
+ * pipeline / report to the convergence barrier.
+ */
+export function buildWorkers(connection: Redis, container: Container): Worker[] {
+  const { useCases, orchestrator } = container;
+
+  const channelIngest = makeWorker(connection, container, {
+    name: 'channel-ingest',
+    ...QUEUE_CONFIG['channel-ingest'],
+    payloadSchema: ProjectJob,
+    handler: async (p) => {
+      const r = await useCases.ingestChannel.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      return r.value;
+    },
+  });
+
+  const videoData = makeWorker(connection, container, {
+    name: 'video-data',
+    ...QUEUE_CONFIG['video-data'],
+    payloadSchema: VideoJob,
+    handler: async (p) => {
+      const r = await useCases.fetchVideoData.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+    },
+  });
+
+  const transcriptFetch = makeWorker(connection, container, {
+    name: 'transcript-fetch',
+    ...QUEUE_CONFIG['transcript-fetch'],
+    payloadSchema: VideoJob,
+    handler: async (p) => {
+      const r = await useCases.fetchTranscript.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      // Captions found (or already present) → summarize. 'pending-whisper'
+      // continues via the whisper worker instead.
+      if (r.value.outcome !== 'pending-whisper') {
+        await enqueueSummarize(container, p.projectId, p.videoId);
+      }
+      return r.value;
+    },
+  });
+
+  const whisper = makeWorker(connection, container, {
+    name: 'whisper-transcribe',
+    ...QUEUE_CONFIG['whisper-transcribe'],
+    payloadSchema: WhisperJob,
+    handler: async (p) => {
+      const r = await useCases.transcribeAudio.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      await enqueueSummarize(container, p.projectId, p.videoId);
+    },
+  });
+
+  const videoSummarize = makeWorker(connection, container, {
+    name: 'video-summarize',
+    ...QUEUE_CONFIG['video-summarize'],
+    payloadSchema: VideoJob,
+    handler: async (p) => {
+      const r = await useCases.summarizeVideo.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      // Per-video chain continues into comment analysis (the last per-video step).
+      await container.queue.enqueue(
+        'analyze-comments',
+        { projectId: p.projectId, videoId: p.videoId },
+        { jobId: `analyze-comments:${p.projectId}:${p.videoId}` },
+      );
+    },
+  });
+
+  const analyzeComments = makeWorker(connection, container, {
+    name: 'analyze-comments',
+    ...QUEUE_CONFIG['analyze-comments'],
+    payloadSchema: VideoJob,
+    handler: async (p) => {
+      const r = await useCases.analyzeComments.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      // Convergence barrier for the entire per-video chain. When every video has
+      // been summarized AND comment-analyzed, walk forward to the knowledge base.
+      const remaining = await container.repositories.projects.decrementPending(
+        ProjectId.from(p.projectId),
+        'VIDEO_PIPELINE',
+      );
+      if (remaining <= 0) await orchestrator.reachStage(p.projectId, 'BUILDING_KNOWLEDGE_BASE');
+    },
+  });
+
+  const knowledgeBase = makeWorker(connection, container, {
+    name: 'knowledge-base',
+    ...QUEUE_CONFIG['knowledge-base'],
+    payloadSchema: ProjectJob,
+    handler: async (p) => {
+      const r = await useCases.buildKnowledgeBase.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      await orchestrator.advance(p.projectId, 'BUILDING_KNOWLEDGE_BASE');
+    },
+  });
+
+  const bookStrategy = makeWorker(connection, container, {
+    name: 'book-strategy',
+    ...QUEUE_CONFIG['book-strategy'],
+    payloadSchema: ProjectJob,
+    handler: async (p) => {
+      const r = await useCases.generateBookStrategy.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      await orchestrator.advance(p.projectId, 'GENERATING_BOOK_STRATEGY');
+    },
+  });
+
+  const outline = makeWorker(connection, container, {
+    name: 'outline-generate',
+    ...QUEUE_CONFIG['outline-generate'],
+    payloadSchema: ProjectJob,
+    handler: async (p) => {
+      // This use case materializes chapters, sets the chapter-research barrier,
+      // advances to GENERATING_CHAPTER_RESEARCH and fans out the research jobs.
+      const r = await useCases.generateOutline.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+    },
+  });
+
+  const chapterResearch = makeWorker(connection, container, {
+    name: 'chapter-research',
+    ...QUEUE_CONFIG['chapter-research'],
+    payloadSchema: ChapterResearchJob,
+    handler: async (p) => {
+      const r = await useCases.generateChapterResearch.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      // Barrier: when every chapter has research, start chapter generation.
+      const remaining = await container.repositories.projects.decrementPending(
+        ProjectId.from(p.projectId),
+        'GENERATING_CHAPTER_RESEARCH',
+      );
+      if (remaining <= 0) {
+        const started = await useCases.startChapterGeneration.execute({ projectId: p.projectId });
+        if (started.isFail()) throw new Error(started.error);
+      }
+    },
+  });
+
+  const chapterGenerate = makeWorker(connection, container, {
+    name: 'chapter-generate',
+    ...QUEUE_CONFIG['chapter-generate'],
+    payloadSchema: ChapterJob,
+    handler: async (p) => {
+      const r = await useCases.generateChapter.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      // Regeneration jobs are user-triggered and must not move the pipeline barrier.
+      if (p.mode === 'generate') {
+        await orchestrator.onStageItemCompleted(p.projectId, 'GENERATING_CHAPTERS');
+      }
+      return r.value;
+    },
+  });
+
+  const polishBook = makeWorker(connection, container, {
+    name: 'polish-book',
+    ...QUEUE_CONFIG['polish-book'],
+    payloadSchema: ProjectJob,
+    handler: async (p) => {
+      const r = await useCases.polishBook.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      await orchestrator.advance(p.projectId, 'POLISHING_BOOK');
+      return r.value;
+    },
+  });
+
+  // Phase 13 — async generation of a long-form extra-content unit (bonus chapter).
+  // User-triggered: does NOT touch the pipeline barrier.
+  const extraContent = makeWorker(connection, container, {
+    name: 'extra-content',
+    ...QUEUE_CONFIG['extra-content'],
+    payloadSchema: ExtraContentJob,
+    handler: async (p) => {
+      const r = await useCases.generateExtraContent.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      return r.value;
+    },
+  });
+
+  const assemble = makeWorker(connection, container, {
+    name: 'ebook-assemble',
+    ...QUEUE_CONFIG['ebook-assemble'],
+    payloadSchema: ProjectJob,
+    handler: async (p) => {
+      const assembled = await useCases.assembleEbook.execute(p);
+      if (assembled.isFail()) throw new Error(assembled.error);
+      // Advance to EXPORTING; the orchestrator enqueues the export entry job.
+      await orchestrator.advance(p.projectId, 'ASSEMBLING');
+      return { chapters: assembled.value.chapters.length };
+    },
+  });
+
+  const exportWorker = makeWorker(connection, container, {
+    name: 'export',
+    ...QUEUE_CONFIG.export,
+    payloadSchema: ExportJob,
+    handler: async (p) => {
+      const assembled = await useCases.assembleEbook.execute({ projectId: p.projectId });
+      if (assembled.isFail()) throw new Error(assembled.error);
+      const formats =
+        p.format === 'both' ? [ExportFormat.PDF, ExportFormat.DOCX] : [p.format === 'pdf' ? ExportFormat.PDF : ExportFormat.DOCX];
+      const r = await useCases.exportEbook.execute({ projectId: p.projectId, doc: assembled.value, formats, bookVersion: 1 });
+      if (r.isFail()) throw new Error(r.error);
+      await orchestrator.advance(p.projectId, 'EXPORTING'); // → COMPLETED
+      return r.value;
+    },
+  });
+
+  return [
+    channelIngest,
+    videoData,
+    transcriptFetch,
+    whisper,
+    videoSummarize,
+    analyzeComments,
+    knowledgeBase,
+    bookStrategy,
+    outline,
+    chapterResearch,
+    chapterGenerate,
+    polishBook,
+    extraContent,
+    assemble,
+    exportWorker,
+  ];
+}
+
+/** Enqueue the per-video summarize step (deterministic id → idempotent). */
+async function enqueueSummarize(container: Container, projectId: string, videoId: string): Promise<void> {
+  await container.queue.enqueue(
+    'video-summarize',
+    { projectId, videoId },
+    { jobId: `video-summarize:${projectId}:${videoId}` },
+  );
+}

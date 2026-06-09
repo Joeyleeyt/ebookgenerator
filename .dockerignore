@@ -1,0 +1,28 @@
+# Never copy host-built (Windows) node_modules into the Linux image — they carry
+# platform-specific binaries and pnpm symlinks that break on Linux and cause
+# `pnpm install` to skip the real install. Let the image build its own.
+node_modules
+**/node_modules
+
+# Build output / caches — rebuilt inside the image
+.next
+**/.next
+dist
+**/dist
+.turbo
+**/.turbo
+
+# Local env + secrets — injected at runtime via env_file, not baked into the image
+.env
+.env.*
+!.env.example
+
+# VCS / editor / OS cruft
+.git
+.gitignore
+.vscode
+.idea
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

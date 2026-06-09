@@ -1,0 +1,37 @@
+{
+  "name": "youtube-ebook-generator",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.7.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "workers": "tsx workers/index.ts",
+    "workers:dev": "tsx watch workers/index.ts",
+    "db:migrate": "supabase db push",
+    "docker:up": "docker-compose up -d",
+    "admin:create": "tsx apps/web/scripts/create-admin.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.0",
+    "turbo": "^2.1.0",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "ioredis": "5.4.1"
+    }
+  }
+}

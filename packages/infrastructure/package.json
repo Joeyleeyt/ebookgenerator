@@ -1,0 +1,30 @@
+{
+  "name": "@yeg/infrastructure",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@yeg/core": "workspace:*",
+    "@anthropic-ai/sdk": "^0.32.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "bullmq": "^5.13.0",
+    "docx": "^9.0.0",
+    "googleapis": "^144.0.0",
+    "ioredis": "^5.4.1",
+    "openai": "^4.67.0",
+    "pino": "^9.4.0",
+    "puppeteer": "^23.4.0",
+    "youtube-transcript": "^1.2.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.2"
+  }
+}

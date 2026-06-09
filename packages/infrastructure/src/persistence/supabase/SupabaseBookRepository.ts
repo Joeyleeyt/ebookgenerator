@@ -1,0 +1,202 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  Book,
+  BookId,
+  Chapter,
+  ChapterId,
+  Section,
+  SectionId,
+  BookSection,
+  BookSectionId,
+  Outline,
+  ProjectId,
+  type BookRepository,
+  type SharedChapterContext,
+} from '@yeg/core';
+
+export class SupabaseBookRepository implements BookRepository {
+  constructor(private readonly db: SupabaseClient) {}
+
+  async findByProject(projectId: ProjectId): Promise<Book | null> {
+    const { data } = await this.db
+      .from('books')
+      .select('*, outlines(*), chapters(*, sections(*)), book_sections(*)')
+      .eq('project_id', projectId.value)
+      .maybeSingle();
+    if (!data) return null;
+    return this.toDomain(data);
+  }
+
+  async findById(id: BookId): Promise<Book | null> {
+    const { data } = await this.db
+      .from('books')
+      .select('*, outlines(*), chapters(*, sections(*)), book_sections(*)')
+      .eq('id', id.value)
+      .maybeSingle();
+    return data ? this.toDomain(data) : null;
+  }
+
+  async save(book: Book): Promise<void> {
+    const { error: bookErr } = await this.db.from('books').upsert(
+      { id: book.id.value, project_id: book.projectId, title: book.title, status: 'GENERATING' },
+      { onConflict: 'project_id' },
+    );
+    if (bookErr) throw new Error(bookErr.message);
+
+    if (book.outline) {
+      await this.db.from('outlines').upsert(
+        { book_id: book.id.value, version: book.outline.version, structure: book.outline.entries, input_hash: book.outline.inputHash },
+        { onConflict: 'book_id,version' },
+      );
+    }
+    for (const ch of book.chapters) {
+      await this.db.from('chapters').upsert(
+        {
+          id: ch.id.value,
+          book_id: book.id.value,
+          position: ch.position,
+          title: ch.title,
+          topic: ch.topic,
+          promise: ch.promise,
+          key_points: ch.keyPoints,
+          word_target: ch.wordTarget,
+          content: ch.content,
+          word_count: ch.totalWords(),
+          status: ch.status,
+          version: ch.version,
+          input_hash: ch.inputHash,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'book_id,position' },
+      );
+      for (const sec of ch.sections) {
+        await this.db.from('sections').upsert(
+          { id: sec.id.value, chapter_id: ch.id.value, position: sec.position, title: sec.title, content: sec.content, status: sec.status },
+          { onConflict: 'chapter_id,position' },
+        );
+      }
+    }
+
+    // Phase 13 — book-level extra content (front/back matter).
+    for (const bs of book.bookSections) {
+      await this.db.from('book_sections').upsert(
+        {
+          id: bs.id.value,
+          book_id: book.id.value,
+          kind: bs.kind,
+          placement: bs.placement,
+          position: bs.position,
+          title: bs.title,
+          prompt: bs.prompt,
+          content: bs.content,
+          status: bs.status,
+        },
+        { onConflict: 'id' },
+      );
+    }
+  }
+
+  async snapshotChapterVersion(_bookId: BookId, chapterId: string): Promise<void> {
+    const { data } = await this.db.from('chapters').select('content, version').eq('id', chapterId).maybeSingle();
+    if (!data?.content) return;
+    await this.db.from('chapter_versions').upsert(
+      { chapter_id: chapterId, version: data.version, content: data.content },
+      { onConflict: 'chapter_id,version' },
+    );
+  }
+
+  async loadSharedContext(projectId: ProjectId): Promise<SharedChapterContext> {
+    // The cacheable shared prefix for chapter writing: book strategy + knowledge base.
+    const [{ data: strategy }, { data: kb }] = await Promise.all([
+      this.db
+        .from('book_strategies')
+        .select('data, input_hash')
+        .eq('project_id', projectId.value)
+        .maybeSingle(),
+      this.db
+        .from('channel_knowledge_bases')
+        .select('data, input_hash')
+        .eq('project_id', projectId.value)
+        .maybeSingle(),
+    ]);
+    const s = (strategy?.data ?? {}) as Record<string, unknown>;
+    return {
+      bookStrategy: renderRecord(s),
+      knowledgeBase: renderRecord((kb?.data ?? {}) as Record<string, unknown>),
+      tone: typeof s.tone === 'string' ? s.tone : 'professional',
+      authorVoice: typeof s.authorVoice === 'string' ? s.authorVoice : 'authoritative and clear',
+      contextVersion: `${strategy?.input_hash ?? ''}:${kb?.input_hash ?? ''}`,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private toDomain(row: any): Book {
+    const book = Book.rehydrate(
+      {
+        projectId: row.project_id,
+        title: row.title ?? null,
+        targetPages: row.target_pages ?? 100,
+        status: row.status ?? 'PENDING',
+        chapters: (row.chapters ?? [])
+          .sort((a: { position: number }, b: { position: number }) => a.position - b.position)
+          .map((c: any) =>
+            Chapter.rehydrate(
+              {
+                bookId: row.id,
+                position: c.position,
+                title: c.title,
+                topic: c.topic,
+                promise: c.promise ?? '',
+                keyPoints: c.key_points ?? [],
+                wordTarget: c.word_target,
+                content: c.content ?? null,
+                wordCount: c.word_count ?? 0,
+                status: c.status ?? 'PENDING',
+                version: c.version ?? 1,
+                inputHash: c.input_hash ?? null,
+                sections: (c.sections ?? []).map((s: any) =>
+                  Section.rehydrate(
+                    { chapterId: c.id, position: s.position, title: s.title, prompt: s.prompt ?? null, content: s.content ?? null, status: s.status ?? 'PENDING' },
+                    SectionId.from(s.id),
+                  ),
+                ),
+              },
+              ChapterId.from(c.id),
+            ),
+          ),
+        bookSections: (row.book_sections ?? []).map((s: any) =>
+          BookSection.rehydrate(
+            {
+              bookId: row.id,
+              kind: s.kind,
+              placement: s.placement,
+              position: s.position,
+              title: s.title,
+              prompt: s.prompt ?? null,
+              content: s.content ?? null,
+              status: s.status ?? 'PENDING',
+            },
+            BookSectionId.from(s.id),
+          ),
+        ),
+        ...(row.outlines?.[0]
+          ? { outline: Outline.create({ version: row.outlines[0].version, entries: row.outlines[0].structure, inputHash: row.outlines[0].input_hash }) }
+          : {}),
+      },
+      BookId.from(row.id),
+    );
+    return book;
+  }
+}
+
+/** Render a stored JSON artifact (strategy/knowledge base) into a prompt-friendly block. */
+function renderRecord(data: Record<string, unknown>): string {
+  return Object.entries(data)
+    .filter(([key]) => key !== 'inputHash')
+    .map(([key, value]) => `${humanize(key)}: ${Array.isArray(value) ? value.join('; ') : String(value)}`)
+    .join('\n');
+}
+
+function humanize(key: string): string {
+  return key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+}
