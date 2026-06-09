@@ -12,7 +12,7 @@ export function SignOutButton() {
     router.refresh();
   }
   return (
-    <button onClick={signOut} style={ui.buttonGhost}>
+    <button onClick={signOut} style={{ ...ui.buttonGhost, width: '100%' }}>
       Sign out
     </button>
   );

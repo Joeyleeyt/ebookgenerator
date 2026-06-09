@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { DashboardShell } from '../../../components/DashboardShell.js';
 import { ui, colors, statusColor } from '../../ui.js';
+import { Spinner } from '../../../components/Spinner.js';
 
 const STAGES = [
   'CREATED',
@@ -103,13 +104,16 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
         <Link href="/projects" style={ui.link}>
           ← Projects
         </Link>
-        <span style={{ ...ui.badge, marginLeft: 'auto', color: statusColor(status) }}>{status}</span>
+        <span style={{ ...ui.badge, marginLeft: 'auto', color: statusColor(status), display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {!terminal && status !== '…' && <Spinner size={11} color={statusColor(status)} />}
+          {status}
+        </span>
       </div>
 
       <h1 style={{ marginTop: 16, fontSize: 26 }}>Generation pipeline</h1>
 
       {errorText && (
-        <div style={{ marginTop: 12, padding: 14, borderRadius: 12, border: '1px solid #5b2330', background: '#1f1418', color: colors.red }}>
+        <div style={{ marginTop: 12, padding: 14, borderRadius: 12, border: `1px solid ${colors.red}`, background: colors.redSoft, color: colors.red }}>
           {errorText}
         </div>
       )}
@@ -135,7 +139,7 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
                     border: active ? `2px solid ${colors.pink}` : done ? 'none' : `1px solid ${colors.border}`,
                   }}
                 >
-                  {done ? '✓' : active ? '▸' : '○'}
+                  {done ? '✓' : active ? <Spinner size={14} color={colors.pink} /> : '○'}
                 </span>
                 <span style={{ fontWeight: active ? 700 : 400, color: active ? colors.text : undefined }}>
                   {stage.replace(/_/g, ' ').toLowerCase()}

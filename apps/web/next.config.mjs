@@ -56,6 +56,15 @@ const nextConfig = {
       '.js': ['.ts', '.tsx', '.js'],
       '.jsx': ['.tsx', '.jsx'],
     };
+    // Puppeteer's config loader (cosmiconfig → import-fresh) uses a dynamic
+    // `require(variable)`, which webpack flags as "Critical dependency: the
+    // request of a dependency is an expression". It's reached transitively via
+    // the server-only PuppeteerPdfExporter in the DI container and is harmless
+    // (Puppeteer is externalized for server use), so silence just that warning.
+    config.ignoreWarnings = [
+      ...(config.ignoreWarnings ?? []),
+      { module: /node_modules[\\/]\.pnpm[\\/](import-fresh|cosmiconfig)@/, message: /Critical dependency/ },
+    ];
     return config;
   },
 };

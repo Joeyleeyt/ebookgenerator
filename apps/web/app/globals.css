@@ -1,0 +1,112 @@
+/*
+ * Theme palettes as CSS custom properties. The JS `colors` tokens in ui.ts
+ * resolve to these variables, so the active theme can be swapped at runtime by
+ * toggling `<html data-theme>`. Dark is the base (`:root`); `[data-theme='light']`
+ * overrides to light, and `[data-theme='system']` follows the OS color scheme.
+ */
+:root {
+  --c-canvas: #0b0b12;
+  --c-sidebar: #0d0d16;
+  --c-panel: #13131c;
+  --c-panel-raised: #171722;
+  --c-border: #1e1e2a;
+  --c-border-soft: #181824;
+  --c-text: #e9e9f0;
+  --c-text-dim: #8b8b9c;
+  --c-text-faint: #5f5f70;
+  --c-accent: #6d5efc;
+  --c-accent2: #8b5cf6;
+  --c-accent-soft: rgba(109, 94, 252, 0.2);
+  --c-pink: #f7567c;
+  --c-pink-soft: rgba(247, 86, 124, 0.18);
+  --c-green: #34d399;
+  --c-red: #f87171;
+  --c-red-soft: rgba(248, 113, 113, 0.12);
+  --c-amber: #fbbf24;
+  --c-shadow: rgba(0, 0, 0, 0.45);
+  --c-shadow-soft: rgba(0, 0, 0, 0.25);
+}
+
+:root[data-theme='light'] {
+  --c-canvas: #eceef5;
+  --c-sidebar: #ffffff;
+  --c-panel: #ffffff;
+  --c-panel-raised: #f3f4fa;
+  --c-border: #d9dbe7;
+  --c-border-soft: #e6e8f1;
+  --c-text: #16161f;
+  --c-text-dim: #5e6072;
+  --c-text-faint: #9395a6;
+  --c-accent: #6d5efc;
+  --c-accent2: #8b5cf6;
+  --c-accent-soft: rgba(109, 94, 252, 0.12);
+  --c-pink: #e63f68;
+  --c-pink-soft: rgba(230, 63, 104, 0.1);
+  --c-green: #059669;
+  --c-red: #dc2626;
+  --c-red-soft: rgba(220, 38, 38, 0.08);
+  --c-amber: #d97706;
+  --c-shadow: rgba(28, 28, 60, 0.14);
+  --c-shadow-soft: rgba(28, 28, 60, 0.07);
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme='system'] {
+    --c-canvas: #eceef5;
+    --c-sidebar: #ffffff;
+    --c-panel: #ffffff;
+    --c-panel-raised: #f3f4fa;
+    --c-border: #d9dbe7;
+    --c-border-soft: #e6e8f1;
+    --c-text: #16161f;
+    --c-text-dim: #5e6072;
+    --c-text-faint: #9395a6;
+    --c-accent: #6d5efc;
+    --c-accent2: #8b5cf6;
+    --c-accent-soft: rgba(109, 94, 252, 0.12);
+    --c-pink: #e63f68;
+    --c-pink-soft: rgba(230, 63, 104, 0.1);
+    --c-green: #059669;
+    --c-red: #dc2626;
+    --c-red-soft: rgba(220, 38, 38, 0.08);
+    --c-amber: #d97706;
+    --c-shadow: rgba(28, 28, 60, 0.14);
+    --c-shadow-soft: rgba(28, 28, 60, 0.07);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Lift a card on hover (project tiles). Inline styles can't express :hover. */
+.panel-card {
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+.panel-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 30px var(--c-shadow);
+  border-color: var(--c-accent);
+}
+
+/* Subtle row highlight (activity feed). */
+.row-hover {
+  transition: background 120ms ease;
+}
+.row-hover:hover {
+  background: var(--c-panel-raised);
+}
+
+/* List buttons (editor chapter nav) — accent border on hover. */
+.list-btn {
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.list-btn:hover {
+  border-color: var(--c-accent);
+}

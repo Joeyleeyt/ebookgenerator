@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { SignOutButton } from '../../components/SignOutButton.js';
 import { DashboardShell } from '../../components/DashboardShell.js';
 import { AreaChart } from '../../components/AreaChart.js';
+import { Spinner } from '../../components/Spinner.js';
 import { createSupabaseBrowserClient } from '../../lib/supabase-browser.js';
 import { ui, colors, accentGradient, statusColor } from '../ui.js';
 
@@ -26,6 +26,11 @@ function timeAgo(iso: string): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
+}
+
+/** A project still moving through the pipeline (not done and not failed). */
+function isActive(status: string): boolean {
+  return status !== 'COMPLETED' && status !== 'FAILED';
 }
 
 function prettyChannel(url: string): string {
@@ -127,7 +132,7 @@ export default function ProjectsPage() {
         </div>
         <div style={{ fontWeight: 700, fontSize: 18 }}>{email ?? 'Your workspace'}</div>
         <div style={{ color: colors.textDim, fontSize: 13, marginTop: 2 }}>Ebook Creator</div>
-        <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 20, paddingTop: 20, borderTop: `1px solid ${colors.borderSoft}` }}>
           {[
             ['Projects', projects.length],
             ['Completed', completed],
@@ -141,11 +146,30 @@ export default function ProjectsPage() {
         </div>
       </div>
 
+      {/* Ebooks-generated chart */}
+      <div style={ui.panel}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+          <strong style={{ fontSize: 15 }}>Ebooks Generated</strong>
+          <span
+            style={{
+              marginLeft: 'auto',
+              ...ui.badge,
+              padding: '6px 10px',
+              border: `1px solid ${colors.border}`,
+              background: colors.panelRaised,
+            }}
+          >
+            30 Days ▾
+          </span>
+        </div>
+        <AreaChart data={series.data} xLabels={series.labels} height={160} />
+      </div>
+
       {/* Activity feed */}
       <div style={ui.panel}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
           <strong>Recent Activity</strong>
-          <span style={{ ...ui.link, marginLeft: 'auto', fontSize: 13 }}>View All</span>
+          <span style={{ ...ui.link, marginLeft: 'auto', fontSize: 13, cursor: 'pointer' }}>View All</span>
         </div>
         {projects.length === 0 ? (
           <p style={{ color: colors.textDim, fontSize: 14 }}>No activity yet.</p>
@@ -154,7 +178,8 @@ export default function ProjectsPage() {
             <Link
               key={p.id}
               href={`/projects/${p.id}`}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', textDecoration: 'none', color: 'inherit' }}
+              className="row-hover"
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 8px', margin: '0 -8px', textDecoration: 'none', color: 'inherit' }}
             >
               <span
                 style={{
@@ -175,7 +200,10 @@ export default function ProjectsPage() {
                 </div>
                 <div style={{ fontSize: 12, color: colors.textFaint }}>{timeAgo(p.createdAt)}</div>
               </span>
-              <span style={{ ...ui.badge, color: statusColor(p.status) }}>{p.status}</span>
+              <span style={{ ...ui.badge, color: statusColor(p.status), display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {isActive(p.status) && <Spinner size={11} color={statusColor(p.status)} />}
+                {p.status}
+              </span>
             </Link>
           ))
         )}
@@ -184,33 +212,14 @@ export default function ProjectsPage() {
   );
 
   return (
-    <DashboardShell rightRail={rightRail} actions={<SignOutButton />}>
+    <DashboardShell rightRail={rightRail}>
       <div style={{ marginBottom: 8 }}>
         <h1 style={{ margin: 0, fontSize: 26 }}>Dashboard</h1>
         <p style={{ color: colors.textDim, margin: '6px 0 0' }}>Turn a YouTube channel into a ~100-page ebook.</p>
       </div>
 
-      {/* Chart panel */}
-      <div style={{ ...ui.panel, marginTop: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 18 }}>
-          <strong style={{ fontSize: 16 }}>Ebooks Generated</strong>
-          <span
-            style={{
-              marginLeft: 'auto',
-              ...ui.badge,
-              padding: '8px 14px',
-              border: `1px solid ${colors.border}`,
-              background: colors.panelRaised,
-            }}
-          >
-            Last 30 Days ▾
-          </span>
-        </div>
-        <AreaChart data={series.data} xLabels={series.labels} />
-      </div>
-
       {/* Create form */}
-      <form onSubmit={createProject} style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+      <form onSubmit={createProject} style={{ display: 'flex', gap: 10, marginTop: 24, maxWidth: 620 }}>
         <input
           style={ui.input}
           value={url}
@@ -218,8 +227,13 @@ export default function ProjectsPage() {
           placeholder="https://www.youtube.com/@channel"
           required
         />
-        <button style={ui.button} type="submit" disabled={submitting}>
-          {submitting ? '…' : 'Generate'}
+        <button
+          style={{ ...ui.button, display: 'inline-flex', alignItems: 'center', gap: 8 }}
+          type="submit"
+          disabled={submitting}
+        >
+          {submitting && <Spinner size={14} color="#fff" />}
+          {submitting ? 'Generating…' : 'Generate'}
         </button>
       </form>
       {errorMsg && <p style={{ color: colors.red, marginTop: 12 }}>{errorMsg}</p>}
@@ -253,16 +267,31 @@ export default function ProjectsPage() {
       </div>
 
       {/* Project grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginTop: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 18, marginTop: 24 }}>
         {loading ? (
-          <p style={{ color: colors.textDim }}>Loading…</p>
+          <p style={{ color: colors.textDim, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Spinner /> Loading…
+          </p>
         ) : filtered.length === 0 ? (
-          <p style={{ color: colors.textDim }}>No projects here yet. Paste a channel URL above to create your first ebook.</p>
+          <div
+            style={{
+              gridColumn: '1 / -1',
+              ...ui.panel,
+              textAlign: 'center',
+              padding: '48px 24px',
+              color: colors.textDim,
+            }}
+          >
+            <div style={{ fontSize: 36, marginBottom: 8 }}>📚</div>
+            <div style={{ fontWeight: 600, color: colors.text, marginBottom: 4 }}>No projects here yet</div>
+            Paste a channel URL above to create your first ebook.
+          </div>
         ) : (
           filtered.map((p) => (
             <Link
               key={p.id}
               href={`/projects/${p.id}`}
+              className="panel-card"
               style={{
                 display: 'block',
                 borderRadius: 16,
@@ -271,19 +300,36 @@ export default function ProjectsPage() {
                 textDecoration: 'none',
                 color: 'inherit',
                 overflow: 'hidden',
+                boxShadow: '0 1px 2px var(--c-shadow-soft)',
               }}
             >
-              <div style={{ height: 120, background: accentGradient, display: 'grid', placeItems: 'center', fontSize: 40, opacity: 0.92 }}>
-                📖
+              <div style={{ position: 'relative', height: 112, background: accentGradient, display: 'grid', placeItems: 'center' }}>
+                <span style={{ fontSize: 42, filter: 'drop-shadow(0 4px 10px rgba(0,0,0,0.3))' }}>📖</span>
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 10,
+                    right: 10,
+                    ...ui.badge,
+                    background: 'rgba(0, 0, 0, 0.4)',
+                    color: '#fff',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  {isActive(p.status) && <Spinner size={10} color="#fff" />}
+                  {p.status}
+                </span>
               </div>
               <div style={{ padding: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <strong style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {prettyChannel(p.channelUrl)}
-                  </strong>
-                  <span style={{ ...ui.badge, color: statusColor(p.status) }}>{p.status}</span>
+                <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {prettyChannel(p.channelUrl)}
+                </strong>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: colors.textFaint, fontSize: 13, marginTop: 10 }}>
+                  <span>🕑</span>
+                  {timeAgo(p.createdAt)}
                 </div>
-                <div style={{ color: colors.textFaint, fontSize: 13, marginTop: 8 }}>{timeAgo(p.createdAt)}</div>
               </div>
             </Link>
           ))

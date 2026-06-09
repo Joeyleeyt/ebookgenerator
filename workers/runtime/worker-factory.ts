@@ -54,15 +54,18 @@ export function makeWorker<S extends z.ZodTypeAny>(
         attempt: job.attemptsMade,
       });
       if (guard.alreadyCompleted) {
-        log.debug('skip — already completed', { jobKey });
+        log.info(`⏭  ${opts.name} skipped (already completed)`, { jobKey, projectId });
         return guard.result;
       }
 
       const startedAt = Date.now();
+      log.info(`▶  ${opts.name} started`, { jobKey, projectId, attempt: job.attemptsMade + 1 });
       try {
         const result = await opts.handler(payload, { container, job });
         await container.idempotency.complete(jobKey, result);
-        container.telemetry.recordStage({ queue: opts.name, projectId, durationMs: Date.now() - startedAt, outcome: 'completed' });
+        const durationMs = Date.now() - startedAt;
+        container.telemetry.recordStage({ queue: opts.name, projectId, durationMs, outcome: 'completed' });
+        log.info(`✓  ${opts.name} completed`, { jobKey, projectId, durationMs });
         return result;
       } catch (err) {
         const terminal = err instanceof NonRetryableError || job.attemptsMade + 1 >= opts.attempts;

@@ -41,6 +41,11 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     handler: async (p) => {
       const r = await useCases.fetchTranscript.execute(p);
       if (r.isFail()) throw new Error(r.error);
+      // Transcript provenance: captions came straight from the YouTube Data API.
+      // ('pending-whisper' is logged by the whisper worker once it transcribes.)
+      if (r.value.outcome === 'youtube') {
+        container.logger.info('📝 transcript source: YouTube Data API', { projectId: p.projectId, videoId: p.videoId, source: 'youtube-data-api' });
+      }
       // Captions found (or already present) → summarize. 'pending-whisper'
       // continues via the whisper worker instead.
       if (r.value.outcome !== 'pending-whisper') {
@@ -57,6 +62,9 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     handler: async (p) => {
       const r = await useCases.transcribeAudio.execute(p);
       if (r.isFail()) throw new Error(r.error);
+      // Transcript provenance: no captions were available, so this was produced
+      // by the Whisper audio-transcription fallback.
+      container.logger.info('📝 transcript source: Whisper (audio fallback)', { projectId: p.projectId, videoId: p.videoId, source: 'whisper' });
       await enqueueSummarize(container, p.projectId, p.videoId);
     },
   });
@@ -68,7 +76,12 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     handler: async (p) => {
       const r = await useCases.summarizeVideo.execute(p);
       if (r.isFail()) throw new Error(r.error);
-      // Per-video chain continues into comment analysis (the last per-video step).
+      if (r.value.outcome === 'skipped-no-transcript') {
+        container.logger.warn('video-summarize skipped — no transcript', { projectId: p.projectId, videoId: p.videoId });
+      }
+      // Per-video chain continues into comment analysis (the last per-video step)
+      // even when summarization was skipped, so the convergence barrier still
+      // decrements for this video.
       await container.queue.enqueue(
         'analyze-comments',
         { projectId: p.projectId, videoId: p.videoId },

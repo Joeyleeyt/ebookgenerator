@@ -2,26 +2,6 @@ import type { ReactNode } from 'react';
 import { Sidebar } from './Sidebar.js';
 import { colors } from '../app/ui.js';
 
-function IconButton({ children }: { children: ReactNode }) {
-  return (
-    <span
-      style={{
-        width: 42,
-        height: 42,
-        borderRadius: '50%',
-        background: colors.panel,
-        border: `1px solid ${colors.border}`,
-        display: 'grid',
-        placeItems: 'center',
-        fontSize: 16,
-        cursor: 'pointer',
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
 /**
  * App chrome for authenticated/dashboard pages: a sticky sidebar, a top bar with
  * a search field and action icons, the main column, and an optional right rail.
@@ -69,11 +49,9 @@ export function DashboardShell({
             <span>🔍</span>
             <span style={{ fontSize: 14 }}>{searchPlaceholder}</span>
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <IconButton>⚙️</IconButton>
-            <IconButton>🔔</IconButton>
-            {actions}
-          </div>
+          {actions && (
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>{actions}</div>
+          )}
         </div>
 
         {/* Body: main + optional right rail */}

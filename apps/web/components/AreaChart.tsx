@@ -67,8 +67,10 @@ export function AreaChart({
           paddingBottom: 24,
         }}
       >
-        {ticks.map((t) => (
-          <span key={t}>{fmt(t)}</span>
+        {ticks.map((t, i) => (
+          // Index key: rounded ticks can repeat (e.g. [0,0,1,1,1]) when the data
+          // range is small, so the value is not unique.
+          <span key={i}>{fmt(t)}</span>
         ))}
       </div>
 
@@ -80,24 +82,24 @@ export function AreaChart({
         >
           <defs>
             <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={colors.pink} stopOpacity="0.35" />
-              <stop offset="100%" stopColor={colors.pink} stopOpacity="0" />
+              <stop offset="0%" style={{ stopColor: colors.pink, stopOpacity: 0.35 }} />
+              <stop offset="100%" style={{ stopColor: colors.pink, stopOpacity: 0 }} />
             </linearGradient>
             <linearGradient id="areaStroke" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor={colors.accent} />
-              <stop offset="100%" stopColor={colors.pink} />
+              <stop offset="0%" style={{ stopColor: colors.accent }} />
+              <stop offset="100%" style={{ stopColor: colors.pink }} />
             </linearGradient>
           </defs>
 
           {/* horizontal grid lines */}
-          {ticks.map((t) => (
+          {ticks.map((t, i) => (
             <line
-              key={t}
+              key={i}
               x1="0"
               x2={w}
               y1={y(t)}
               y2={y(t)}
-              stroke={colors.border}
+              style={{ stroke: colors.border }}
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
             />
@@ -116,8 +118,9 @@ export function AreaChart({
 
         {/* X axis */}
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: colors.textFaint, marginTop: 8 }}>
-          {xLabels.map((l) => (
-            <span key={l}>{l}</span>
+          {xLabels.map((l, i) => (
+            // Index key: labels can repeat (same day) when projects share a date.
+            <span key={i}>{l}</span>
           ))}
         </div>
       </div>

@@ -1,27 +1,32 @@
 import type { CSSProperties } from 'react';
 
 /**
- * Shared design tokens. The app uses a dark "dashboard" visual language:
- * a deep navy canvas, raised panels, a violet→pink accent, and soft borders.
+ * Shared design tokens. The app uses a "dashboard" visual language: a deep
+ * canvas, raised panels, a violet→pink accent, and soft borders. Each token
+ * resolves to a CSS variable so the active theme (light/dark/system) can swap
+ * the underlying palette at runtime — the variables are defined per-theme in
+ * the root layout, and the active theme is set via `<html data-theme>`.
  * Inline styles keep the dependency surface tiny (no CSS framework).
  */
 export const colors = {
-  canvas: '#0b0b12',
-  sidebar: '#0d0d16',
-  panel: '#13131c',
-  panelRaised: '#171722',
-  border: '#1e1e2a',
-  borderSoft: '#181824',
-  text: '#e9e9f0',
-  textDim: '#8b8b9c',
-  textFaint: '#5f5f70',
-  accent: '#6d5efc',
-  accent2: '#8b5cf6',
-  pink: '#f7567c',
-  pinkSoft: 'rgba(247, 86, 124, 0.18)',
-  green: '#34d399',
-  red: '#f87171',
-  amber: '#fbbf24',
+  canvas: 'var(--c-canvas)',
+  sidebar: 'var(--c-sidebar)',
+  panel: 'var(--c-panel)',
+  panelRaised: 'var(--c-panel-raised)',
+  border: 'var(--c-border)',
+  borderSoft: 'var(--c-border-soft)',
+  text: 'var(--c-text)',
+  textDim: 'var(--c-text-dim)',
+  textFaint: 'var(--c-text-faint)',
+  accent: 'var(--c-accent)',
+  accent2: 'var(--c-accent2)',
+  accentSoft: 'var(--c-accent-soft)',
+  pink: 'var(--c-pink)',
+  pinkSoft: 'var(--c-pink-soft)',
+  green: 'var(--c-green)',
+  red: 'var(--c-red)',
+  redSoft: 'var(--c-red-soft)',
+  amber: 'var(--c-amber)',
 };
 
 /** Violet→pink gradient used for the logo mark, active nav pill, and primary CTAs. */
@@ -73,6 +78,7 @@ export const ui = {
     border: `1px solid ${colors.border}`,
     background: colors.panel,
     padding: 24,
+    boxShadow: '0 1px 2px var(--c-shadow-soft)',
   } as CSSProperties,
   badge: {
     fontSize: 12,

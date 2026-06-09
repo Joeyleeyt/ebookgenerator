@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
  * Polls the project status (a production build would subscribe to the Redis
  * pub/sub channel published by the workers' QueueEvents bridge).
  */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, { params }: { params: { id: string } }) {
   const userId = await getUserId();
   if (!userId) return error('Unauthorized', 401);
 
@@ -21,7 +21,32 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const stream = new ReadableStream({
     async start(controller) {
       let last = '';
-      const send = (data: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      // The client can disconnect (tab close / navigation) at any time, which
+      // closes the controller out from under us. Track that and make every
+      // enqueue/close a no-op afterwards so the polling interval can't throw
+      // ERR_INVALID_STATE ("Controller is already closed").
+      let closed = false;
+
+      const stop = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(interval);
+        try {
+          controller.close();
+        } catch {
+          /* already closed by the runtime on disconnect */
+        }
+      };
+
+      const send = (data: unknown): void => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          stop(); // controller went away between the check and the enqueue
+        }
+      };
+
       const tick = async (): Promise<boolean> => {
         const project = await repo.findById(ProjectId.from(params.id));
         if (!project || project.ownerId !== userId) {
@@ -35,14 +60,24 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         return last === 'COMPLETED' || last === 'FAILED';
       };
 
-      const interval = setInterval(async () => {
-        const done = await tick();
-        if (done) {
-          clearInterval(interval);
-          controller.close();
+      const tickOnce = async (): Promise<void> => {
+        if (closed) return;
+        try {
+          if (await tick()) stop();
+        } catch {
+          stop(); // DB/transient error — end the stream rather than spin
         }
-      }, 1500);
-      await tick();
+      };
+
+      // End promptly when the client aborts the request.
+      req.signal.addEventListener('abort', stop);
+
+      const interval = setInterval(() => void tickOnce(), 1500);
+      await tickOnce();
+    },
+    cancel() {
+      // Reader cancelled (disconnect). start()'s abort listener also calls stop;
+      // the `closed` guard makes this idempotent.
     },
   });
 

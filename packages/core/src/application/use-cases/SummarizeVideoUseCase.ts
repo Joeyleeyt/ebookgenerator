@@ -30,16 +30,19 @@ export class SummarizeVideoUseCase {
     private readonly hasher: Hasher,
   ) {}
 
-  async execute(cmd: VideoJob): Promise<Result<void>> {
+  async execute(cmd: VideoJob): Promise<Result<{ outcome: 'summarized' | 'skipped-no-transcript' }>> {
     const video = await this.videos.findById(VideoId.from(cmd.videoId));
     if (!video) return Result.fail('Video not found');
-    if (!video.transcript) return Result.fail('Video has no transcript');
+    // A video with no captions and no Whisper transcript can't be summarized.
+    // That's an expected outcome for some videos, not a pipeline error — skip it
+    // so the per-video chain still converges and the book is built from the rest.
+    if (!video.transcript) return Result.ok({ outcome: 'skipped-no-transcript' });
 
     const inputHash = this.hasher.hash({
       transcript: video.transcript.inputHash,
       comments: video.comments.map((c) => c.text),
     });
-    if (video.summary?.inputHash === inputHash) return Result.ok(); // idempotent
+    if (video.summary?.inputHash === inputHash) return Result.ok({ outcome: 'summarized' }); // idempotent
 
     const prompt = VideoSummaryPrompt.build({
       title: video.title,
@@ -63,6 +66,6 @@ export class SummarizeVideoUseCase {
     );
     if (attach.isFail()) return Result.fail(attach.error);
     await this.videos.save(video);
-    return Result.ok();
+    return Result.ok({ outcome: 'summarized' });
   }
 }

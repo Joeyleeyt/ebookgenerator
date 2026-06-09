@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
+import './globals.css';
 import { colors } from './ui.js';
+import { themeInitScript } from '../lib/theme.js';
 
 export const metadata = {
   title: 'YouTube Ebook Generator',
@@ -8,7 +10,10 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body
         style={{
           fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif',

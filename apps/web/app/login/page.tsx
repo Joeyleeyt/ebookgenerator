@@ -4,6 +4,7 @@ import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createSupabaseBrowserClient } from '../../lib/supabase-browser.js';
 import { ui, colors, accentGradient } from '../ui.js';
+import { Spinner } from '../../components/Spinner.js';
 
 function LoginForm() {
   const router = useRouter();
@@ -54,8 +55,13 @@ function LoginForm() {
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 24 }}>
           <input style={ui.input} type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <input style={ui.input} type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
-          <button style={ui.button} type="submit" disabled={busy}>
-            {busy ? '…' : 'Sign in'}
+          <button
+            style={{ ...ui.button, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+            type="submit"
+            disabled={busy}
+          >
+            {busy && <Spinner size={14} color="#fff" />}
+            {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
         {message && <p style={{ marginTop: 16, color: colors.amber }}>{message}</p>}
