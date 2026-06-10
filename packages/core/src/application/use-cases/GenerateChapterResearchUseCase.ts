@@ -77,7 +77,9 @@ export class GenerateChapterResearchUseCase {
       model: 'claude-sonnet-4-6',
       system: prompt.system,
       messages: [{ role: 'user', content: prompt.user }],
-      maxTokens: 2500,
+      // Six supporting arrays (stories, lessons, examples, case studies,
+      // frameworks, principles) overflow 2500 and truncate the JSON.
+      maxTokens: 6000,
       metadata: { projectId: cmd.projectId, stage: 'chapter-research' },
     });
     if (completion.isFail()) return Result.fail(completion.error.type);

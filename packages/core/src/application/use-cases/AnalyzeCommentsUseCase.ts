@@ -50,7 +50,8 @@ export class AnalyzeCommentsUseCase {
     const completion = await this.ai.generate({
       model: 'claude-haiku-4-5',
       // 7-array schema; too tight a budget truncates the JSON mid-object.
-      maxTokens: 2048,
+      // (Ceiling only — billed on actual output — so headroom is free insurance.)
+      maxTokens: 4000,
       system: prompt.system,
       messages: [{ role: 'user', content: prompt.user }],
       metadata: { projectId: cmd.projectId, stage: 'analyze-comments' },

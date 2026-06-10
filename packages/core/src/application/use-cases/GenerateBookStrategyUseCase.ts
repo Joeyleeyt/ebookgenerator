@@ -53,7 +53,10 @@ export class GenerateBookStrategyUseCase {
       model: 'claude-sonnet-4-6',
       system: prompt.system,
       messages: [{ role: 'user', content: prompt.user }],
-      maxTokens: 2000,
+      // 11-field strategy JSON (several prose fields + keyPrinciples) can overflow
+      // 2000 and truncate into invalid JSON. max_tokens is a ceiling, billed on
+      // actual output, so the extra headroom is free insurance.
+      maxTokens: 4000,
       metadata: { projectId: cmd.projectId, stage: 'book-strategy' },
     });
     if (completion.isFail()) return Result.fail(completion.error.type);

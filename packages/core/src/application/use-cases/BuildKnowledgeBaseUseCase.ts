@@ -64,7 +64,9 @@ export class BuildKnowledgeBaseUseCase {
       model: 'claude-sonnet-4-6',
       system: prompt.system,
       messages: [{ role: 'user', content: prompt.user }],
-      maxTokens: 2500,
+      // The knowledge base is a large multi-field JSON synthesis; 2500 truncated
+      // it mid-object, producing invalid JSON the parser rejected.
+      maxTokens: 8000,
       metadata: { projectId: cmd.projectId, stage: 'knowledge-base' },
     });
     if (completion.isFail()) return Result.fail(completion.error.type);

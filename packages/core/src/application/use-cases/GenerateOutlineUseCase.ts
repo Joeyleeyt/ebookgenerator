@@ -73,7 +73,10 @@ export class GenerateOutlineUseCase {
         model: 'claude-sonnet-4-6',
         system: prompt.system,
         messages: [{ role: 'user', content: prompt.user }],
-        maxTokens: 4000,
+        // Up to 14 chapter entries (title/purpose/promise/keyPoints/wordTarget
+        // each) can overflow 4000 and truncate the JSON. Ceiling only, so the
+        // headroom is free insurance.
+        maxTokens: 8000,
         metadata: { projectId: cmd.projectId, stage: 'outline-generate' },
       });
       if (completion.isFail()) return Result.fail(completion.error.type);

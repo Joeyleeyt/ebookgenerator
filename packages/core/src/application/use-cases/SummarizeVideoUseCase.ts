@@ -39,7 +39,7 @@ export type SummarizeOutcome =
 // The 10-field schema (summary + nine arrays) needs headroom; too low a budget
 // truncates the model mid-object and the closing brace is never emitted, yielding
 // "No JSON object found in completion".
-const SUMMARY_MAX_TOKENS = 4096;
+const SUMMARY_MAX_TOKENS = 6000;
 
 /** Map step: per-video summary via Claude Sonnet. */
 export class SummarizeVideoUseCase {
