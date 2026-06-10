@@ -151,6 +151,7 @@ const QUEUE_TO_STAGE: Record<QueueName, ProjectState> = {
   'chapter-research': 'GENERATING_CHAPTER_RESEARCH',
   'chapter-generate': 'GENERATING_CHAPTERS',
   'polish-book': 'POLISHING_BOOK',
+  'polish-chapter': 'POLISHING_BOOK',
   'extra-content': 'GENERATING_CHAPTERS', // user-triggered; rewind alongside chapters
   'ebook-assemble': 'ASSEMBLING',
   export: 'EXPORTING',

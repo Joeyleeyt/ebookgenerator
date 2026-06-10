@@ -11,6 +11,7 @@ export type QueueName =
   | 'chapter-research'
   | 'chapter-generate'
   | 'polish-book'
+  | 'polish-chapter'
   | 'extra-content'
   | 'ebook-assemble'
   | 'export';

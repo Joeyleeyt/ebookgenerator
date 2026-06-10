@@ -30,6 +30,12 @@ export const ChapterJob = z.object({
   instructions: z.string().optional(),
 });
 
+/** One per-chapter polishing job, fanned out by the polish-book controller. */
+export const PolishChapterJob = z.object({
+  projectId: z.string().uuid(),
+  chapterId: z.string().uuid(),
+});
+
 export const ExportJob = z.object({
   projectId: z.string().uuid(),
   format: z.enum(['pdf', 'docx', 'both']).default('both'),
@@ -40,4 +46,5 @@ export type VideoJob = z.infer<typeof VideoJob>;
 export type WhisperJob = z.infer<typeof WhisperJob>;
 export type ChapterResearchJob = z.infer<typeof ChapterResearchJob>;
 export type ChapterJob = z.infer<typeof ChapterJob>;
+export type PolishChapterJob = z.infer<typeof PolishChapterJob>;
 export type ExportJob = z.infer<typeof ExportJob>;

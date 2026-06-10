@@ -5,7 +5,11 @@ import type { z } from 'zod';
  * Parse a Claude completion that should contain JSON. Tolerates ```json fences
  * and surrounding prose. AI output is validated, never trusted.
  */
-export function parseJsonCompletion<T>(text: string, schema: z.ZodType<T>): Result<T> {
+// Infer the schema's OUTPUT type (`z.output`), not a single combined type. This
+// matters for schemas using `z.preprocess`/transforms, where the input type is
+// `unknown` but the parsed output is concrete (e.g. `string[]`) — typing on the
+// output gives callers the post-validation shape they actually receive.
+export function parseJsonCompletion<S extends z.ZodTypeAny>(text: string, schema: S): Result<z.output<S>> {
   const json = extractJson(text);
   if (!json) return Result.fail('No JSON object found in completion');
   let raw: unknown;

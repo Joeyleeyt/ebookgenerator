@@ -141,7 +141,8 @@ youtube-ebook-generator/
 │  │  │  │  ├─ GenerateChapterResearchUseCase.ts # Phase 10
 │  │  │  │  ├─ StartChapterGenerationUseCase.ts  # fan-out controller
 │  │  │  │  ├─ GenerateChapterUseCase.ts       # Phase 11
-│  │  │  │  ├─ PolishBookUseCase.ts            # Phase 12
+│  │  │  │  ├─ StartBookPolishUseCase.ts       # Phase 12 fan-out controller
+│  │  │  │  ├─ PolishChapterUseCase.ts         # Phase 12 (per-chapter, parallel)
 │  │  │  │  ├─ AddExtraContentUseCase.ts       # Phase 13 (front/back matter)
 │  │  │  │  ├─ GenerateExtraContentUseCase.ts  # Phase 13 (bonus chapters)
 │  │  │  │  ├─ AssembleEbookUseCase.ts         # Phase 14

@@ -50,31 +50,7 @@ export class SupabaseBookRepository implements BookRepository {
       );
     }
     for (const ch of book.chapters) {
-      await this.db.from('chapters').upsert(
-        {
-          id: ch.id.value,
-          book_id: book.id.value,
-          position: ch.position,
-          title: ch.title,
-          topic: ch.topic,
-          promise: ch.promise,
-          key_points: ch.keyPoints,
-          word_target: ch.wordTarget,
-          content: ch.content,
-          word_count: ch.totalWords(),
-          status: ch.status,
-          version: ch.version,
-          input_hash: ch.inputHash,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'book_id,position' },
-      );
-      for (const sec of ch.sections) {
-        await this.db.from('sections').upsert(
-          { id: sec.id.value, chapter_id: ch.id.value, position: sec.position, title: sec.title, content: sec.content, status: sec.status },
-          { onConflict: 'chapter_id,position' },
-        );
-      }
+      await this.persistChapter(book.id, ch);
     }
 
     // Phase 13 — book-level extra content (front/back matter).
@@ -92,6 +68,40 @@ export class SupabaseBookRepository implements BookRepository {
           status: bs.status,
         },
         { onConflict: 'id' },
+      );
+    }
+  }
+
+  async saveChapter(bookId: BookId, chapter: Chapter): Promise<void> {
+    await this.persistChapter(bookId, chapter);
+  }
+
+  /** Upsert one chapter row plus its sections (shared by save and saveChapter). */
+  private async persistChapter(bookId: BookId, ch: Chapter): Promise<void> {
+    const { error } = await this.db.from('chapters').upsert(
+      {
+        id: ch.id.value,
+        book_id: bookId.value,
+        position: ch.position,
+        title: ch.title,
+        topic: ch.topic,
+        promise: ch.promise,
+        key_points: ch.keyPoints,
+        word_target: ch.wordTarget,
+        content: ch.content,
+        word_count: ch.totalWords(),
+        status: ch.status,
+        version: ch.version,
+        input_hash: ch.inputHash,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'book_id,position' },
+    );
+    if (error) throw new Error(error.message);
+    for (const sec of ch.sections) {
+      await this.db.from('sections').upsert(
+        { id: sec.id.value, chapter_id: ch.id.value, position: sec.position, title: sec.title, content: sec.content, status: sec.status },
+        { onConflict: 'chapter_id,position' },
       );
     }
   }

@@ -13,6 +13,7 @@ export const QUEUE_NAMES: QueueName[] = [
   'chapter-research',
   'chapter-generate',
   'polish-book',
+  'polish-chapter',
   'extra-content',
   'ebook-assemble',
   'export',
@@ -35,9 +36,12 @@ export const QUEUE_CONFIG: Record<QueueName, QueueConfig> = {
   'knowledge-base': { concurrency: 4, attempts: 4 },
   'book-strategy': { concurrency: 4, attempts: 4 },
   'outline-generate': { concurrency: 4, attempts: 4 },
-  'chapter-research': { concurrency: 5, attempts: 4, limiter: { max: 40, duration: 60_000 } },
-  'chapter-generate': { concurrency: 4, attempts: 3, limiter: { max: 30, duration: 60_000 } },
-  'polish-book': { concurrency: 2, attempts: 3, limiter: { max: 30, duration: 60_000 } },
+  'chapter-research': { concurrency: 8, attempts: 4, limiter: { max: 60, duration: 60_000 } },
+  'chapter-generate': { concurrency: 8, attempts: 3, limiter: { max: 50, duration: 60_000 } },
+  // Controller only — fans out one polish-chapter job per chapter; no LLM call here.
+  'polish-book': { concurrency: 4, attempts: 3 },
+  // The actual per-chapter polishing LLM work — parallelized, was a serial loop.
+  'polish-chapter': { concurrency: 8, attempts: 3, limiter: { max: 50, duration: 60_000 } },
   'extra-content': { concurrency: 3, attempts: 3, limiter: { max: 30, duration: 60_000 } },
   'ebook-assemble': { concurrency: 4, attempts: 3 },
   export: { concurrency: 3, attempts: 3 },

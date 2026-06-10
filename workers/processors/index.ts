@@ -1,6 +1,6 @@
 import type { Worker } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { ProjectJob, VideoJob, WhisperJob, ChapterResearchJob, ChapterJob, ExportJob, ExtraContentJob, ExportFormat, ProjectId } from '@yeg/core';
+import { ProjectJob, VideoJob, WhisperJob, ChapterResearchJob, ChapterJob, PolishChapterJob, ExportJob, ExtraContentJob, ExportFormat, ProjectId } from '@yeg/core';
 import type { Container } from '@yeg/config';
 import { makeWorker } from '../runtime/worker-factory.js';
 import { QUEUE_CONFIG } from '@yeg/infrastructure';
@@ -191,14 +191,28 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     },
   });
 
+  // Phase 12 controller — sets the polish fan-in barrier and fans out one
+  // polish-chapter job per chapter. Does NOT advance; the barrier does.
   const polishBook = makeWorker(connection, container, {
     name: 'polish-book',
     ...QUEUE_CONFIG['polish-book'],
     payloadSchema: ProjectJob,
     handler: async (p) => {
-      const r = await useCases.polishBook.execute(p);
+      const r = await useCases.startBookPolish.execute(p);
       if (r.isFail()) throw new Error(r.error);
-      await orchestrator.advance(p.projectId, 'POLISHING_BOOK');
+      return r.value;
+    },
+  });
+
+  const polishChapter = makeWorker(connection, container, {
+    name: 'polish-chapter',
+    ...QUEUE_CONFIG['polish-chapter'],
+    payloadSchema: PolishChapterJob,
+    handler: async (p) => {
+      const r = await useCases.polishChapter.execute(p);
+      if (r.isFail()) throw new Error(r.error);
+      // Barrier: when every chapter is polished, advance POLISHING_BOOK → ASSEMBLING.
+      await orchestrator.onStageItemCompleted(p.projectId, 'POLISHING_BOOK');
       return r.value;
     },
   });
@@ -258,6 +272,7 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     chapterResearch,
     chapterGenerate,
     polishBook,
+    polishChapter,
     extraContent,
     assemble,
     exportWorker,
