@@ -69,7 +69,10 @@ export class GenerateChapterUseCase {
       this.clock.now(),
     );
     if (applied.isFail()) return Result.fail(applied.error);
-    await this.books.save(book);
+    // Persist ONLY this chapter. A full save(book) re-upserts every chapter, so
+    // parallel chapter jobs would clobber each other's just-written content with
+    // their own stale snapshot — leaving a chapter PENDING and breaking assembly.
+    await this.books.saveChapter(book.id, chapter);
     return Result.ok({ skipped: false });
   }
 }
