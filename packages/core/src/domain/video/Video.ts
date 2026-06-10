@@ -45,6 +45,9 @@ export class Video extends AggregateRoot<VideoProps, VideoId> {
   get position() {
     return this.props.position;
   }
+  get status(): VideoContentStatus {
+    return this.props.status;
+  }
   get transcript(): Transcript | undefined {
     return this.props.transcript;
   }

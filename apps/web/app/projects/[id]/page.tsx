@@ -3,11 +3,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { motion } from 'framer-motion';
 import {
   AlertTriangle,
   ArrowLeft,
-  Check,
   Download,
   FileText,
   Loader2,
@@ -20,25 +18,37 @@ import { Card } from '../../../components/ui/card.js';
 import { Button } from '../../../components/ui/button.js';
 import { Badge } from '../../../components/ui/badge.js';
 import { Progress } from '../../../components/ui/progress.js';
+import { PipelineSteps, type Counters } from '../../../components/dashboard/PipelineSteps.js';
 import { resolvePipeline, isTerminal } from '../../../components/dashboard/pipeline.js';
-import { cn } from '../../../lib/utils.js';
-
-// Backend statuses that run under the per-video pipeline barrier — while the
-// project rests on any of these, we surface a live "N/total videos" counter on
-// the active premium stage.
-const PER_VIDEO = new Set([
-  'FETCHING_VIDEO_DATA',
-  'FETCHING_TRANSCRIPTS',
-  'TRANSCRIBING_FALLBACK',
-  'SUMMARIZING_VIDEOS',
-  'ANALYZING_COMMENTS',
-]);
+import {
+  buildPipelineItems,
+  type RawVideo,
+  type RawChapter,
+} from '../../../components/dashboard/buildPipelineItems.js';
 
 interface Artifact {
   format: string;
   pageCount: number | null;
   url: string | null;
 }
+
+// Phases during which per-item lists are worth refreshing on each progress tick.
+const VIDEO_PHASES = new Set([
+  'INGESTING_CHANNEL',
+  'FETCHING_VIDEO_DATA',
+  'FETCHING_TRANSCRIPTS',
+  'TRANSCRIBING_FALLBACK',
+  'SUMMARIZING_VIDEOS',
+  'ANALYZING_COMMENTS',
+]);
+const CHAPTER_PHASES = new Set([
+  'GENERATING_OUTLINE',
+  'GENERATING_CHAPTER_RESEARCH',
+  'GENERATING_CHAPTERS',
+  'POLISHING_BOOK',
+  'ASSEMBLING',
+]);
+const EXPORT_PHASES = new Set(['ASSEMBLING', 'EXPORTING']);
 
 function statusVariant(status: string) {
   if (status === 'COMPLETED') return 'success' as const;
@@ -55,22 +65,44 @@ export default function ProjectPipelinePage({ params }: { params: { id: string }
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<Record<string, number>>({});
-  // The VIDEO_PIPELINE barrier starts at the video count and counts down, so the
-  // largest remaining value we've seen is the total.
-  const [videoTotal, setVideoTotal] = useState<number | null>(null);
+  // Each fan-in barrier counts down from its total to zero, so the largest value
+  // we've ever seen for a key is its total. We keep both to render "done/total".
+  const [totals, setTotals] = useState<Record<string, number>>({});
+  // Raw per-item data feeding the expandable sub-step detail.
+  const [videos, setVideos] = useState<RawVideo[]>([]);
+  const [chapters, setChapters] = useState<RawChapter[]>([]);
+  const [outline, setOutline] = useState<{ title: string }[]>([]);
 
   const applyPending = useCallback((p?: Record<string, number> | null) => {
     if (!p) return;
     setPending(p);
-    const remaining = p.VIDEO_PIPELINE;
-    if (typeof remaining === 'number') {
-      setVideoTotal((t) => (t === null ? remaining : Math.max(t, remaining)));
-    }
+    setTotals((prev) => {
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(p)) {
+        if (typeof v === 'number') next[k] = Math.max(next[k] ?? 0, v);
+      }
+      return next;
+    });
   }, []);
 
   const loadArtifacts = useCallback(async () => {
     const res = await fetch(`/api/exports?projectId=${id}`);
     if (res.ok) setArtifacts((await res.json()).artifacts ?? []);
+  }, [id]);
+
+  const refreshVideos = useCallback(async () => {
+    const res = await fetch(`/api/projects/${id}/videos`);
+    if (!res.ok) return;
+    const data = await res.json();
+    setVideos(data.videos ?? []);
+  }, [id]);
+
+  const refreshChapters = useCallback(async () => {
+    const res = await fetch(`/api/projects/${id}/book`);
+    if (!res.ok) return;
+    const data = await res.json();
+    setChapters(data.book?.chapters ?? []);
+    setOutline(data.book?.outline?.entries ?? []);
   }, [id]);
 
   const loadProject = useCallback(async () => {
@@ -87,6 +119,8 @@ export default function ProjectPipelinePage({ params }: { params: { id: string }
 
   useEffect(() => {
     void loadProject();
+    void refreshVideos();
+    void refreshChapters();
     const es = new EventSource(`/api/projects/${id}/events`);
     es.onmessage = (e) => {
       const payload = JSON.parse(e.data);
@@ -94,13 +128,22 @@ export default function ProjectPipelinePage({ params }: { params: { id: string }
       applyPending(payload.pending);
       if (payload.status) {
         setStatus(payload.status);
-        if (payload.status === 'COMPLETED') void loadArtifacts();
+        // Refresh the per-item list for whichever phase is live so titles and
+        // states track progress as videos/chapters complete.
+        if (VIDEO_PHASES.has(payload.status)) void refreshVideos();
+        if (CHAPTER_PHASES.has(payload.status)) void refreshChapters();
+        if (EXPORT_PHASES.has(payload.status)) void loadArtifacts();
+        if (payload.status === 'COMPLETED') {
+          void loadArtifacts();
+          void refreshVideos();
+          void refreshChapters();
+        }
         if (payload.status === 'FAILED') void loadProject();
       }
     };
     es.onerror = () => es.close();
     return () => es.close();
-  }, [id, loadProject, loadArtifacts, applyPending]);
+  }, [id, loadProject, loadArtifacts, applyPending, refreshVideos, refreshChapters]);
 
   async function retry() {
     setBusy(true);
@@ -127,10 +170,15 @@ export default function ProjectPipelinePage({ params }: { params: { id: string }
 
   const { stages, percent } = resolvePipeline(status);
   const terminal = isTerminal(status);
-  const videoRemaining = pending.VIDEO_PIPELINE;
-  const showVideoCount =
-    PER_VIDEO.has(status) && videoTotal !== null && typeof videoRemaining === 'number';
-  const videoDone = showVideoCount ? Math.max(0, (videoTotal as number) - videoRemaining) : 0;
+
+  // Live "done/total" for every fan-in barrier currently reported.
+  const counters: Counters = {};
+  for (const [k, total] of Object.entries(totals)) {
+    const remaining = pending[k];
+    if (typeof remaining === 'number' && total > 0) {
+      counters[k] = { done: Math.max(0, total - remaining), total };
+    }
+  }
 
   return (
     <AppShell>
@@ -175,51 +223,13 @@ export default function ProjectPipelinePage({ params }: { params: { id: string }
             <span className="text-sm font-semibold tabular-nums text-primary">{percent}%</span>
           </div>
 
-          <div className="px-6 py-5">
+          <div className="px-4 py-5 sm:px-6">
             <Progress value={percent} className="mb-5" />
-            <ol className="flex flex-col gap-0.5">
-              {stages.map((s, i) => (
-                <motion.li
-                  key={s.label}
-                  initial={{ opacity: 0, x: -6 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.04, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                  className={cn(
-                    'flex items-center gap-3 rounded-input px-2 py-2.5 text-sm',
-                    s.state === 'active' && 'bg-surface-hover',
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'grid size-5 shrink-0 place-items-center rounded-full',
-                      s.state === 'done' && 'bg-success text-white',
-                      s.state === 'active' && 'bg-primary-soft text-primary animate-pulse-ring',
-                      s.state === 'pending' && 'border border-border text-transparent',
-                    )}
-                  >
-                    {s.state === 'done' ? (
-                      <Check className="size-3" strokeWidth={3} />
-                    ) : s.state === 'active' ? (
-                      <Loader2 className="size-3 animate-spin" />
-                    ) : null}
-                  </span>
-                  <span
-                    className={cn(
-                      'flex-1',
-                      s.state === 'pending' ? 'text-muted-foreground' : 'text-foreground',
-                      s.state === 'active' && 'font-medium',
-                    )}
-                  >
-                    {s.label}
-                  </span>
-                  {showVideoCount && s.state === 'active' && (
-                    <span className="text-xs tabular-nums text-muted-foreground">
-                      {videoDone}/{videoTotal} videos
-                    </span>
-                  )}
-                </motion.li>
-              ))}
-            </ol>
+            <PipelineSteps
+              stages={stages}
+              counters={counters}
+              items={buildPipelineItems(videos, chapters, outline, artifacts)}
+            />
           </div>
         </Card>
 

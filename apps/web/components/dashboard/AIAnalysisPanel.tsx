@@ -1,14 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { motion } from 'framer-motion';
-import { Check, Loader2, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { Card } from '../ui/card.js';
 import { Progress } from '../ui/progress.js';
 import { Button } from '../ui/button.js';
 import { resolvePipeline } from './pipeline.js';
+import { PipelineSteps } from './PipelineSteps.js';
 import { prettyChannel } from './format.js';
-import { cn } from '../../lib/utils.js';
 import type { ProjectItem } from './data.js';
 
 /**
@@ -36,44 +35,7 @@ export function AIAnalysisPanel({ project }: { project: ProjectItem }) {
 
       <div className="px-6 py-5">
         <Progress value={percent} className="mb-5" />
-        <ol className="flex flex-col gap-0.5">
-          {stages.map((s, i) => (
-            <motion.li
-              key={s.label}
-              initial={{ opacity: 0, x: -6 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.05, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className={cn(
-                'flex items-center gap-3 rounded-input px-2 py-2 text-sm',
-                s.state === 'active' && 'bg-surface-hover',
-              )}
-            >
-              <span
-                className={cn(
-                  'grid size-5 shrink-0 place-items-center rounded-full',
-                  s.state === 'done' && 'bg-success text-white',
-                  s.state === 'active' && 'bg-primary-soft text-primary animate-pulse-ring',
-                  s.state === 'pending' && 'border border-border text-transparent',
-                )}
-              >
-                {s.state === 'done' ? (
-                  <Check className="size-3" strokeWidth={3} />
-                ) : s.state === 'active' ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : null}
-              </span>
-              <span
-                className={cn(
-                  s.state === 'done' && 'text-foreground',
-                  s.state === 'active' && 'font-medium text-foreground',
-                  s.state === 'pending' && 'text-muted-foreground',
-                )}
-              >
-                {s.label}
-              </span>
-            </motion.li>
-          ))}
-        </ol>
+        <PipelineSteps stages={stages} />
 
         <div className="mt-5 flex items-center gap-2">
           <Button asChild size="sm" variant="secondary">
