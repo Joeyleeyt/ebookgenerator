@@ -74,6 +74,19 @@ export class SupabaseProjectRepository implements ProjectRepository {
     return (data as number | null) ?? 0;
   }
 
+  async advanceStatusAtomic(id: ProjectId, from: ProjectState[], to: ProjectState): Promise<boolean> {
+    // Single guarded UPDATE: only rows whose status is still in `from` are
+    // changed, so exactly one of several racing callers can win the transition.
+    const { data, error } = await this.db
+      .from('projects')
+      .update({ status: to, updated_at: new Date().toISOString() })
+      .eq('id', id.value)
+      .in('status', from)
+      .select('id');
+    if (error) throw new Error(error.message);
+    return (data?.length ?? 0) > 0;
+  }
+
   private toDomain(row: ProjectRow): Project {
     const url = ChannelUrl.create(row.channel_url);
     return Project.rehydrate(

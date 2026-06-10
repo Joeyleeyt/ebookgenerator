@@ -12,6 +12,8 @@ export interface KnowledgeRepository {
   saveCommentInsights(videoId: VideoId, insights: CommentInsights): Promise<void>;
   getCommentInsights(videoId: VideoId): Promise<CommentInsights | null>;
   listCommentInsights(projectId: ProjectId): Promise<CommentInsights[]>;
+  /** Cheap count of videos in a project that already have comment insights. */
+  countCommentInsights(projectId: ProjectId): Promise<number>;
 
   // Phase 7 — channel knowledge base (per project)
   saveKnowledgeBase(projectId: ProjectId, kb: ChannelKnowledgeBase): Promise<void>;

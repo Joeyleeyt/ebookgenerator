@@ -79,6 +79,13 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
       if (r.value.outcome === 'skipped-no-transcript') {
         container.logger.warn('video-summarize skipped — no transcript', { projectId: p.projectId, videoId: p.videoId });
       }
+      if (r.value.outcome === 'skipped-summary-failed') {
+        container.logger.warn('video-summarize skipped — unusable model output', {
+          projectId: p.projectId,
+          videoId: p.videoId,
+          reason: r.value.reason,
+        });
+      }
       // Per-video chain continues into comment analysis (the last per-video step)
       // even when summarization was skipped, so the convergence barrier still
       // decrements for this video.
@@ -97,13 +104,22 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     handler: async (p) => {
       const r = await useCases.analyzeComments.execute(p);
       if (r.isFail()) throw new Error(r.error);
-      // Convergence barrier for the entire per-video chain. When every video has
-      // been summarized AND comment-analyzed, walk forward to the knowledge base.
-      const remaining = await container.repositories.projects.decrementPending(
-        ProjectId.from(p.projectId),
-        'VIDEO_PIPELINE',
-      );
-      if (remaining <= 0) await orchestrator.reachStage(p.projectId, 'BUILDING_KNOWLEDGE_BASE');
+      // Convergence barrier for the entire per-video chain. The countdown counter
+      // still drives the UI, but the advance decision is DB-authoritative: advance
+      // when every video already has comment insights. That self-heals a drifted
+      // counter (e.g. a decrement lost to a worker restart) that would otherwise
+      // wedge the project forever on the per-video phase.
+      const pid = ProjectId.from(p.projectId);
+      const remaining = await container.repositories.projects.decrementPending(pid, 'VIDEO_PIPELINE');
+      let converged = remaining <= 0;
+      if (!converged) {
+        const [analyzed, total] = await Promise.all([
+          container.repositories.knowledge.countCommentInsights(pid),
+          container.repositories.videos.countByProject(pid),
+        ]);
+        converged = total > 0 && analyzed >= total;
+      }
+      if (converged) await orchestrator.reachStage(p.projectId, 'BUILDING_KNOWLEDGE_BASE');
     },
   });
 

@@ -5,6 +5,7 @@ import { ProjectId } from '../../domain/project/ProjectId.js';
 import { GenerationOptions } from '../../domain/project/GenerationOptions.js';
 import { ChannelUrl } from '../../domain/channel/ChannelUrl.js';
 import type { ProjectRepository, ProjectListItem } from '../ports/repositories/ProjectRepository.js';
+import type { ProjectState } from '../../domain/project/ProjectStatus.js';
 import type { JobQueue, QueueName } from '../ports/services/JobQueue.js';
 import type { Clock } from '../ports/Clock.js';
 import type { Logger } from '../ports/Logger.js';
@@ -36,6 +37,13 @@ class FakeProjectRepo implements ProjectRepository {
   }
   async decrementPending(): Promise<number> {
     return 0;
+  }
+  async advanceStatusAtomic(id: ProjectId, from: ProjectState[], to: ProjectState): Promise<boolean> {
+    if (!this.project || this.project.id.value !== id.value) return false;
+    if (!from.includes(this.project.status.value)) return false;
+    this.project.advanceTo(to, now);
+    this.saved.push(this.project);
+    return true;
   }
   async listByOwner(): Promise<ProjectListItem[]> {
     return [];

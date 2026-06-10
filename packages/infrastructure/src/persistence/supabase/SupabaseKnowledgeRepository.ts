@@ -41,6 +41,15 @@ export class SupabaseKnowledgeRepository implements KnowledgeRepository {
     return rows.map((r) => CommentInsights.create(r.data));
   }
 
+  async countCommentInsights(projectId: ProjectId): Promise<number> {
+    const { count, error } = await this.db
+      .from('comment_insights')
+      .select('video_id, videos!inner(project_id)', { count: 'exact', head: true })
+      .eq('videos.project_id', projectId.value);
+    if (error) throw new Error(error.message);
+    return count ?? 0;
+  }
+
   // ── Phase 7 — channel knowledge base ──────────────────────────────────────
   async saveKnowledgeBase(projectId: ProjectId, kb: ChannelKnowledgeBase): Promise<void> {
     const { error } = await this.db.from('channel_knowledge_bases').upsert(

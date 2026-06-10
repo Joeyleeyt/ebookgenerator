@@ -22,6 +22,25 @@ const SummarySchema = z.object({
   recurringAdvice: z.array(z.string()),
 });
 
+/**
+ * Outcome of a summarize attempt.
+ * - `summarized` — a structured summary was produced and attached.
+ * - `skipped-no-transcript` — the video has no captions/Whisper text to summarize.
+ * - `skipped-summary-failed` — the model returned an unusable response (truncated
+ *   or non-JSON). This is a CONTENT failure that won't change on retry, so it's
+ *   non-fatal: the per-video chain continues and the book is built from the rest.
+ *   (Transient AI errors — rate limits/overload — still fail so BullMQ retries.)
+ */
+export type SummarizeOutcome =
+  | { outcome: 'summarized' }
+  | { outcome: 'skipped-no-transcript' }
+  | { outcome: 'skipped-summary-failed'; reason: string };
+
+// The 10-field schema (summary + nine arrays) needs headroom; too low a budget
+// truncates the model mid-object and the closing brace is never emitted, yielding
+// "No JSON object found in completion".
+const SUMMARY_MAX_TOKENS = 4096;
+
 /** Map step: per-video summary via Claude Sonnet. */
 export class SummarizeVideoUseCase {
   constructor(
@@ -30,7 +49,7 @@ export class SummarizeVideoUseCase {
     private readonly hasher: Hasher,
   ) {}
 
-  async execute(cmd: VideoJob): Promise<Result<{ outcome: 'summarized' | 'skipped-no-transcript' }>> {
+  async execute(cmd: VideoJob): Promise<Result<SummarizeOutcome>> {
     const video = await this.videos.findById(VideoId.from(cmd.videoId));
     if (!video) return Result.fail('Video not found');
     // A video with no captions and no Whisper transcript can't be summarized.
@@ -53,13 +72,23 @@ export class SummarizeVideoUseCase {
       model: 'claude-sonnet-4-6',
       system: prompt.system,
       messages: [{ role: 'user', content: prompt.user }],
-      maxTokens: 2800,
+      maxTokens: SUMMARY_MAX_TOKENS,
       metadata: { projectId: cmd.projectId, stage: 'video-summarize' },
     });
+    // Transient provider errors (rate-limited/overloaded/unknown) stay fatal so the
+    // worker throws and BullMQ retries with backoff.
     if (completion.isFail()) return Result.fail(completion.error.type);
 
+    // Truncated output can never contain the closing brace → skip non-fatally
+    // rather than retry the same too-large request forever.
+    if (completion.value.stopReason === 'max_tokens') {
+      return Result.ok({ outcome: 'skipped-summary-failed', reason: 'completion truncated at max_tokens' });
+    }
+
     const parsed = parseJsonCompletion(completion.value.text, SummarySchema);
-    if (parsed.isFail()) return Result.fail(parsed.error);
+    // A non-JSON / schema-mismatched response is a deterministic content failure;
+    // retrying the same input won't help, so skip this video instead of stalling.
+    if (parsed.isFail()) return Result.ok({ outcome: 'skipped-summary-failed', reason: parsed.error });
 
     const attach = video.attachSummary(
       VideoSummary.create({ ...parsed.value, model: completion.value.model, inputHash }),

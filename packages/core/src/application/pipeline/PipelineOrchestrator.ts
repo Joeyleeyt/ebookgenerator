@@ -26,27 +26,21 @@ export class PipelineOrchestrator {
   }
 
   /**
-   * Walk the linear pipeline forward until `target`, applying each valid
-   * transition, then enqueue the target stage's entry job. Used by the
-   * per-video convergence barrier, which spans several coarse phases.
+   * Per-video fan-in convergence: jump from the per-video phase to `target`.
+   *
+   * Dozens of per-video jobs can finish near-simultaneously and all call this at
+   * once. A prior racing advance may also have left the status anywhere within
+   * the per-video phase. So we transition ATOMICALLY from any per-video status to
+   * the target in one guarded write — exactly one caller wins and enqueues the
+   * next stage; the rest no-op. This replaces the old read-walk-save, which lost
+   * updates under that concurrency and could wedge the project mid-phase.
    */
   async reachStage(projectId: string, target: ProjectState): Promise<void> {
-    const project = await this.projects.findById(ProjectId.from(projectId));
-    if (!project) return;
-    if (project.status.value === target) return;
-
-    let guard = 0;
-    while (project.status.value !== target && guard++ < 16) {
-      const next = NEXT_STAGE[project.status.value];
-      if (!next) break;
-      const r = project.advanceTo(next, this.clock.now());
-      if (r.isFail()) {
-        this.logger.warn('reachStage stopped', { projectId, at: project.status.value, target, error: r.error });
-        break;
-      }
+    const won = await this.projects.advanceStatusAtomic(ProjectId.from(projectId), PER_VIDEO_PHASE, target);
+    if (won) {
+      this.logger.info('per-video phase converged', { projectId, target });
+      await this.enqueueStageEntry(projectId, target);
     }
-    await this.projects.save(project);
-    if (project.status.value === target) await this.enqueueStageEntry(projectId, target);
   }
 
   /**
@@ -83,16 +77,12 @@ export class PipelineOrchestrator {
   async advance(projectId: string, completed: ProjectState): Promise<void> {
     const next = NEXT_STAGE[completed];
     if (!next) return;
-    const project = await this.projects.findById(ProjectId.from(projectId));
-    if (!project) return;
-
-    const transition = project.advanceTo(next, this.clock.now());
-    if (transition.isFail()) {
-      this.logger.warn('skipping illegal transition', { projectId, completed, next, error: transition.error });
-      return;
-    }
-    await this.projects.save(project);
-    await this.enqueueStageEntry(projectId, next);
+    // Atomic compare-and-advance: only transition while status is still
+    // `completed`. Idempotent under fan-in — concurrent completions can't
+    // double-advance or clobber the status; the losers simply no-op.
+    const won = await this.projects.advanceStatusAtomic(ProjectId.from(projectId), [completed], next);
+    if (won) await this.enqueueStageEntry(projectId, next);
+    else this.logger.debug('advance skipped — status already moved', { projectId, completed, next });
   }
 
   /** Enqueue the entrypoint job for a stage (fan-out jobs are scheduled by the use case). */
@@ -102,6 +92,18 @@ export class PipelineOrchestrator {
     await this.queue.enqueue(queueName, { projectId }, { jobId: `${queueName}:${projectId}` });
   }
 }
+
+/**
+ * The coarse statuses that make up the per-video fan-in phase. reachStage accepts
+ * any of these as the source when converging to the knowledge-base stage.
+ */
+const PER_VIDEO_PHASE: ProjectState[] = [
+  'FETCHING_VIDEO_DATA',
+  'FETCHING_TRANSCRIPTS',
+  'TRANSCRIBING_FALLBACK',
+  'SUMMARIZING_VIDEOS',
+  'ANALYZING_COMMENTS',
+];
 
 /** Linear stage progression (conditional branches & fan-outs resolved inside use cases). */
 const NEXT_STAGE: Partial<Record<ProjectState, ProjectState>> = {

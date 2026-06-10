@@ -20,7 +20,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   const stream = new ReadableStream({
     async start(controller) {
-      let last = '';
+      let lastStatus = '';
+      // Track the serialized pending-counts too: during the per-video phase the
+      // project status sits on FETCHING_VIDEO_DATA while the VIDEO_PIPELINE barrier
+      // counts down, so we must emit on pending changes to drive a live counter.
+      let lastPending = '';
       // The client can disconnect (tab close / navigation) at any time, which
       // closes the controller out from under us. Track that and make every
       // enqueue/close a no-op afterwards so the polling interval can't throw
@@ -53,11 +57,13 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           send({ error: 'not_found' });
           return true;
         }
-        if (project.status.value !== last) {
-          last = project.status.value;
-          send({ status: last, pending: project.pendingCounts });
+        const pendingJson = JSON.stringify(project.pendingCounts);
+        if (project.status.value !== lastStatus || pendingJson !== lastPending) {
+          lastStatus = project.status.value;
+          lastPending = pendingJson;
+          send({ status: lastStatus, pending: project.pendingCounts });
         }
-        return last === 'COMPLETED' || last === 'FAILED';
+        return lastStatus === 'COMPLETED' || lastStatus === 'FAILED';
       };
 
       const tickOnce = async (): Promise<void> => {

@@ -38,6 +38,15 @@ export class SupabaseVideoRepository implements VideoRepository {
     return (data ?? []).map((r) => this.toDomain(r));
   }
 
+  async countByProject(projectId: ProjectId): Promise<number> {
+    const { count, error } = await this.db
+      .from('videos')
+      .select('*', { count: 'exact', head: true })
+      .eq('project_id', projectId.value);
+    if (error) throw new Error(error.message);
+    return count ?? 0;
+  }
+
   async save(video: Video): Promise<void> {
     await this.upsertVideo(video);
   }

@@ -15,6 +15,13 @@ export interface ProjectRepository {
   save(project: Project): Promise<void>;
   /** Atomic per-stage fan-in counter decrement; returns remaining count. */
   decrementPending(id: ProjectId, stage: string): Promise<number>;
+  /**
+   * Atomically transition status from any of `from` to `to` in a single guarded
+   * write. Returns true iff THIS call performed the transition. Concurrency-safe:
+   * when many fan-in jobs converge at once, exactly one wins and the rest no-op,
+   * so the status can't be clobbered by racing read-modify-write saves.
+   */
+  advanceStatusAtomic(id: ProjectId, from: ProjectState[], to: ProjectState): Promise<boolean>;
   /** List a user's projects, newest first (read model for the dashboard). */
   listByOwner(ownerId: string): Promise<ProjectListItem[]>;
 }

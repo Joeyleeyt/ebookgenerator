@@ -57,7 +57,7 @@ export class GenerateOutlineUseCase {
     if (!strategy || !kb) return Result.fail('Book strategy or knowledge base missing');
 
     const budget = PageBudget.of(project.options.targetPages);
-    const chapterCount = Math.max(8, Math.min(14, strategy.chapterCount || 12));
+    const chapterCount = Math.max(2, Math.min(14, strategy.chapterCount || 2));
     const inputHash = this.hasher.hash({ strat: strategy.inputHash, kb: kb.inputHash });
 
     let book = await this.books.findByProject(projectId);

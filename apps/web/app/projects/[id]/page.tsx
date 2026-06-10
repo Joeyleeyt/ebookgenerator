@@ -7,24 +7,31 @@ import { DashboardShell } from '../../../components/DashboardShell.js';
 import { ui, colors, statusColor } from '../../ui.js';
 import { Spinner } from '../../../components/Spinner.js';
 
-const STAGES = [
-  'CREATED',
-  'INGESTING_CHANNEL',
-  'FETCHING_VIDEO_DATA',
-  'FETCHING_TRANSCRIPTS',
-  'TRANSCRIBING_FALLBACK',
-  'SUMMARIZING_VIDEOS',
-  'ANALYZING_COMMENTS',
-  'BUILDING_KNOWLEDGE_BASE',
-  'GENERATING_BOOK_STRATEGY',
-  'GENERATING_OUTLINE',
-  'GENERATING_CHAPTER_RESEARCH',
-  'GENERATING_CHAPTERS',
-  'POLISHING_BOOK',
-  'ASSEMBLING',
-  'EXPORTING',
-  'COMPLETED',
+// Display steps for the progress tracker. Each step maps to one or more backend
+// statuses. The per-video phases (data → transcripts → whisper fallback →
+// summarize → comments) all run concurrently under a single VIDEO_PIPELINE
+// barrier — the project status never rests on them individually — so they're
+// shown as one "processing videos" step with a live N/total counter.
+const DISPLAY_STAGES: { label: string; statuses: string[] }[] = [
+  { label: 'created', statuses: ['CREATED'] },
+  { label: 'ingesting channel', statuses: ['INGESTING_CHANNEL'] },
+  {
+    label: 'processing videos',
+    statuses: ['FETCHING_VIDEO_DATA', 'FETCHING_TRANSCRIPTS', 'TRANSCRIBING_FALLBACK', 'SUMMARIZING_VIDEOS', 'ANALYZING_COMMENTS'],
+  },
+  { label: 'building knowledge base', statuses: ['BUILDING_KNOWLEDGE_BASE'] },
+  { label: 'generating book strategy', statuses: ['GENERATING_BOOK_STRATEGY'] },
+  { label: 'generating outline', statuses: ['GENERATING_OUTLINE'] },
+  { label: 'generating chapter research', statuses: ['GENERATING_CHAPTER_RESEARCH'] },
+  { label: 'generating chapters', statuses: ['GENERATING_CHAPTERS'] },
+  { label: 'polishing book', statuses: ['POLISHING_BOOK'] },
+  { label: 'assembling', statuses: ['ASSEMBLING'] },
+  { label: 'exporting', statuses: ['EXPORTING'] },
+  { label: 'completed', statuses: ['COMPLETED'] },
 ];
+
+// The display step that aggregates the per-video pipeline (carries the counter).
+const VIDEO_STEP = 'FETCHING_VIDEO_DATA';
 
 interface Artifact {
   format: string;
@@ -39,6 +46,19 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
   const [errorText, setErrorText] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<Record<string, number>>({});
+  // Total videos in the per-video pipeline. The VIDEO_PIPELINE barrier starts at
+  // the video count and counts down, so the largest value we've seen is the total.
+  const [videoTotal, setVideoTotal] = useState<number | null>(null);
+
+  const applyPending = useCallback((p?: Record<string, number> | null) => {
+    if (!p) return;
+    setPending(p);
+    const remaining = p.VIDEO_PIPELINE;
+    if (typeof remaining === 'number') {
+      setVideoTotal((t) => (t === null ? remaining : Math.max(t, remaining)));
+    }
+  }, []);
 
   const loadArtifacts = useCallback(async () => {
     const res = await fetch(`/api/exports?projectId=${id}`);
@@ -52,9 +72,10 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
       const data = await res.json();
       setStatus(data.status);
       setErrorText(data.error ?? null);
+      applyPending(data.pending);
       if (data.status === 'COMPLETED') void loadArtifacts();
     }
-  }, [id, router, loadArtifacts]);
+  }, [id, router, loadArtifacts, applyPending]);
 
   useEffect(() => {
     void loadProject();
@@ -62,6 +83,7 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
     es.onmessage = (e) => {
       const payload = JSON.parse(e.data);
       if (payload.error) return;
+      applyPending(payload.pending);
       if (payload.status) {
         setStatus(payload.status);
         if (payload.status === 'COMPLETED') void loadArtifacts();
@@ -70,7 +92,7 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
     };
     es.onerror = () => es.close();
     return () => es.close();
-  }, [id, loadProject, loadArtifacts]);
+  }, [id, loadProject, loadArtifacts, applyPending]);
 
   async function retry() {
     setBusy(true);
@@ -95,8 +117,9 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
     }
   }
 
-  const currentIdx = STAGES.indexOf(status);
+  const currentIdx = DISPLAY_STAGES.findIndex((s) => s.statuses.includes(status));
   const terminal = status === 'COMPLETED' || status === 'FAILED' || status === 'PARTIAL';
+  const videoRemaining = pending.VIDEO_PIPELINE;
 
   return (
     <DashboardShell>
@@ -120,11 +143,15 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
 
       <div style={{ ...ui.panel, marginTop: 24 }}>
         <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-          {STAGES.map((stage, i) => {
+          {DISPLAY_STAGES.map((stage, i) => {
             const done = currentIdx > i || status === 'COMPLETED';
             const active = currentIdx === i && status !== 'COMPLETED';
+            // Show "N/total videos" on the per-video step while it's active.
+            const showCount =
+              active && stage.statuses.includes(VIDEO_STEP) && videoTotal !== null && typeof videoRemaining === 'number';
+            const videoDone = showCount ? Math.max(0, (videoTotal as number) - videoRemaining) : 0;
             return (
-              <li key={stage} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '9px 0', opacity: done || active ? 1 : 0.4 }}>
+              <li key={stage.label} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '9px 0', opacity: done || active ? 1 : 0.4 }}>
                 <span
                   style={{
                     width: 26,
@@ -142,7 +169,12 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
                   {done ? '✓' : active ? <Spinner size={14} color={colors.pink} /> : '○'}
                 </span>
                 <span style={{ fontWeight: active ? 700 : 400, color: active ? colors.text : undefined }}>
-                  {stage.replace(/_/g, ' ').toLowerCase()}
+                  {stage.label}
+                  {showCount && (
+                    <span style={{ marginLeft: 8, fontWeight: 400, color: colors.textFaint }}>
+                      {videoDone}/{videoTotal} videos
+                    </span>
+                  )}
                 </span>
               </li>
             );

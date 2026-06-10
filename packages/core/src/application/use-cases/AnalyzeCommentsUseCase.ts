@@ -49,15 +49,25 @@ export class AnalyzeCommentsUseCase {
     const prompt = CommentAnalysisPrompt.build({ videoTitle: video.title, comments: comments.slice(0, 80) });
     const completion = await this.ai.generate({
       model: 'claude-haiku-4-5',
+      // 7-array schema; too tight a budget truncates the JSON mid-object.
+      maxTokens: 2048,
       system: prompt.system,
       messages: [{ role: 'user', content: prompt.user }],
-      maxTokens: 1200,
       metadata: { projectId: cmd.projectId, stage: 'analyze-comments' },
     });
+    // Transient provider errors stay fatal so the worker retries them.
     if (completion.isFail()) return Result.fail(completion.error.type);
 
-    const parsed = parseJsonCompletion(completion.value.text, Schema);
-    if (parsed.isFail()) return Result.fail(parsed.error);
+    // A truncated or non-JSON response is a deterministic content failure that
+    // won't change on retry. Persist empty insights so the per-video barrier
+    // still converges (mirrors the no-comments path above) rather than stalling
+    // the whole project on one video.
+    const isTruncated = completion.value.stopReason === 'max_tokens';
+    const parsed = isTruncated ? null : parseJsonCompletion(completion.value.text, Schema);
+    if (isTruncated || !parsed || parsed.isFail()) {
+      await this.knowledge.saveCommentInsights(videoId, CommentInsights.empty(inputHash));
+      return Result.ok();
+    }
 
     await this.knowledge.saveCommentInsights(videoId, CommentInsights.create({ ...parsed.value, inputHash }));
     return Result.ok();

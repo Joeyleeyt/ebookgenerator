@@ -10,16 +10,26 @@ import { KnowledgeBasePrompt } from '../prompts/KnowledgeBasePrompt.js';
 import { parseJsonCompletion } from '../prompts/parse.js';
 import type { ProjectJob } from '../dto/jobs.dto.js';
 
+/**
+ * Claude occasionally returns a list field as a single string instead of an
+ * array. Coerce a lone string (or null) into a string[] so a benign shape
+ * drift doesn't fail the whole job.
+ */
+const stringArray = z.preprocess(
+  (v) => (typeof v === 'string' ? [v] : v == null ? [] : v),
+  z.array(z.string()),
+);
+
 const Schema = z.object({
-  coreThemes: z.array(z.string()),
-  corePrinciples: z.array(z.string()),
-  recurringAdvice: z.array(z.string()),
-  commonMistakes: z.array(z.string()),
-  audiencePainPoints: z.array(z.string()),
-  audienceGoals: z.array(z.string()),
+  coreThemes: stringArray,
+  corePrinciples: stringArray,
+  recurringAdvice: stringArray,
+  commonMistakes: stringArray,
+  audiencePainPoints: stringArray,
+  audienceGoals: stringArray,
   transformationJourney: z.string(),
   expertPositioning: z.string(),
-  hiddenInsights: z.array(z.string()),
+  hiddenInsights: stringArray,
 });
 
 /** Phase 7 (Claude Sonnet): reduce video knowledge + comment insights into a knowledge base. */
