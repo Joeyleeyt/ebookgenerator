@@ -1,28 +1,27 @@
 import type { ReactNode } from 'react';
+import { Inter } from 'next/font/google';
 import './globals.css';
-import { colors } from './ui.js';
 import { themeInitScript } from '../lib/theme.js';
 
+const inter = Inter({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-inter',
+});
+
 export const metadata = {
-  title: 'YouTube Ebook Generator',
-  description: 'Turn a YouTube channel into a 100-page ebook.',
+  title: 'Ebookly — Turn YouTube audience intelligence into profitable books',
+  description:
+    'Ebookly analyzes your YouTube channel and audience to surface book opportunities, then writes a professional 100+ page ebook you can edit and export.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={inter.variable}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body
-        style={{
-          fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif',
-          margin: 0,
-          minHeight: '100vh',
-          background: colors.canvas,
-          color: colors.text,
-        }}
-      >
+      <body className="min-h-screen bg-canvas font-sans text-foreground antialiased">
         {children}
       </body>
     </html>

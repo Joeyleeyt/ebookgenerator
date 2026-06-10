@@ -2,14 +2,19 @@
 
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { AlertTriangle, BookMarked, Loader2 } from 'lucide-react';
 import { createSupabaseBrowserClient } from '../../lib/supabase-browser.js';
-import { ui, colors, accentGradient } from '../ui.js';
-import { Spinner } from '../../components/Spinner.js';
+import { Button } from '../../components/ui/button.js';
+import { cn } from '../../lib/utils.js';
+
+const FIELD =
+  'h-11 w-full rounded-input border border-border bg-surface px-3.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary';
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get('next') ?? '/projects';
+  const next = params.get('next') ?? '/dashboard';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -34,37 +39,71 @@ function LoginForm() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24 }}>
-      <div style={{ ...ui.panel, width: '100%', maxWidth: 400, padding: 32 }}>
-        <div
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: 14,
-            background: accentGradient,
-            display: 'grid',
-            placeItems: 'center',
-            fontSize: 22,
-            marginBottom: 18,
-          }}
-        >
-          📖
-        </div>
-        <h1 style={{ margin: 0, fontSize: 26 }}>Sign in</h1>
-        <p style={{ color: colors.textDim, marginTop: 6 }}>Administrator access.</p>
-        <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 24 }}>
-          <input style={ui.input} type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          <input style={ui.input} type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
-          <button
-            style={{ ...ui.button, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-            type="submit"
-            disabled={busy}
-          >
-            {busy && <Spinner size={14} color="#fff" />}
+    <div className="relative grid min-h-screen place-items-center overflow-hidden px-6">
+      {/* Ambient brand glow */}
+      <div className="pointer-events-none absolute -top-40 left-1/2 size-[36rem] -translate-x-1/2 rounded-full bg-primary/15 blur-3xl" />
+      <div className="pointer-events-none absolute inset-0 bg-grid opacity-40" />
+
+      <div className="relative w-full max-w-sm rounded-card border border-border bg-surface p-8 shadow-card">
+        <Link href="/" className="inline-flex items-center gap-2.5">
+          <span className="grid size-10 place-items-center rounded-[12px] bg-brand-vivid shadow-glow">
+            <BookMarked className="size-5 text-white" />
+          </span>
+          <span className="text-lg font-bold tracking-tight">Ebookly</span>
+        </Link>
+
+        <h1 className="mt-6 text-2xl font-semibold tracking-tight">Welcome back</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Sign in to your workspace.</p>
+
+        <form onSubmit={submit} className="mt-6 flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="email" className="text-xs font-medium text-muted-foreground">
+              Email
+            </label>
+            <input
+              id="email"
+              className={FIELD}
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoComplete="email"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="password" className="text-xs font-medium text-muted-foreground">
+              Password
+            </label>
+            <input
+              id="password"
+              className={FIELD}
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+              autoComplete="current-password"
+            />
+          </div>
+
+          <Button type="submit" size="lg" disabled={busy} className="mt-2 w-full">
+            {busy && <Loader2 className="size-4 animate-spin" />}
             {busy ? 'Signing in…' : 'Sign in'}
-          </button>
+          </Button>
         </form>
-        {message && <p style={{ marginTop: 16, color: colors.amber }}>{message}</p>}
+
+        {message && (
+          <div
+            className={cn(
+              'mt-4 flex items-start gap-2 rounded-input border border-error/30 bg-error/5 p-3 text-sm text-error',
+            )}
+          >
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>{message}</span>
+          </div>
+        )}
       </div>
     </div>
   );

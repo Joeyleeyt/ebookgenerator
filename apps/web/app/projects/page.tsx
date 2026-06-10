@@ -2,72 +2,30 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { DashboardShell } from '../../components/DashboardShell.js';
-import { AreaChart } from '../../components/AreaChart.js';
-import { Spinner } from '../../components/Spinner.js';
-import { createSupabaseBrowserClient } from '../../lib/supabase-browser.js';
-import { ui, colors, accentGradient, statusColor } from '../ui.js';
-
-interface ProjectItem {
-  id: string;
-  channelUrl: string;
-  status: string;
-  createdAt: string;
-}
+import { ArrowRight, Loader2, Youtube } from 'lucide-react';
+import { AppShell } from '../../components/app/AppShell.js';
+import { ProjectCard, type ProjectCardData } from '../../components/projects/ProjectCard.js';
+import { Button } from '../../components/ui/button.js';
+import { Skeleton } from '../../components/ui/skeleton.js';
+import { isActiveStatus } from '../../components/dashboard/pipeline.js';
+import { cn } from '../../lib/utils.js';
 
 type Tab = 'all' | 'active' | 'completed';
 
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-/** A project still moving through the pipeline (not done and not failed). */
-function isActive(status: string): boolean {
-  return status !== 'COMPLETED' && status !== 'FAILED';
-}
-
-function prettyChannel(url: string): string {
-  return url.replace(/^https?:\/\/(www\.)?youtube\.com\//, '').replace(/^@/, '@') || url;
-}
-
-/** Cumulative ebooks-created curve over the project history (demo curve when sparse). */
-function buildSeries(projects: ProjectItem[]): { data: number[]; labels: string[] } {
-  const N = 7;
-  if (projects.length < 2) {
-    return {
-      data: [2, 3, 3, 5, 4, 6, 7],
-      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-    };
-  }
-  const times = projects.map((p) => new Date(p.createdAt).getTime()).sort((a, b) => a - b);
-  const min = times[0]!;
-  const span = Math.max(1, times[times.length - 1]! - min);
-  const data: number[] = [];
-  const labels: string[] = [];
-  for (let i = 1; i <= N; i++) {
-    const cutoff = min + (span * i) / N;
-    data.push(times.filter((t) => t <= cutoff).length);
-    labels.push(new Date(cutoff).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
-  }
-  return { data, labels };
-}
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'all', label: 'All projects' },
+  { key: 'active', label: 'In progress' },
+  { key: 'completed', label: 'Completed' },
+];
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [projects, setProjects] = useState<ProjectCardData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<Tab>('all');
   const [url, setUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('all');
-  const [email, setEmail] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function load() {
     const res = await fetch('/api/projects');
@@ -79,17 +37,13 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     void load();
-    void createSupabaseBrowserClient()
-      .auth.getUser()
-      .then(({ data }) => setEmail(data.user?.email ?? null))
-      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function createProject(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    setErrorMsg(null);
+    setError(null);
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -97,244 +51,110 @@ export default function ProjectsPage() {
         body: JSON.stringify({ channelUrl: url, options: { targetPages: 10, maxVideos: 10 } }),
       });
       const data = await res.json();
-      if (!res.ok) return setErrorMsg(data.error ?? 'Failed to create project');
+      if (!res.ok) return setError(data.error ?? 'Could not start analysis');
       router.push(`/projects/${data.projectId}`);
+    } catch {
+      setError('Network error — please try again');
     } finally {
       setSubmitting(false);
     }
   }
 
-  const completed = projects.filter((p) => p.status === 'COMPLETED').length;
-  const active = projects.filter((p) => p.status !== 'COMPLETED' && p.status !== 'FAILED').length;
-  const series = buildSeries(projects);
+  const counts = {
+    all: projects.length,
+    active: projects.filter((p) => isActiveStatus(p.status)).length,
+    completed: projects.filter((p) => p.status === 'COMPLETED').length,
+  };
 
   const filtered = projects.filter((p) =>
-    tab === 'all' ? true : tab === 'completed' ? p.status === 'COMPLETED' : p.status !== 'COMPLETED' && p.status !== 'FAILED',
-  );
-
-  const rightRail = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {/* Profile card */}
-      <div style={{ ...ui.panel, textAlign: 'center', paddingTop: 28 }}>
-        <div
-          style={{
-            width: 76,
-            height: 76,
-            borderRadius: '50%',
-            margin: '0 auto 14px',
-            background: accentGradient,
-            display: 'grid',
-            placeItems: 'center',
-            fontSize: 30,
-          }}
-        >
-          📚
-        </div>
-        <div style={{ fontWeight: 700, fontSize: 18 }}>{email ?? 'Your workspace'}</div>
-        <div style={{ color: colors.textDim, fontSize: 13, marginTop: 2 }}>Ebook Creator</div>
-        <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 20, paddingTop: 20, borderTop: `1px solid ${colors.borderSoft}` }}>
-          {[
-            ['Projects', projects.length],
-            ['Completed', completed],
-            ['Active', active],
-          ].map(([label, value]) => (
-            <div key={label as string}>
-              <div style={{ fontWeight: 700, fontSize: 18 }}>{value}</div>
-              <div style={{ color: colors.textDim, fontSize: 12 }}>{label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Ebooks-generated chart */}
-      <div style={ui.panel}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-          <strong style={{ fontSize: 15 }}>Ebooks Generated</strong>
-          <span
-            style={{
-              marginLeft: 'auto',
-              ...ui.badge,
-              padding: '6px 10px',
-              border: `1px solid ${colors.border}`,
-              background: colors.panelRaised,
-            }}
-          >
-            30 Days ▾
-          </span>
-        </div>
-        <AreaChart data={series.data} xLabels={series.labels} height={160} />
-      </div>
-
-      {/* Activity feed */}
-      <div style={ui.panel}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-          <strong>Recent Activity</strong>
-          <span style={{ ...ui.link, marginLeft: 'auto', fontSize: 13, cursor: 'pointer' }}>View All</span>
-        </div>
-        {projects.length === 0 ? (
-          <p style={{ color: colors.textDim, fontSize: 14 }}>No activity yet.</p>
-        ) : (
-          projects.slice(0, 6).map((p) => (
-            <Link
-              key={p.id}
-              href={`/projects/${p.id}`}
-              className="row-hover"
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 8px', margin: '0 -8px', textDecoration: 'none', color: 'inherit' }}
-            >
-              <span
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: '50%',
-                  background: colors.panelRaised,
-                  display: 'grid',
-                  placeItems: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                🎬
-              </span>
-              <span style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {prettyChannel(p.channelUrl)}
-                </div>
-                <div style={{ fontSize: 12, color: colors.textFaint }}>{timeAgo(p.createdAt)}</div>
-              </span>
-              <span style={{ ...ui.badge, color: statusColor(p.status), display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                {isActive(p.status) && <Spinner size={11} color={statusColor(p.status)} />}
-                {p.status}
-              </span>
-            </Link>
-          ))
-        )}
-      </div>
-    </div>
+    tab === 'all' ? true : tab === 'completed' ? p.status === 'COMPLETED' : isActiveStatus(p.status),
   );
 
   return (
-    <DashboardShell rightRail={rightRail}>
-      <div style={{ marginBottom: 8 }}>
-        <h1 style={{ margin: 0, fontSize: 26 }}>Dashboard</h1>
-        <p style={{ color: colors.textDim, margin: '6px 0 0' }}>Turn a YouTube channel into a ~100-page ebook.</p>
-      </div>
-
-      {/* Create form */}
-      <form onSubmit={createProject} style={{ display: 'flex', gap: 10, marginTop: 24, maxWidth: 620 }}>
-        <input
-          style={ui.input}
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://www.youtube.com/@channel"
-          required
-        />
-        <button
-          style={{ ...ui.button, display: 'inline-flex', alignItems: 'center', gap: 8 }}
-          type="submit"
-          disabled={submitting}
-        >
-          {submitting && <Spinner size={14} color="#fff" />}
-          {submitting ? 'Generating…' : 'Generate'}
-        </button>
-      </form>
-      {errorMsg && <p style={{ color: colors.red, marginTop: 12 }}>{errorMsg}</p>}
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 24, marginTop: 32, borderBottom: `1px solid ${colors.borderSoft}` }}>
-        {(
-          [
-            ['all', 'All Projects'],
-            ['active', 'In Progress'],
-            ['completed', 'Completed'],
-          ] as [Tab, string][]
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            style={{
-              background: 'none',
-              border: 0,
-              padding: '0 0 12px',
-              cursor: 'pointer',
-              fontSize: 15,
-              fontWeight: 600,
-              color: tab === key ? colors.text : colors.textDim,
-              borderBottom: `2px solid ${tab === key ? colors.pink : 'transparent'}`,
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Project grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 18, marginTop: 24 }}>
-        {loading ? (
-          <p style={{ color: colors.textDim, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Spinner /> Loading…
+    <AppShell>
+      <div className="mx-auto flex max-w-7xl flex-col gap-6">
+        {/* Header */}
+        <div className="flex flex-col gap-1">
+          <h1 className="text-h3 font-semibold tracking-tight">Projects</h1>
+          <p className="text-sm text-muted-foreground">
+            Every channel you've turned into a book, and the ones in progress.
           </p>
+        </div>
+
+        {/* Create row */}
+        <form
+          onSubmit={createProject}
+          className={cn(
+            'flex items-center gap-2 rounded-input border bg-surface p-1.5 pl-3.5 transition-colors',
+            error ? 'border-error' : 'border-border focus-within:border-primary',
+          )}
+        >
+          <Youtube className="size-5 shrink-0 text-error" />
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="Paste a YouTube channel URL to start a new book…"
+            required
+            className="h-10 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+          <Button type="submit" size="sm" disabled={submitting}>
+            {submitting ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
+            {submitting ? 'Starting…' : 'Analyze'}
+          </Button>
+        </form>
+        {error && <p className="-mt-3 text-sm text-error">{error}</p>}
+
+        {/* Tabs */}
+        <div className="flex items-center gap-1 border-b border-border">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={cn(
+                'relative flex items-center gap-2 px-3 pb-3 pt-1 text-sm font-medium transition-colors',
+                tab === t.key ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {t.label}
+              <span className="rounded-full bg-surface-hover px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+                {counts[t.key]}
+              </span>
+              {tab === t.key && (
+                <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-vivid" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Grid */}
+        {loading ? (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-44 rounded-card" />
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
-          <div
-            style={{
-              gridColumn: '1 / -1',
-              ...ui.panel,
-              textAlign: 'center',
-              padding: '48px 24px',
-              color: colors.textDim,
-            }}
-          >
-            <div style={{ fontSize: 36, marginBottom: 8 }}>📚</div>
-            <div style={{ fontWeight: 600, color: colors.text, marginBottom: 4 }}>No projects here yet</div>
-            Paste a channel URL above to create your first ebook.
+          <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-border bg-grid py-16 text-center">
+            <div className="grid size-12 place-items-center rounded-2xl bg-surface-hover">
+              <Youtube className="size-6 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="font-semibold">
+                {tab === 'all' ? 'No projects yet' : `Nothing ${tab === 'active' ? 'in progress' : 'completed'}`}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Paste a channel URL above to create your first ebook.
+              </p>
+            </div>
           </div>
         ) : (
-          filtered.map((p) => (
-            <Link
-              key={p.id}
-              href={`/projects/${p.id}`}
-              className="panel-card"
-              style={{
-                display: 'block',
-                borderRadius: 16,
-                border: `1px solid ${colors.border}`,
-                background: colors.panel,
-                textDecoration: 'none',
-                color: 'inherit',
-                overflow: 'hidden',
-                boxShadow: '0 1px 2px var(--c-shadow-soft)',
-              }}
-            >
-              <div style={{ position: 'relative', height: 112, background: accentGradient, display: 'grid', placeItems: 'center' }}>
-                <span style={{ fontSize: 42, filter: 'drop-shadow(0 4px 10px rgba(0,0,0,0.3))' }}>📖</span>
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: 10,
-                    right: 10,
-                    ...ui.badge,
-                    background: 'rgba(0, 0, 0, 0.4)',
-                    color: '#fff',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                >
-                  {isActive(p.status) && <Spinner size={10} color="#fff" />}
-                  {p.status}
-                </span>
-              </div>
-              <div style={{ padding: 16 }}>
-                <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {prettyChannel(p.channelUrl)}
-                </strong>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: colors.textFaint, fontSize: 13, marginTop: 10 }}>
-                  <span>🕑</span>
-                  {timeAgo(p.createdAt)}
-                </div>
-              </div>
-            </Link>
-          ))
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+            {filtered.map((p) => (
+              <ProjectCard key={p.id} project={p} />
+            ))}
+          </div>
         )}
       </div>
-    </DashboardShell>
+    </AppShell>
   );
 }

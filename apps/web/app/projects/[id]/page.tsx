@@ -3,35 +3,36 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { DashboardShell } from '../../../components/DashboardShell.js';
-import { ui, colors, statusColor } from '../../ui.js';
-import { Spinner } from '../../../components/Spinner.js';
+import { motion } from 'framer-motion';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  Download,
+  FileText,
+  Loader2,
+  RotateCcw,
+  Sparkles,
+  X,
+} from 'lucide-react';
+import { AppShell } from '../../../components/app/AppShell.js';
+import { Card } from '../../../components/ui/card.js';
+import { Button } from '../../../components/ui/button.js';
+import { Badge } from '../../../components/ui/badge.js';
+import { Progress } from '../../../components/ui/progress.js';
+import { resolvePipeline, isTerminal } from '../../../components/dashboard/pipeline.js';
+import { cn } from '../../../lib/utils.js';
 
-// Display steps for the progress tracker. Each step maps to one or more backend
-// statuses. The per-video phases (data → transcripts → whisper fallback →
-// summarize → comments) all run concurrently under a single VIDEO_PIPELINE
-// barrier — the project status never rests on them individually — so they're
-// shown as one "processing videos" step with a live N/total counter.
-const DISPLAY_STAGES: { label: string; statuses: string[] }[] = [
-  { label: 'created', statuses: ['CREATED'] },
-  { label: 'ingesting channel', statuses: ['INGESTING_CHANNEL'] },
-  {
-    label: 'processing videos',
-    statuses: ['FETCHING_VIDEO_DATA', 'FETCHING_TRANSCRIPTS', 'TRANSCRIBING_FALLBACK', 'SUMMARIZING_VIDEOS', 'ANALYZING_COMMENTS'],
-  },
-  { label: 'building knowledge base', statuses: ['BUILDING_KNOWLEDGE_BASE'] },
-  { label: 'generating book strategy', statuses: ['GENERATING_BOOK_STRATEGY'] },
-  { label: 'generating outline', statuses: ['GENERATING_OUTLINE'] },
-  { label: 'generating chapter research', statuses: ['GENERATING_CHAPTER_RESEARCH'] },
-  { label: 'generating chapters', statuses: ['GENERATING_CHAPTERS'] },
-  { label: 'polishing book', statuses: ['POLISHING_BOOK'] },
-  { label: 'assembling', statuses: ['ASSEMBLING'] },
-  { label: 'exporting', statuses: ['EXPORTING'] },
-  { label: 'completed', statuses: ['COMPLETED'] },
-];
-
-// The display step that aggregates the per-video pipeline (carries the counter).
-const VIDEO_STEP = 'FETCHING_VIDEO_DATA';
+// Backend statuses that run under the per-video pipeline barrier — while the
+// project rests on any of these, we surface a live "N/total videos" counter on
+// the active premium stage.
+const PER_VIDEO = new Set([
+  'FETCHING_VIDEO_DATA',
+  'FETCHING_TRANSCRIPTS',
+  'TRANSCRIBING_FALLBACK',
+  'SUMMARIZING_VIDEOS',
+  'ANALYZING_COMMENTS',
+]);
 
 interface Artifact {
   format: string;
@@ -39,7 +40,14 @@ interface Artifact {
   url: string | null;
 }
 
-export default function ProjectStatusPage({ params }: { params: { id: string } }) {
+function statusVariant(status: string) {
+  if (status === 'COMPLETED') return 'success' as const;
+  if (status === 'FAILED') return 'error' as const;
+  if (status === 'PARTIAL') return 'warning' as const;
+  return 'primary' as const;
+}
+
+export default function ProjectPipelinePage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { id } = params;
   const [status, setStatus] = useState<string>('…');
@@ -47,8 +55,8 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<Record<string, number>>({});
-  // Total videos in the per-video pipeline. The VIDEO_PIPELINE barrier starts at
-  // the video count and counts down, so the largest value we've seen is the total.
+  // The VIDEO_PIPELINE barrier starts at the video count and counts down, so the
+  // largest remaining value we've seen is the total.
   const [videoTotal, setVideoTotal] = useState<number | null>(null);
 
   const applyPending = useCallback((p?: Record<string, number> | null) => {
@@ -117,107 +125,157 @@ export default function ProjectStatusPage({ params }: { params: { id: string } }
     }
   }
 
-  const currentIdx = DISPLAY_STAGES.findIndex((s) => s.statuses.includes(status));
-  const terminal = status === 'COMPLETED' || status === 'FAILED' || status === 'PARTIAL';
+  const { stages, percent } = resolvePipeline(status);
+  const terminal = isTerminal(status);
   const videoRemaining = pending.VIDEO_PIPELINE;
+  const showVideoCount =
+    PER_VIDEO.has(status) && videoTotal !== null && typeof videoRemaining === 'number';
+  const videoDone = showVideoCount ? Math.max(0, (videoTotal as number) - videoRemaining) : 0;
 
   return (
-    <DashboardShell>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Link href="/projects" style={ui.link}>
-          ← Projects
-        </Link>
-        <span style={{ ...ui.badge, marginLeft: 'auto', color: statusColor(status), display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          {!terminal && status !== '…' && <Spinner size={11} color={statusColor(status)} />}
-          {status}
-        </span>
-      </div>
-
-      <h1 style={{ marginTop: 16, fontSize: 26 }}>Generation pipeline</h1>
-
-      {errorText && (
-        <div style={{ marginTop: 12, padding: 14, borderRadius: 12, border: `1px solid ${colors.red}`, background: colors.redSoft, color: colors.red }}>
-          {errorText}
+    <AppShell>
+      <div className="mx-auto flex max-w-3xl flex-col gap-6">
+        {/* Header */}
+        <div className="flex items-center gap-3">
+          <Button asChild variant="ghost" size="sm" className="-ml-2">
+            <Link href="/projects">
+              <ArrowLeft className="size-4" />
+              Projects
+            </Link>
+          </Button>
+          <Badge variant={statusVariant(status)} className="ml-auto capitalize">
+            {!terminal && status !== '…' && <Loader2 className="size-3 animate-spin" />}
+            {status === '…' ? 'Loading' : status.toLowerCase().replace(/_/g, ' ')}
+          </Badge>
         </div>
-      )}
 
-      <div style={{ ...ui.panel, marginTop: 24 }}>
-        <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-          {DISPLAY_STAGES.map((stage, i) => {
-            const done = currentIdx > i || status === 'COMPLETED';
-            const active = currentIdx === i && status !== 'COMPLETED';
-            // Show "N/total videos" on the per-video step while it's active.
-            const showCount =
-              active && stage.statuses.includes(VIDEO_STEP) && videoTotal !== null && typeof videoRemaining === 'number';
-            const videoDone = showCount ? Math.max(0, (videoTotal as number) - videoRemaining) : 0;
-            return (
-              <li key={stage.label} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '9px 0', opacity: done || active ? 1 : 0.4 }}>
-                <span
-                  style={{
-                    width: 26,
-                    height: 26,
-                    flexShrink: 0,
-                    borderRadius: '50%',
-                    display: 'grid',
-                    placeItems: 'center',
-                    fontSize: 13,
-                    color: done ? '#fff' : active ? colors.pink : colors.textFaint,
-                    background: done ? colors.green : 'transparent',
-                    border: active ? `2px solid ${colors.pink}` : done ? 'none' : `1px solid ${colors.border}`,
-                  }}
+        <div>
+          <h1 className="text-h3 font-semibold tracking-tight">
+            {status === 'COMPLETED' ? 'Your book is ready' : 'Building your book'}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Ebookly is turning this channel's videos and audience into a finished ebook.
+          </p>
+        </div>
+
+        {errorText && (
+          <Card className="flex items-start gap-3 border-error/30 bg-error/5 p-4 text-sm text-error">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>{errorText}</span>
+          </Card>
+        )}
+
+        {/* Pipeline */}
+        <Card className="overflow-hidden">
+          <div className="flex items-center gap-3 border-b border-border px-6 py-4">
+            <span className="grid size-9 place-items-center rounded-[11px] bg-primary-soft">
+              <Sparkles className="size-4 text-primary" />
+            </span>
+            <p className="flex-1 text-sm font-semibold">Generation pipeline</p>
+            <span className="text-sm font-semibold tabular-nums text-primary">{percent}%</span>
+          </div>
+
+          <div className="px-6 py-5">
+            <Progress value={percent} className="mb-5" />
+            <ol className="flex flex-col gap-0.5">
+              {stages.map((s, i) => (
+                <motion.li
+                  key={s.label}
+                  initial={{ opacity: 0, x: -6 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.04, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  className={cn(
+                    'flex items-center gap-3 rounded-input px-2 py-2.5 text-sm',
+                    s.state === 'active' && 'bg-surface-hover',
+                  )}
                 >
-                  {done ? '✓' : active ? <Spinner size={14} color={colors.pink} /> : '○'}
-                </span>
-                <span style={{ fontWeight: active ? 700 : 400, color: active ? colors.text : undefined }}>
-                  {stage.label}
-                  {showCount && (
-                    <span style={{ marginLeft: 8, fontWeight: 400, color: colors.textFaint }}>
+                  <span
+                    className={cn(
+                      'grid size-5 shrink-0 place-items-center rounded-full',
+                      s.state === 'done' && 'bg-success text-white',
+                      s.state === 'active' && 'bg-primary-soft text-primary animate-pulse-ring',
+                      s.state === 'pending' && 'border border-border text-transparent',
+                    )}
+                  >
+                    {s.state === 'done' ? (
+                      <Check className="size-3" strokeWidth={3} />
+                    ) : s.state === 'active' ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : null}
+                  </span>
+                  <span
+                    className={cn(
+                      'flex-1',
+                      s.state === 'pending' ? 'text-muted-foreground' : 'text-foreground',
+                      s.state === 'active' && 'font-medium',
+                    )}
+                  >
+                    {s.label}
+                  </span>
+                  {showVideoCount && s.state === 'active' && (
+                    <span className="text-xs tabular-nums text-muted-foreground">
                       {videoDone}/{videoTotal} videos
                     </span>
                   )}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      </div>
+                </motion.li>
+              ))}
+            </ol>
+          </div>
+        </Card>
 
-      <div style={{ display: 'flex', gap: 12, marginTop: 24, flexWrap: 'wrap' }}>
-        {status === 'FAILED' && (
-          <button style={ui.button} onClick={retry} disabled={busy}>
-            Retry failed stages
-          </button>
-        )}
-        {!terminal && (
-          <button style={ui.buttonGhost} onClick={cancel} disabled={busy}>
-            Cancel
-          </button>
-        )}
-        {status === 'COMPLETED' && (
-          <Link href={`/projects/${id}/editor`} style={{ ...ui.button, textDecoration: 'none' }}>
-            Open editor
-          </Link>
-        )}
-      </div>
-
-      {artifacts.length > 0 && (
-        <div style={{ marginTop: 32 }}>
-          <h2 style={{ fontSize: 20 }}>Downloads</h2>
-          {artifacts.map((a) => (
-            <div key={a.format} style={ui.card}>
-              <strong>{a.format.toUpperCase()}</strong>
-              {a.pageCount ? <span style={{ opacity: 0.6 }}> · {a.pageCount} pages</span> : null}
-              {a.url ? (
-                <a href={a.url} style={{ ...ui.link, marginLeft: 12 }} target="_blank" rel="noreferrer">
-                  Download
-                </a>
-              ) : (
-                <span style={{ opacity: 0.5, marginLeft: 12 }}>unavailable</span>
-              )}
-            </div>
-          ))}
+        {/* Actions */}
+        <div className="flex flex-wrap gap-3">
+          {status === 'FAILED' && (
+            <Button onClick={retry} disabled={busy}>
+              <RotateCcw className="size-4" />
+              Retry failed stages
+            </Button>
+          )}
+          {!terminal && (
+            <Button variant="outline" onClick={cancel} disabled={busy}>
+              <X className="size-4" />
+              Cancel
+            </Button>
+          )}
+          {status === 'COMPLETED' && (
+            <Button asChild>
+              <Link href={`/projects/${id}/editor`}>Open editor</Link>
+            </Button>
+          )}
         </div>
-      )}
-    </DashboardShell>
+
+        {/* Downloads */}
+        {artifacts.length > 0 && (
+          <div>
+            <h2 className="mb-3 text-base font-semibold tracking-tight">Downloads</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {artifacts.map((a) => (
+                <Card key={a.format} className="flex items-center gap-3 p-4">
+                  <span className="grid size-10 place-items-center rounded-[11px] bg-surface-hover">
+                    <FileText className="size-5 text-primary" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold uppercase">{a.format}</p>
+                    {a.pageCount ? (
+                      <p className="text-xs text-muted-foreground">{a.pageCount} pages</p>
+                    ) : null}
+                  </div>
+                  {a.url ? (
+                    <Button asChild variant="secondary" size="sm">
+                      <a href={a.url} target="_blank" rel="noreferrer">
+                        <Download className="size-4" />
+                        Download
+                      </a>
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">unavailable</span>
+                  )}
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </AppShell>
   );
 }

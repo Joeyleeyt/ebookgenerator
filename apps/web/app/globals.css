@@ -1,8 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /*
- * Theme palettes as CSS custom properties. The JS `colors` tokens in ui.ts
- * resolve to these variables, so the active theme can be swapped at runtime by
- * toggling `<html data-theme>`. Dark is the base (`:root`); `[data-theme='light']`
- * overrides to light, and `[data-theme='system']` follows the OS color scheme.
+ * ============================================================================
+ *  DESIGN SYSTEM TOKENS
+ *  Dark is the base palette (:root). Light overrides on [data-theme='light'];
+ *  [data-theme='system'] follows the OS. Values are HSL channels (no hsl())
+ *  so Tailwind can apply alpha via `hsl(var(--token) / <alpha>)`.
+ *  Source palette (brief): bg #0A0B0F · surface #12141B · surface-hover #1A1D26
+ *  primary #6D5EF7 · secondary #00D4FF · success #00C853 · warning #FFB300
+ *  error #FF5252 · text #FFFFFF · text-secondary #A1A7B3 · border #252A36
+ * ============================================================================
+ */
+@layer base {
+  :root {
+    --canvas: 228 20% 5%;
+    --surface: 228 20% 9%;
+    --surface-raised: 226 19% 11%;
+    --surface-hover: 225 19% 13%;
+    --foreground: 0 0% 100%;
+    --muted: 226 19% 11%;
+    --muted-foreground: 220 11% 67%;
+    --border: 222 19% 18%;
+    --border-strong: 222 18% 26%;
+    --input: 222 19% 18%;
+    --ring: 246 91% 67%;
+    --primary: 246 91% 67%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 190 100% 50%;
+    --secondary-foreground: 228 20% 5%;
+    --success: 145 100% 39%;
+    --warning: 42 100% 50%;
+    --error: 0 100% 66%;
+    --popover: 226 22% 10%;
+    --popover-foreground: 0 0% 100%;
+    --shadow: 228 40% 2%;
+    --radius: 14px;
+  }
+
+  :root[data-theme='light'] {
+    --canvas: 228 28% 96%;
+    --surface: 0 0% 100%;
+    --surface-raised: 228 30% 98%;
+    --surface-hover: 228 24% 95%;
+    --foreground: 228 24% 11%;
+    --muted: 228 30% 97%;
+    --muted-foreground: 224 9% 42%;
+    --border: 226 20% 88%;
+    --border-strong: 226 18% 80%;
+    --input: 226 20% 88%;
+    --ring: 246 91% 60%;
+    --primary: 246 84% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 190 95% 42%;
+    --secondary-foreground: 0 0% 100%;
+    --success: 145 80% 33%;
+    --warning: 36 95% 45%;
+    --error: 0 75% 55%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 228 24% 11%;
+    --shadow: 228 30% 60%;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root[data-theme='system'] {
+      --canvas: 228 28% 96%;
+      --surface: 0 0% 100%;
+      --surface-raised: 228 30% 98%;
+      --surface-hover: 228 24% 95%;
+      --foreground: 228 24% 11%;
+      --muted: 228 30% 97%;
+      --muted-foreground: 224 9% 42%;
+      --border: 226 20% 88%;
+      --border-strong: 226 18% 80%;
+      --input: 226 20% 88%;
+      --ring: 246 91% 60%;
+      --primary: 246 84% 60%;
+      --primary-foreground: 0 0% 100%;
+      --secondary: 190 95% 42%;
+      --secondary-foreground: 0 0% 100%;
+      --success: 145 80% 33%;
+      --warning: 36 95% 45%;
+      --error: 0 75% 55%;
+      --popover: 0 0% 100%;
+      --popover-foreground: 228 24% 11%;
+      --shadow: 228 30% 60%;
+    }
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background: hsl(var(--canvas));
+    color: hsl(var(--foreground));
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.3);
+  }
+}
+
+@layer utilities {
+  /* Violet→cyan brand wash used on the logo mark, hero numerals, focus moments. */
+  .text-gradient {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .bg-brand {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(266 85% 62%));
+  }
+  .bg-brand-vivid {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+  }
+  /* Hairline grid texture for empty/hero surfaces — premium, not noisy. */
+  .bg-grid {
+    background-image: radial-gradient(hsl(var(--border) / 0.6) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .shimmer-mask {
+    -webkit-mask: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+  }
+}
+
+/*
+ * ============================================================================
+ *  LEGACY TOKENS — kept verbatim so the not-yet-migrated inline-style routes
+ *  (/projects, /projects/[id], /login, editor) keep rendering during the
+ *  Tailwind migration. Remove once every route is on the new system.
+ * ============================================================================
  */
 :root {
   --c-canvas: #0b0b12;
@@ -85,7 +217,6 @@
   }
 }
 
-/* Lift a card on hover (project tiles). Inline styles can't express :hover. */
 .panel-card {
   transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
 }
@@ -95,7 +226,6 @@
   border-color: var(--c-accent);
 }
 
-/* Subtle row highlight (activity feed). */
 .row-hover {
   transition: background 120ms ease;
 }
@@ -103,7 +233,6 @@
   background: var(--c-panel-raised);
 }
 
-/* List buttons (editor chapter nav) — accent border on hover. */
 .list-btn {
   transition: border-color 120ms ease, background 120ms ease;
 }
