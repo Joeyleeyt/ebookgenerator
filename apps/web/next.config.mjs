@@ -45,6 +45,13 @@ const nextConfig = {
       'pino',
       '@anthropic-ai/sdk',
       'googleapis',
+      // Supabase pulls in Node-only APIs (process.version, path resolution) that
+      // can't be bundled into the server build — bundling it makes page-data
+      // collection throw `path.dirname` on a webpack module id. Externalize so
+      // it's required at runtime. (Client components still bundle it normally;
+      // this setting only affects the server bundle.)
+      '@supabase/ssr',
+      '@supabase/supabase-js',
     ],
   },
   transpilePackages: ['@yeg/core'],
