@@ -67,6 +67,7 @@ export class BuildKnowledgeBaseUseCase {
       // The knowledge base is a large multi-field JSON synthesis; 2500 truncated
       // it mid-object, producing invalid JSON the parser rejected.
       maxTokens: 8000,
+      cacheControl: { systemPrefix: true },
       metadata: { projectId: cmd.projectId, stage: 'knowledge-base' },
     });
     if (completion.isFail()) return Result.fail(completion.error.type);

@@ -64,6 +64,7 @@ export class GenerateBookStrategyUseCase {
       // 2000 and truncate into invalid JSON. max_tokens is a ceiling, billed on
       // actual output, so the extra headroom is free insurance.
       maxTokens: 4000,
+      cacheControl: { systemPrefix: true },
       metadata: { projectId: cmd.projectId, stage: 'book-strategy' },
     });
     if (completion.isFail()) return Result.fail(completion.error.type);

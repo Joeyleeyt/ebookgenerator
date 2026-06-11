@@ -77,6 +77,7 @@ export class GenerateOutlineUseCase {
         // each) can overflow 4000 and truncate the JSON. Ceiling only, so the
         // headroom is free insurance.
         maxTokens: 8000,
+        cacheControl: { systemPrefix: true },
         metadata: { projectId: cmd.projectId, stage: 'outline-generate' },
       });
       if (completion.isFail()) return Result.fail(completion.error.type);

@@ -236,18 +236,19 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     payloadSchema: ProjectJob,
     handler: async (p) => {
       // Give the book its publishing structure (Preface, Introduction, Conclusion)
-      // before assembling. Best-effort: a generation failure must not block the
-      // book — assembly will simply omit the missing matter.
-      const matter = await useCases.generateFrontBackMatter.execute(p);
+      // and its cover illustration before assembling. The two are independent, so
+      // run them concurrently. Both are best-effort: a matter failure assembles
+      // without it; a cover failure falls back to the typographic cover.
+      const [matter, cover] = await Promise.all([
+        useCases.generateFrontBackMatter.execute(p),
+        useCases.generateCoverImage.execute(p),
+      ]);
       if (matter.isFail()) {
         container.logger.warn('front/back matter generation failed; assembling without it', {
           projectId: p.projectId,
           error: matter.error,
         });
       }
-      // Generate the cover illustration (matched to the whole channel). Best-effort:
-      // on failure the PDF falls back to the typographic cover.
-      const cover = await useCases.generateCoverImage.execute(p);
       if (cover.isFail()) {
         container.logger.warn('cover image generation failed; using typographic cover', {
           projectId: p.projectId,

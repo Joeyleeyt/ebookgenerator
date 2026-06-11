@@ -41,7 +41,7 @@ export type SummarizeOutcome =
 // "No JSON object found in completion".
 const SUMMARY_MAX_TOKENS = 6000;
 
-/** Map step: per-video summary via Claude Sonnet. */
+/** Map step: per-video summary via Claude Haiku (fast/cheap structured extraction). */
 export class SummarizeVideoUseCase {
   constructor(
     private readonly videos: VideoRepository,
@@ -69,10 +69,14 @@ export class SummarizeVideoUseCase {
       comments: video.comments.map((c) => c.text).slice(0, 50),
     });
     const completion = await this.ai.generate({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-haiku-4-5',
       system: prompt.system,
       messages: [{ role: 'user', content: prompt.user }],
       maxTokens: SUMMARY_MAX_TOKENS,
+      // The system block is identical for every video, so caching it turns each
+      // per-video call into a cache read across the fan-out (same project, well
+      // within the 5-min TTL).
+      cacheControl: { systemPrefix: true },
       metadata: { projectId: cmd.projectId, stage: 'video-summarize' },
     });
     // Transient provider errors (rate-limited/overloaded/unknown) stay fatal so the

@@ -80,6 +80,8 @@ export class GenerateChapterResearchUseCase {
       // Six supporting arrays (stories, lessons, examples, case studies,
       // frameworks, principles) overflow 2500 and truncate the JSON.
       maxTokens: 6000,
+      // Shared system block → cache read on every per-chapter research call.
+      cacheControl: { systemPrefix: true },
       metadata: { projectId: cmd.projectId, stage: 'chapter-research' },
     });
     if (completion.isFail()) return Result.fail(completion.error.type);
