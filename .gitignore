@@ -11,3 +11,4 @@ coverage/
 .vercel
 supabase/.branches
 supabase/.temp
+sample.md

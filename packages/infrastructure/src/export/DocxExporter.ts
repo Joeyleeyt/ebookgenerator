@@ -11,7 +11,6 @@ export class DocxExporter implements DocumentExporter {
         new Paragraph({ text: doc.title, heading: HeadingLevel.TITLE }),
         ...(doc.subtitle ? [new Paragraph({ children: [new TextRun({ text: doc.subtitle })] })] : []),
         new Paragraph({ children: [new TextRun({ text: doc.author, italics: true })] }),
-        new Paragraph({ children: [new TextRun({ text: doc.copyright, size: 16 })], pageBreakBefore: true }),
       ];
 
       // Front matter (introduction, foreword).

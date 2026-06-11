@@ -235,6 +235,25 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     ...QUEUE_CONFIG['ebook-assemble'],
     payloadSchema: ProjectJob,
     handler: async (p) => {
+      // Give the book its publishing structure (Preface, Introduction, Conclusion)
+      // before assembling. Best-effort: a generation failure must not block the
+      // book — assembly will simply omit the missing matter.
+      const matter = await useCases.generateFrontBackMatter.execute(p);
+      if (matter.isFail()) {
+        container.logger.warn('front/back matter generation failed; assembling without it', {
+          projectId: p.projectId,
+          error: matter.error,
+        });
+      }
+      // Generate the cover illustration (matched to the whole channel). Best-effort:
+      // on failure the PDF falls back to the typographic cover.
+      const cover = await useCases.generateCoverImage.execute(p);
+      if (cover.isFail()) {
+        container.logger.warn('cover image generation failed; using typographic cover', {
+          projectId: p.projectId,
+          error: cover.error,
+        });
+      }
       const assembled = await useCases.assembleEbook.execute(p);
       if (assembled.isFail()) throw new Error(assembled.error);
       // Advance to EXPORTING; the orchestrator enqueues the export entry job.

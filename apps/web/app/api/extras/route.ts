@@ -7,7 +7,18 @@ export const runtime = 'nodejs';
 
 const Body = z.object({
   projectId: z.string().uuid(),
-  kind: z.enum(['introduction', 'foreword', 'conclusion', 'faq', 'bonus_chapter', 'resources', 'checklist', 'glossary']),
+  kind: z.enum([
+    'dedication',
+    'introduction',
+    'foreword',
+    'conclusion',
+    'acknowledgments',
+    'faq',
+    'bonus_chapter',
+    'resources',
+    'checklist',
+    'glossary',
+  ]),
   title: z.string().min(1).max(200),
   prompt: z.string().max(2000).optional(),
 });

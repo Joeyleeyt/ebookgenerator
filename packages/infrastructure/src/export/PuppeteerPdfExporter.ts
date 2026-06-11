@@ -1,8 +1,17 @@
 import puppeteer from 'puppeteer';
+import { createRequire } from 'node:module';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { Result, ExportFormat, type DocumentExporter, type AssembledDocument, type ExportedDocument } from '@yeg/core';
 import { renderHtml } from './html.js';
 
-/** Renders the assembled document to a paginated PDF via headless Chromium. */
+// Paged.js polyfill — runs in the page to lay out CSS Paged Media features that
+// headless Chrome alone can't: running headers, named pages, and real TOC page
+// numbers (target-counter). The package's `exports` map blocks the dist subpath,
+// so derive it from the resolved package root.
+const requireFromHere = createRequire(import.meta.url);
+const PAGED_POLYFILL_PATH = resolvePath(dirname(requireFromHere.resolve('pagedjs')), '..', 'dist', 'paged.polyfill.js');
+
+/** Renders the assembled document to a paginated PDF via Paged.js + headless Chromium. */
 export class PuppeteerPdfExporter implements DocumentExporter {
   readonly format = ExportFormat.PDF;
 
@@ -11,29 +20,44 @@ export class PuppeteerPdfExporter implements DocumentExporter {
     try {
       const page = await browser.newPage();
       await page.setContent(renderHtml(doc), { waitUntil: 'networkidle0' });
-      const pdf = await page.pdf({
-        format: 'A4',
-        margin: { top: '2cm', bottom: '2cm', left: '2cm', right: '2cm' },
-        printBackground: true,
-        displayHeaderFooter: true,
-        footerTemplate: '<div style="font-size:9px;width:100%;text-align:center;"><span class="pageNumber"></span></div>',
-        headerTemplate: '<div></div>',
+      // Configure Paged.js to auto-run with a completion flag, THEN load the polyfill.
+      // (Auto-mode is the only path that honours `@page { size }`; calling preview()
+      // manually leaves the sheet at Paged.js's US-Letter default, which shrinks the
+      // A4 cover and leaves a gap at the page edges.)
+      await page.addScriptTag({
+        content: 'window.PagedConfig = { auto: true, after: function () { window.__pagedRendered = true; } };',
       });
-      const pageCount = await estimatePageCount(page);
-      return Result.ok({ bytes: new Uint8Array(pdf), pageCount, contentType: 'application/pdf' });
+      await page.addScriptTag({ path: PAGED_POLYFILL_PATH });
+      // Wait until Paged.js has built every page box.
+      await page.waitForFunction('window.__pagedRendered === true', { timeout: 60000 });
+      // Fill the Table of Contents page numbers from the actual pagination (paged.js'
+      // target-counter doesn't resolve forward refs reliably, so we read the real page
+      // each chapter landed on and write it into the entry).
+      await page.evaluate(() => {
+        const g = globalThis as unknown as { document: any; CSS: { escape: (s: string) => string } };
+        const pages: any[] = Array.prototype.slice.call(g.document.querySelectorAll('.pagedjs_page'));
+        const entries: any[] = Array.prototype.slice.call(g.document.querySelectorAll('.toc__entry'));
+        for (const entry of entries) {
+          const id = String(entry.getAttribute('href') || '').replace(/^#/, '');
+          if (!id) continue;
+          const idx = pages.findIndex((pg: any) => pg.querySelector('#' + g.CSS.escape(id)));
+          const slot = entry.querySelector('.toc__pageno');
+          if (slot && idx !== -1) slot.textContent = String(idx + 1);
+        }
+      });
+      const pdf = await page.pdf({
+        printBackground: true,
+        preferCSSPageSize: true, // use the @page size Paged.js laid out
+        margin: { top: '0', bottom: '0', left: '0', right: '0' },
+      });
+      const pageCount = await page.evaluate(
+        () => (globalThis as unknown as { document: { querySelectorAll: (s: string) => { length: number } } }).document.querySelectorAll('.pagedjs_page').length,
+      );
+      return Result.ok({ bytes: new Uint8Array(pdf), pageCount: Math.max(1, pageCount), contentType: 'application/pdf' });
     } catch (e) {
       return Result.fail(e instanceof Error ? e.message : String(e));
     } finally {
       await browser.close();
     }
   }
-}
-
-async function estimatePageCount(page: import('puppeteer').Page): Promise<number> {
-  // Runs in the browser context; avoid requiring the DOM lib in this package.
-  const height = await page.evaluate(
-    () => (globalThis as unknown as { document: { body: { scrollHeight: number } } }).document.body.scrollHeight,
-  );
-  const a4PxHeight = 1122; // ~96dpi A4
-  return Math.max(1, Math.ceil(height / a4PxHeight));
 }

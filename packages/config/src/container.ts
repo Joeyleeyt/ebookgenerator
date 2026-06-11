@@ -22,6 +22,8 @@ import {
   AddSectionUseCase,
   AddExtraContentUseCase,
   GenerateExtraContentUseCase,
+  GenerateFrontBackMatterUseCase,
+  GenerateCoverImageUseCase,
   type DocumentExporter,
 } from '@yeg/core';
 import {
@@ -31,6 +33,7 @@ import {
   PinoLogger,
   PinoTelemetry,
   ClaudeTextGenerator,
+  OpenAIImageGenerator,
   YouTubeDataApiProvider,
   YouTubeTranscriptProvider,
   WhisperSpeechToText,
@@ -72,6 +75,7 @@ export function buildContainer(env: Env = loadEnv()) {
   const storage = new SupabaseStorageAdapter(supabase);
   const queue = new BullJobQueue(redis);
   const ai = ClaudeTextGenerator.fromApiKey(env.ANTHROPIC_API_KEY, telemetry);
+  const images = OpenAIImageGenerator.fromApiKey(env.OPENAI_API_KEY ?? '');
   const youtube = new YouTubeDataApiProvider(env.YOUTUBE_API_KEY);
   const transcripts = new YouTubeTranscriptProvider();
   const audio = new YtDlpAudioDownloader(storage);
@@ -100,14 +104,16 @@ export function buildContainer(env: Env = loadEnv()) {
     summarizeVideo: new SummarizeVideoUseCase(videos, ai, hasher),
     analyzeComments: new AnalyzeCommentsUseCase(videos, knowledge, ai, hasher),
     buildKnowledgeBase: new BuildKnowledgeBaseUseCase(channels, knowledge, ai, hasher),
-    generateBookStrategy: new GenerateBookStrategyUseCase(projects, knowledge, ai, hasher),
+    generateBookStrategy: new GenerateBookStrategyUseCase(projects, knowledge, channels, ai, hasher),
     generateOutline: new GenerateOutlineUseCase(projects, books, knowledge, ai, queue, ids, clock, hasher),
     generateChapterResearch: new GenerateChapterResearchUseCase(books, videos, knowledge, ai),
     startChapterGeneration: new StartChapterGenerationUseCase(projects, books, queue, clock, hasher),
     generateChapter: new GenerateChapterUseCase(books, knowledge, ai, clock),
     startBookPolish: new StartBookPolishUseCase(projects, books, queue),
     polishChapter: new PolishChapterUseCase(books, knowledge, ai, clock),
-    assembleEbook: new AssembleEbookUseCase(books, knowledge, clock),
+    generateFrontBackMatter: new GenerateFrontBackMatterUseCase(books, ai, ids),
+    generateCoverImage: new GenerateCoverImageUseCase(books, knowledge, images, storage),
+    assembleEbook: new AssembleEbookUseCase(books, knowledge, clock, storage),
     exportEbook: new ExportEbookUseCase(exporters, storage, artifacts),
     regenerateChapter: new RegenerateChapterUseCase(books, queue, hasher),
     editChapter: new EditChapterUseCase(books),

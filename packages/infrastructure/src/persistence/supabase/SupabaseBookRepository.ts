@@ -38,7 +38,7 @@ export class SupabaseBookRepository implements BookRepository {
 
   async save(book: Book): Promise<void> {
     const { error: bookErr } = await this.db.from('books').upsert(
-      { id: book.id.value, project_id: book.projectId, title: book.title, status: 'GENERATING' },
+      { id: book.id.value, project_id: book.projectId, title: book.title, status: 'GENERATING', cover_image_path: book.coverImagePath },
       { onConflict: 'project_id' },
     );
     if (bookErr) throw new Error(bookErr.message);
@@ -147,6 +147,7 @@ export class SupabaseBookRepository implements BookRepository {
         title: row.title ?? null,
         targetPages: row.target_pages ?? 100,
         status: row.status ?? 'PENDING',
+        coverImagePath: row.cover_image_path ?? null,
         chapters: (row.chapters ?? [])
           .sort((a: { position: number }, b: { position: number }) => a.position - b.position)
           .map((c: any) =>

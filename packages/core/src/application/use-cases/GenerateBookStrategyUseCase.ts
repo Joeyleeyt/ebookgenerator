@@ -4,6 +4,7 @@ import { ProjectId } from '../../domain/project/ProjectId.js';
 import { BookStrategy } from '../../domain/book/BookStrategy.js';
 import type { ProjectRepository } from '../ports/repositories/ProjectRepository.js';
 import type { KnowledgeRepository } from '../ports/repositories/KnowledgeRepository.js';
+import type { ChannelRepository } from '../ports/repositories/ChannelRepository.js';
 import type { AiTextGenerator } from '../ports/services/AiTextGenerator.js';
 import type { Hasher } from '../ports/Hasher.js';
 import { BookStrategyPrompt } from '../prompts/BookStrategyPrompt.js';
@@ -22,6 +23,9 @@ const Schema = z.object({
   targetWordCount: z.number(),
   uniqueSellingProposition: z.string(),
   keyPrinciples: z.array(z.string()),
+  // Optional so a model omission can't fail the whole strategy stage; the cover
+  // falls back to a neutral byline when absent.
+  author: z.string().optional(),
 });
 
 /** Phase 8 (Claude Sonnet): commercial book positioning derived from the knowledge base. */
@@ -29,6 +33,7 @@ export class GenerateBookStrategyUseCase {
   constructor(
     private readonly projects: ProjectRepository,
     private readonly knowledge: KnowledgeRepository,
+    private readonly channels: ChannelRepository,
     private readonly ai: AiTextGenerator,
     private readonly hasher: Hasher,
   ) {}
@@ -44,10 +49,12 @@ export class GenerateBookStrategyUseCase {
     const existing = await this.knowledge.getBookStrategy(projectId);
     if (existing?.inputHash === inputHash) return Result.ok(); // idempotent
 
+    const channel = await this.channels.getChannel(projectId);
     const prompt = BookStrategyPrompt.build({
       knowledgeBase: kb.toText(),
       targetPages: project.options.targetPages,
       tone: project.options.tone,
+      channelTitle: channel?.title ?? 'this channel',
     });
     const completion = await this.ai.generate({
       model: 'claude-sonnet-4-6',

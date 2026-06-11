@@ -29,7 +29,10 @@ export interface QueueConfig {
 export const QUEUE_CONFIG: Record<QueueName, QueueConfig> = {
   'channel-ingest': { concurrency: 5, attempts: 5 },
   'video-data': { concurrency: 10, attempts: 5 },
-  'transcript-fetch': { concurrency: 8, attempts: 4 },
+  // Parallel again: the proxy pool rotates a distinct starting IP per video, so
+  // concurrent downloads spread across proxies instead of hammering one. Keep
+  // concurrency <= the number of working proxies so each lands on its own IP.
+  'transcript-fetch': { concurrency: 6, attempts: 4 },
   'whisper-transcribe': { concurrency: 2, attempts: 3 },
   'video-summarize': { concurrency: 6, attempts: 4, limiter: { max: 50, duration: 60_000 } },
   'analyze-comments': { concurrency: 8, attempts: 4, limiter: { max: 100, duration: 60_000 } },

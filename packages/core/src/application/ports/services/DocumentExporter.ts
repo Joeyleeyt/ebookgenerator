@@ -4,6 +4,10 @@ import type { ExportFormat } from '../../../domain/export/ExportArtifact.js';
 export interface AssembledDocument {
   title: string;
   subtitle: string;
+  /** Optional cover promise/benefit line (the book's core promise). */
+  promise?: string;
+  /** Optional URL of the AI-generated cover illustration, rendered full-bleed behind the cover text. */
+  coverImage?: string;
   author: string;
   copyright: string;
   /** Front-matter table of contents (chapter titles in order). */

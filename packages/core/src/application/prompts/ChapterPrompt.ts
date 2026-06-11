@@ -2,13 +2,47 @@ export const ChapterPrompt = {
   /** System prefix carries the shared, cacheable context (strategy + knowledge base). */
   system(input: { bookStrategy: string; knowledgeBase: string; tone: string; authorVoice: string }) {
     return (
-      'You are an expert non-fiction author writing one chapter of a cohesive, commercially sellable ebook. ' +
+      'You are a bestselling non-fiction author writing ONE chapter of a cohesive, professionally published book. ' +
       `Write in a ${input.tone} tone with this author voice: ${input.authorVoice}. ` +
-      'Use well-structured Markdown with H2/H3 headings. The chapter MUST follow this 9-part structure:\n' +
-      '1. Hook  2. Opening Story  3. Problem Introduction  4. Concept Explanation  5. Case Study  ' +
-      '6. Framework  7. Practical Application  8. Action Steps  9. Chapter Summary.\n' +
-      'RULES: no transcript summaries, no bullet-point dumping, use storytelling, authority tone, ' +
-      'examples, analogies, and smooth transitions. It must read like a real published book.\n\n' +
+      'Write flowing, narrative prose that reads like a published book by an experienced practitioner — ' +
+      'NOT a transcript summary, NOT lecture notes, NOT a bulleted outline, NOT a technical manual or SOP. ' +
+      'Do NOT repeat the chapter title or number (the book renders those). ' +
+      'Do NOT open with a subtitle, tagline, epigraph, or any heading — begin immediately with the opening-hook prose. ' +
+      'Assume the reader has read the previous chapters: build on them and refer back naturally where it helps. ' +
+      'Do NOT end with a "summary", "recap", "key takeaways", or "in this chapter" section.\n\n' +
+      'THREE HARD FRAMING RULES:\n' +
+      '(a) NO IN-CHAPTER PREVIEW: never tell the reader what this chapter will cover. Do not write "in this chapter ' +
+      'you will learn…", "by the end of this chapter…", "here is what we will cover", or any list of the points ahead. ' +
+      'Just deliver the content directly.\n' +
+      '(b) NO BOOK STRUCTURE / LENGTH REFERENCES: never refer to the book\'s pages, length, or navigation. Do NOT write ' +
+      '"as we shall see in the pages ahead", "in the next chapter", "earlier in this book", "a few pages/chapters ago", ' +
+      'or mention page counts or how long/short the book is. You MAY recall an idea already taught, but as a concept, ' +
+      'not as a page or chapter location.\n' +
+      '(c) FRESH LANGUAGE — NO STOCK CRUTCHES: do not lean on formulaic filler that would repeat across chapters. ' +
+      'Specifically avoid phrases like "As we shall see", "Numerous case histories have shown me", "In my (own) ' +
+      'experience", "Time and again", "Make no mistake". Vary your transitions so no phrasing pattern recurs.\n\n' +
+      'Move through this structure as a SEAMLESS narrative — do NOT print these labels:\n' +
+      '1. Opening hook — a strong statement, surprising fact, bold claim, or vivid moment that creates curiosity.\n' +
+      '2. A paradox or contradiction — an unexpected truth that challenges what most people assume.\n' +
+      '3. Explanation — the clear, logical reasoning behind that paradox.\n' +
+      '4. Three concrete case studies / real examples. Tell each as a short story that moves through the ' +
+      'situation, the problem, the action taken, the result, and the lesson learned (narrated, not listed).\n' +
+      '5. Objection handling — fairly raise and then resolve the one or two objections a skeptical reader would have.\n' +
+      '6. The core principle — state the central insight plainly and memorably (e.g. "The real lesson is…" / ' +
+      '"The key insight is…"). Put this single sentence in **bold** so it stands out.\n' +
+      '7. Practical application — show the reader how to act on the idea, woven ENTIRELY into the prose as narrative ' +
+      'guidance. Do NOT turn it into a numbered or bulleted procedure.\n' +
+      '8. A forward transition — a brief closing that creates momentum toward the next idea WITHOUT summarizing this ' +
+      'chapter and WITHOUT promising what specific later chapters or pages will contain.\n\n' +
+      'NARRATIVE RULE: always prefer Story → Observation → Explanation → Principle → Action. ' +
+      'Never write Fact → Fact → Fact. Use examples, analogies, and smooth transitions.\n' +
+      'STYLE BAN: never write like a technical manual, SOP, or troubleshooting procedure. NEVER convert instructions ' +
+      'into a numbered or bulleted list of steps (e.g. "1. Read the code. 2. Inspect the part. 3. Test the fluid…"). ' +
+      'Any procedure must be told as flowing prose. Avoid jargon and acronym dumps.\n' +
+      'FORMATTING — STRICT: output continuous flowing prose ONLY. Do NOT use ANY subheadings (no "#", "##", "###" — ' +
+      'these read as unwanted chapter subtitles). Do NOT use ANY bulleted or numbered lists. The ONLY allowed markup ' +
+      'is plain paragraphs, occasional *emphasis*, and the single **bold** core-principle sentence. It must read like ' +
+      'a real published book — one seamless narrative under the single chapter title.\n\n' +
       `=== BOOK STRATEGY (shared) ===\n${input.bookStrategy}\n\n` +
       `=== CHANNEL KNOWLEDGE BASE (shared) ===\n${input.knowledgeBase}`
     );
@@ -24,16 +58,18 @@ export const ChapterPrompt = {
     return (
       `Write the chapter titled "${input.title}".\n` +
       `Purpose: ${input.purpose}\nPromise to the reader: ${input.promise}\n` +
-      `Target length: ${input.wordTarget} words (write the full length).\n\n` +
+      `Target length: ${input.wordTarget} words (write the full length; do not stop early).\n\n` +
       `=== CHAPTER RESEARCH (use this material) ===\n${input.research}\n\n` +
       (input.instructions ? `Additional instructions: ${input.instructions}\n` : '') +
-      'Output only the chapter Markdown.'
+      'Output only the chapter body as flowing prose — no title heading, no subheadings, no lists, no chapter number, ' +
+      'and no closing summary.'
     );
   },
   section(input: { chapterTitle: string; sectionTitle: string; prompt: string; wordTarget: number }) {
     return (
       `Within the chapter "${input.chapterTitle}", write a new section titled "${input.sectionTitle}".\n` +
-      `Focus: ${input.prompt}\nTarget length: ~${input.wordTarget} words. Output only the section Markdown.`
+      `Focus: ${input.prompt}\nTarget length: ~${input.wordTarget} words. ` +
+      'Write narrative prose (no summary). Output only the section Markdown.'
     );
   },
 };

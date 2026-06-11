@@ -17,6 +17,8 @@ interface BookProps {
   outline?: Outline;
   chapters: Chapter[];
   bookSections: BookSection[];
+  /** Storage path of the AI-generated cover illustration (null until generated). */
+  coverImagePath: string | null;
 }
 
 export class Book extends AggregateRoot<BookProps, BookId> {
@@ -29,6 +31,7 @@ export class Book extends AggregateRoot<BookProps, BookId> {
         status: 'PENDING',
         chapters: [],
         bookSections: [],
+        coverImagePath: null,
       },
       input.id,
     );
@@ -53,8 +56,16 @@ export class Book extends AggregateRoot<BookProps, BookId> {
     return PageBudget.of(this.props.targetPages);
   }
 
+  get coverImagePath(): string | null {
+    return this.props.coverImagePath;
+  }
+
   setTitle(title: string): void {
     this.props.title = title;
+  }
+
+  setCoverImagePath(path: string): void {
+    this.props.coverImagePath = path;
   }
 
   /** Assign the outline and derive per-chapter word targets from the page budget. */

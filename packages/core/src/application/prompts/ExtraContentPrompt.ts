@@ -13,20 +13,52 @@ interface ExtraContentInput {
 
 /** Per-type instructions and word budgets — each extra-content kind has its own shape. */
 const SPEC: Record<ExtraContentKind, { instruction: string; words: number }> = {
+  [ExtraContentKind.DEDICATION]: {
+    instruction:
+      'Write a short, heartfelt book Dedication — one to three sentences, centered in spirit (e.g. "For everyone ' +
+      'who…"). Warm and sincere. Do NOT invent real named people. Output the dedication line(s) only, with no heading ' +
+      'and no commentary.',
+    words: 40,
+  },
   [ExtraContentKind.INTRODUCTION]: {
     instruction:
-      'Write an Introduction that frames the book, states the core promise, and tells the reader what they will gain and how to use the book.',
-    words: 900,
+      'Write the Introduction as flowing narrative prose that pulls the reader in and hands off naturally into the ' +
+      'first chapter. Frame the subject, restate the core promise in the reader\'s language, and make the reader feel ' +
+      'the transformation ahead. ' +
+      'STRICT RULES: Do NOT preview or summarize the chapters. Do NOT write a "What\'s Coming", "What You\'ll Learn", ' +
+      '"In this book" or chapter-by-chapter list ("Chapter One… Chapter Two…"). Do NOT write a "How to Get the Most ' +
+      'From This Book" or "how to use this book" section. No bullet lists — narrative prose only.',
+    words: 800,
   },
   [ExtraContentKind.FOREWORD]: {
     instruction:
-      'Write a Foreword in the warm, credible voice of a respected peer endorsing the author and the value of the book. Do not invent a real named person.',
-    words: 600,
+      "Write the book's Preface in the author's own first-person voice as flowing narrative prose. This single " +
+      'section serves as BOTH the foreword and the introduction, so it both establishes the author and frames the ' +
+      'book. Move through, WITHOUT printing any labels: (1) a real personal story, experience, or moment that ' +
+      'motivated the author to write this book, to create emotional connection and authenticity; (2) the author\'s ' +
+      'authority and credibility — relevant experience, years in the field, why they are qualified to teach this; ' +
+      '(3) the core problem — why most people struggle, the common mistakes and misconceptions; (4) the book\'s ' +
+      'promise — what the reader will learn, the problems it solves, the outcomes they can expect; (5) the practical ' +
+      'benefits and transformation the reader will gain; (6) a short, motivating transition that encourages the ' +
+      'reader to continue into Chapter 1. Do NOT preview the chapters one by one. Warm, authentic, and credible. Do ' +
+      'not invent a real named third-party endorser.',
+    words: 1000,
   },
   [ExtraContentKind.CONCLUSION]: {
     instruction:
-      'Write a Conclusion that synthesizes the transformation, reinforces the key principles, and ends with a motivating call to action.',
+      'Write the Conclusion as flowing narrative prose. Synthesize the transformation the reader has gone through, ' +
+      'weave the key principles together into a coherent whole (not a dry list), and end with a motivating call to ' +
+      'action and a vivid picture of what is now possible. Do not write a chapter-by-chapter "summary". ' +
+      'Do NOT reference the physical book\'s length, size, or page count (never write things like "a few hundred ' +
+      'pages ago", "this short book", or "by now you\'ve read N chapters").',
     words: 900,
+  },
+  [ExtraContentKind.ACKNOWLEDGMENTS]: {
+    instruction:
+      'Write a brief, gracious Acknowledgments as warm narrative prose — thank, in a general way, the community, ' +
+      'mentors, peers, and especially the readers who make the work meaningful. Do NOT invent real named people or ' +
+      'organizations. Keep it genuine and concise.',
+    words: 180,
   },
   [ExtraContentKind.FAQ]: {
     instruction:
@@ -35,7 +67,10 @@ const SPEC: Record<ExtraContentKind, { instruction: string; words: number }> = {
   },
   [ExtraContentKind.BONUS_CHAPTER]: {
     instruction:
-      'Write a full Bonus Chapter following the same 9-part structure as the main chapters (Hook → Opening Story → Problem → Concept → Case Study → Framework → Application → Action Steps → Summary).',
+      'Write a full Bonus Chapter as flowing narrative prose following the same framework as the main chapters: ' +
+      'opening hook → a paradox or contradiction → explanation → three real case studies (situation, problem, ' +
+      'action, result, lesson) → objection handling → the core principle (in bold) → practical action steps → a ' +
+      'forward transition. Do NOT include a chapter summary or recap.',
     words: 3500,
   },
   [ExtraContentKind.RESOURCES]: {
@@ -62,7 +97,10 @@ export const ExtraContentPrompt = {
       system:
         `You are an expert non-fiction author writing the "${input.kind}" element of a cohesive, sellable ebook. ` +
         `Maintain a ${input.tone} tone and this author voice: ${input.authorVoice}. ` +
-        `${spec.instruction} Target ~${spec.words} words. Output only well-structured Markdown (no surrounding commentary).\n\n` +
+        `${spec.instruction} Target ~${spec.words} words. Output only well-structured Markdown (no surrounding commentary). ` +
+        'Do NOT begin with or include any title/heading that names this section (no "# Foreword", "# Preface", ' +
+        '"# Introduction", "# Conclusion", etc.) — the book prints the section heading itself, so start directly with ' +
+        'the prose.\n\n' +
         `=== BOOK STRATEGY (shared) ===\n${input.bookStrategy}\n\n` +
         `=== CHANNEL KNOWLEDGE BASE (shared) ===\n${input.knowledgeBase}`,
       user:

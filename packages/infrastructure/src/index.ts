@@ -5,8 +5,9 @@ export * from './util/Sha256Hasher.js';
 export * from './observability/PinoLogger.js';
 export * from './observability/PinoTelemetry.js';
 
-// ── AI (Anthropic Claude — only provider) ───────────────────────────────────
+// ── AI (Anthropic Claude — text; OpenAI — cover images) ─────────────────────
 export * from './ai/anthropic/ClaudeTextGenerator.js';
+export * from './ai/openai/OpenAIImageGenerator.js';
 
 // ── YouTube ─────────────────────────────────────────────────────────────────
 export * from './youtube/YouTubeDataApiProvider.js';

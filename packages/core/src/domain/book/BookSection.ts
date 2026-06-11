@@ -2,11 +2,13 @@ import { Entity } from '../shared/Entity.js';
 import { BookSectionId } from './ids.js';
 import type { ContentStatus } from './Section.js';
 
-/** The 8 optional extra-content types from logic.md Phase 13. */
+/** The extra-content types — front/back matter generated around the chapters. */
 export const ExtraContentKind = {
+  DEDICATION: 'dedication',
   INTRODUCTION: 'introduction',
   FOREWORD: 'foreword',
   CONCLUSION: 'conclusion',
+  ACKNOWLEDGMENTS: 'acknowledgments',
   FAQ: 'faq',
   BONUS_CHAPTER: 'bonus_chapter',
   RESOURCES: 'resources',
@@ -17,9 +19,14 @@ export type ExtraContentKind = (typeof ExtraContentKind)[keyof typeof ExtraConte
 
 export type Placement = 'front' | 'back';
 
-/** Front matter precedes the chapters; everything else is back matter. */
+/** Front matter (dedication, foreword, introduction) precedes the chapters; everything else is back matter. */
+const FRONT_MATTER_KINDS: ExtraContentKind[] = [
+  ExtraContentKind.DEDICATION,
+  ExtraContentKind.FOREWORD,
+  ExtraContentKind.INTRODUCTION,
+];
 export function placementOf(kind: ExtraContentKind): Placement {
-  return kind === ExtraContentKind.INTRODUCTION || kind === ExtraContentKind.FOREWORD ? 'front' : 'back';
+  return FRONT_MATTER_KINDS.includes(kind) ? 'front' : 'back';
 }
 
 /** Bonus chapters are full-length and generated asynchronously via the queue. */

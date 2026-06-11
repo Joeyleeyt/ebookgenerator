@@ -7,6 +7,8 @@ interface BookStrategyProps {
   corePromise: string;
   transformation: string;
   authorVoice: string;
+  /** Cover byline (e.g. "Adrian from Car Care Garage"); optional for older records. */
+  author?: string | undefined;
   tone: string;
   chapterCount: number;
   targetWordCount: number;
@@ -37,6 +39,9 @@ export class BookStrategy extends ValueObject<BookStrategyProps> {
   }
   get authorVoice() {
     return this.props.authorVoice;
+  }
+  get author() {
+    return this.props.author;
   }
   get chapterCount() {
     return this.props.chapterCount;
