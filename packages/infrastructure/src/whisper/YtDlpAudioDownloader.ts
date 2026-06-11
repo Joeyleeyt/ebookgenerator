@@ -74,7 +74,16 @@ export class YtDlpAudioDownloader implements AudioDownloader {
 
   private runYtDlp(youtubeId: string, output: string, proxy: string | undefined): Promise<void> {
     return new Promise((resolve, reject) => {
-      const args = ['-x', '--audio-format', 'mp3', '--audio-quality', '5'];
+      // Encode to 16 kHz mono at 32 kbps. Whisper resamples to 16 kHz mono
+      // internally, so this loses no transcription accuracy while shrinking the
+      // file ~8x vs the previous quality-5 stereo MP3 — keeping audio under the
+      // Whisper API's 25 MB upload cap (which otherwise 413s on ~25 min+ videos).
+      const args = [
+        '-x',
+        '--audio-format', 'mp3',
+        '--audio-quality', '32K',
+        '--postprocessor-args', 'ffmpeg:-ac 1 -ar 16000',
+      ];
       // Route through a proxy to clear YouTube's IP-reputation block when configured.
       if (proxy) args.push('--proxy', proxy);
       // Authenticate to get past YouTube's bot gate when configured.
