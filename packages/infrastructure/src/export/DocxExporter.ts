@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, HeadingLevel, TextRun } from 'docx';
+import { Document, Packer, Paragraph, HeadingLevel, TextRun, ImageRun } from 'docx';
 import { Result, ExportFormat, type DocumentExporter, type AssembledDocument, type ExportedDocument } from '@yeg/core';
 
 /** Renders the assembled document to a .docx using the `docx` library. */
@@ -7,11 +7,24 @@ export class DocxExporter implements DocumentExporter {
 
   async export(doc: AssembledDocument): Promise<Result<ExportedDocument>> {
     try {
-      const children: Paragraph[] = [
-        new Paragraph({ text: doc.title, heading: HeadingLevel.TITLE }),
+      const children: Paragraph[] = [];
+
+      // Cover art (when generated) on its own page. doc.coverImage is a base64
+      // data URI; the docx library embeds from raw bytes, so decode it first.
+      const cover = doc.coverImage ? decodeImageDataUri(doc.coverImage) : null;
+      if (cover) {
+        children.push(
+          new Paragraph({
+            children: [new ImageRun({ data: cover.bytes, type: cover.type, transformation: { width: 600, height: 900 } })],
+          }),
+        );
+      }
+
+      children.push(
+        new Paragraph({ text: doc.title, heading: HeadingLevel.TITLE, ...(cover ? { pageBreakBefore: true } : {}) }),
         ...(doc.subtitle ? [new Paragraph({ children: [new TextRun({ text: doc.subtitle })] })] : []),
         new Paragraph({ children: [new TextRun({ text: doc.author, italics: true })] }),
-      ];
+      );
 
       // Front matter (introduction, foreword).
       for (const m of doc.frontMatter) {
@@ -53,6 +66,15 @@ export class DocxExporter implements DocumentExporter {
       return Result.fail(e instanceof Error ? e.message : String(e));
     }
   }
+}
+
+/** Decode a `data:image/...;base64,...` URI into the bytes + type the docx ImageRun needs. */
+function decodeImageDataUri(uri: string): { bytes: Buffer; type: 'png' | 'jpg' | 'gif' | 'bmp' } | null {
+  const m = /^data:image\/(png|jpe?g|gif|bmp);base64,(.+)$/i.exec(uri);
+  if (!m) return null;
+  const ext = m[1]!.toLowerCase();
+  const type = ext === 'jpeg' || ext === 'jpg' ? 'jpg' : (ext as 'png' | 'gif' | 'bmp');
+  return { bytes: Buffer.from(m[2]!, 'base64'), type };
 }
 
 function toParagraphs(markdown: string): Paragraph[] {

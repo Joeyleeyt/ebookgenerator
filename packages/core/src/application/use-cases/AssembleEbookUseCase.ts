@@ -34,12 +34,18 @@ export class AssembleEbookUseCase {
     const orderedChapters = [...book.chapters].sort((a, b) => a.position - b.position);
     const year = this.clock.now().getFullYear();
 
-    // Sign a short-lived URL for the generated cover art (rendered full-bleed behind the
-    // cover text). Best-effort: a missing/unsignable cover just falls back to the plain cover.
+    // Inline the generated cover art as a base64 data URI (rendered full-bleed
+    // behind the cover text). It must be inlined, not a network URL, because:
+    //   - PDF: Paged.js re-chunks the DOM after the initial network-idle load, and
+    //     a background image fetched over the network often fails to repaint into
+    //     the regenerated page boxes — so the cover silently drops out of the PDF.
+    //   - DOCX: the docx library embeds images from raw bytes, which it recovers
+    //     by decoding this data URI.
+    // Best-effort: a missing/unreadable cover just falls back to the plain cover.
     let coverImage: string | undefined;
     if (book.coverImagePath) {
-      const signed = await this.storage.signedUrl(EXPORT_BUCKET, book.coverImagePath, 3600);
-      if (signed.isOk()) coverImage = signed.value;
+      const inlined = await this.storage.getDataUri(EXPORT_BUCKET, book.coverImagePath);
+      if (inlined.isOk()) coverImage = inlined.value;
     }
 
     const doc: AssembledDocument = {
