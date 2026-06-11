@@ -8,8 +8,21 @@ import { renderHtml } from './html.js';
 // headless Chrome alone can't: running headers, named pages, and real TOC page
 // numbers (target-counter). The package's `exports` map blocks the dist subpath,
 // so derive it from the resolved package root.
-const requireFromHere = createRequire(import.meta.url);
-const PAGED_POLYFILL_PATH = resolvePath(dirname(requireFromHere.resolve('pagedjs')), '..', 'dist', 'paged.polyfill.js');
+//
+// Resolved LAZILY (on first export), not at module load. This file is reachable
+// from the Next.js web build via the shared DI container, and a top-level
+// `require.resolve('pagedjs')` gets rewritten by webpack into a numeric module id
+// — `path.dirname(<number>)` then throws and crashes `next build`'s page-data
+// collection. The web app never exports PDFs (that runs only in the worker, plain
+// Node with no bundler), so deferring the resolve keeps it out of that code path.
+let pagedPolyfillPath: string | undefined;
+function pagedPolyfillFile(): string {
+  if (pagedPolyfillPath === undefined) {
+    const requireFromHere = createRequire(import.meta.url);
+    pagedPolyfillPath = resolvePath(dirname(requireFromHere.resolve('pagedjs')), '..', 'dist', 'paged.polyfill.js');
+  }
+  return pagedPolyfillPath;
+}
 
 /** Renders the assembled document to a paginated PDF via Paged.js + headless Chromium. */
 export class PuppeteerPdfExporter implements DocumentExporter {
@@ -27,7 +40,7 @@ export class PuppeteerPdfExporter implements DocumentExporter {
       await page.addScriptTag({
         content: 'window.PagedConfig = { auto: true, after: function () { window.__pagedRendered = true; } };',
       });
-      await page.addScriptTag({ path: PAGED_POLYFILL_PATH });
+      await page.addScriptTag({ path: pagedPolyfillFile() });
       // Wait until Paged.js has built every page box.
       await page.waitForFunction('window.__pagedRendered === true', { timeout: 60000 });
       // Fill the Table of Contents page numbers from the actual pagination (paged.js'
