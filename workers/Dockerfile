@@ -1,6 +1,9 @@
 # Worker image — runs the BullMQ processors. Includes yt-dlp + ffmpeg for the
 # Whisper audio-download fallback, and Chromium for the PDF exporter.
-FROM node:20-bookworm-slim
+# Node 22 (not 20): @supabase/supabase-js >=2.108 requires a native WebSocket,
+# which only exists from Node 22 — on Node 20 the SupabaseClient constructor
+# throws "Node.js 20 detected without native WebSocket support" at boot.
+FROM node:22-bookworm-slim
 
 # Install Chromium from Debian's apt mirror rather than letting Puppeteer pull
 # its own bundled build from Google — apt downloads are chunked + retried, which

@@ -1,7 +1,10 @@
 # Web image — builds and serves the Next.js app (apps/web) for Railway.
 # Mirrors the workers image: Chromium is present because the shared DI container
 # can reach the Puppeteer PDF exporter from server routes.
-FROM node:20-bookworm-slim
+# Node 22 (not 20): @supabase/supabase-js >=2.108 requires a native WebSocket
+# (Node 22+); on Node 20 buildContainer() throws at runtime when it creates the
+# Supabase client.
+FROM node:22-bookworm-slim
 
 # Chromium from Debian's apt mirror (chunked + retried downloads are far more
 # reliable in a build VM than Puppeteer's single bundled-download stream).
