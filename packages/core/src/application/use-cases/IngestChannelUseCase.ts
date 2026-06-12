@@ -13,7 +13,7 @@ import type { IdGenerator } from '../ports/IdGenerator.js';
 import type { Clock } from '../ports/Clock.js';
 import type { ProjectJob } from '../dto/jobs.dto.js';
 
-/** Resolves the channel, lists 30–50 videos, persists stubs, fans out video-data jobs. */
+/** Resolves the channel, ranks its uploads, persists the top `maxVideos` stubs, fans out video-data jobs. */
 export class IngestChannelUseCase {
   constructor(
     private readonly projects: ProjectRepository,
@@ -38,8 +38,11 @@ export class IngestChannelUseCase {
     if (channelMeta.isFail()) return Result.fail(channelMeta.error);
     await this.channels.saveChannel(projectId, Channel.create(channelMeta.value));
 
-    // Fetch candidates with full stats, then apply the Phase 2 weighted score.
-    const list = await this.youtube.listVideos(channelMeta.value.youtubeId, 50);
+    // Fetch a broad candidate pool (up to 100) with full stats, then apply the
+    // Phase 2 weighted score and keep the top `maxVideos`. A wide pool means the
+    // selection is the channel's genuinely best videos, and there are always
+    // enough candidates to satisfy maxVideos.
+    const list = await this.youtube.listVideos(channelMeta.value.youtubeId, 100);
     if (list.isFail()) return Result.fail(list.error);
     const selected = selectTopVideos(
       list.value.map((m) => ({ ...m })),

@@ -43,18 +43,37 @@ export class YouTubeDataApiProvider implements YouTubeMetadataProvider {
 
   async listVideos(channelId: string, candidateLimit: number): Promise<Result<VideoMetadata[]>> {
     try {
-      const search = await this.yt.search.list({
-        part: ['id'],
-        channelId,
-        order: 'viewCount',
-        type: ['video'],
-        maxResults: Math.min(candidateLimit, 50),
-      });
-      const ids = (search.data.items ?? []).map((i) => i.id?.videoId).filter((v): v is string => !!v);
+      // search.list is NOT exhaustive — it's relevance-capped and routinely returns
+      // far fewer than a channel's real video count (so a 30-video request could only
+      // ingest ~15). Enumerate the channel's UPLOADS playlist instead: the complete,
+      // paginated video list. selectTopVideos then ranks these by engagement.
+      const ch = await this.yt.channels.list({ part: ['contentDetails'], id: [channelId] });
+      const uploads = ch.data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+      if (!uploads) return Result.ok([]);
+
+      const ids: string[] = [];
+      let pageToken: string | undefined;
+      do {
+        const page = await this.yt.playlistItems.list({
+          part: ['contentDetails'],
+          playlistId: uploads,
+          maxResults: 50,
+          ...(pageToken ? { pageToken } : {}),
+        });
+        for (const item of page.data.items ?? []) {
+          const vid = item.contentDetails?.videoId;
+          if (vid) ids.push(vid);
+        }
+        pageToken = page.data.nextPageToken ?? undefined;
+      } while (pageToken && ids.length < candidateLimit);
       if (ids.length === 0) return Result.ok([]);
 
-      const details = await this.yt.videos.list({ part: ['snippet', 'statistics', 'contentDetails'], id: ids });
-      const videos = (details.data.items ?? []).map(mapVideo);
+      // Hydrate snippet/stats in batches of 50 (the videos.list id cap).
+      const videos: VideoMetadata[] = [];
+      for (let i = 0; i < ids.length; i += 50) {
+        const details = await this.yt.videos.list({ part: ['snippet', 'statistics', 'contentDetails'], id: ids.slice(i, i + 50) });
+        videos.push(...(details.data.items ?? []).map(mapVideo));
+      }
       return Result.ok(videos);
     } catch (e) {
       return Result.fail(asMessage(e));
