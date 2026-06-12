@@ -79,9 +79,9 @@ export function buildContainer(env: Env = loadEnv()) {
   const ai = ClaudeTextGenerator.fromApiKey(env.ANTHROPIC_API_KEY, telemetry);
   // OpenAI gpt-image-1 powers the COVER art.
   const images = OpenAIImageGenerator.fromApiKey(env.OPENAI_API_KEY ?? '');
-  // 69labs (nano-banana-2) powers the in-chapter ILLUSTRATIONS. Both fall back
-  // gracefully when their key is unset.
-  const illustrationImages = Labs69ImageGenerator.fromApiKey(env.LABS69_API_KEY ?? '');
+  // 69labs powers the in-chapter ILLUSTRATIONS (default model img-flux for speed).
+  // Both fall back gracefully when their key is unset.
+  const illustrationImages = Labs69ImageGenerator.fromApiKey(env.LABS69_API_KEY ?? '', env.LABS69_IMAGE_MODEL);
   const youtube = new YouTubeDataApiProvider(env.YOUTUBE_API_KEY);
   const transcripts = new YouTubeTranscriptProvider();
   const audio = new YtDlpAudioDownloader(storage);

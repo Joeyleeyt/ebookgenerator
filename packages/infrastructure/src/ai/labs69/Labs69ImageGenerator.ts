@@ -17,8 +17,10 @@ export class Labs69ImageGenerator implements ImageGenerator {
 
   constructor(
     private readonly apiKey: string,
-    private readonly model = 'nano-banana-2',
-    private readonly pollIntervalMs = 2500,
+    private readonly model = 'img-flux',
+    // Poll fairly tightly: img-flux finishes in ~10s, so a long interval would add
+    // noticeable dead time after the image is already ready.
+    private readonly pollIntervalMs = 1200,
     private readonly timeoutMs = 180_000,
   ) {}
 

@@ -23,9 +23,13 @@ const EnvSchema = z.object({
   WHISPER_PROVIDER: z.enum(['openai', 'self-hosted']).default('openai'),
   OPENAI_API_KEY: z.string().optional(),
 
-  // 69labs (default model "nano-banana-2") — generates ONLY the in-chapter
-  // illustrations. If unset, books carry no illustrations.
+  // 69labs — generates ONLY the in-chapter illustrations. If unset, books carry
+  // no illustrations.
   LABS69_API_KEY: z.string().optional(),
+  // Which 69labs model to use for illustrations. Defaults to "img-flux" (Flux
+  // Schnell) — ~10s/image vs ~38s for "nano-banana-2", same 1-credit cost. Set to
+  // "nano-banana-2" for max quality at the cost of speed.
+  LABS69_IMAGE_MODEL: z.string().default('img-flux'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

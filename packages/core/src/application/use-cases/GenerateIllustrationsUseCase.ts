@@ -2,7 +2,6 @@ import { Result } from '../../domain/shared/Result.js';
 import { ProjectId } from '../../domain/project/ProjectId.js';
 import { Illustration } from '../../domain/book/Illustration.js';
 import { IllustrationId } from '../../domain/book/ids.js';
-import { PageBudget } from '../../domain/book/PageBudget.js';
 import type { BookRepository } from '../ports/repositories/BookRepository.js';
 import type { ProjectRepository } from '../ports/repositories/ProjectRepository.js';
 import type { ImageGenerator } from '../ports/services/ImageGenerator.js';
@@ -43,33 +42,51 @@ export class GenerateIllustrationsUseCase {
 
     const ctx = await this.books.loadSharedContext(projectId);
     const everyPages = Math.max(1, project.options.illustrationEveryPages);
-    const wordsPerImage = everyPages * PageBudget.WORDS_PER_PAGE;
 
-    // Only chapters with real prose can host an illustration. Allocate a count per
-    // chapter proportional to length, carrying the remainder so the global cadence
-    // (≈ one per `wordsPerImage`) holds across chapter boundaries.
+    // "One illustration per N pages" is anchored to the book's TARGET page count
+    // (what the client chose), NOT the actual generated word count — otherwise a
+    // book that the model wrote short would silently get far fewer images than the
+    // client asked for. 100 target pages ÷ 5 ⇒ 20 illustrations.
+    const targetCount = Math.max(1, Math.round(project.options.targetPages / everyPages));
+
     const chapters = [...book.chapters]
       .filter((c) => c.status === 'DONE' && (c.content ?? '').trim().length > 0)
       .sort((a, b) => a.position - b.position);
+    if (chapters.length === 0) return Result.ok({ generated: 0, attempted: 0 });
+
+    // Distribute the target count across chapters in proportion to their length
+    // (largest-remainder), so longer chapters host more images and the total lands
+    // exactly on targetCount regardless of how the words fell across chapters.
+    const chapterWords = chapters.map((c) => (c.content ?? '').trim().split(/\s+/));
+    const wordCounts = chapterWords.map((w) => w.length);
+    const totalWords = wordCounts.reduce((a, b) => a + b, 0) || 1;
+    const exact = wordCounts.map((w) => (w / totalWords) * targetCount);
+    const counts = exact.map(Math.floor);
+    let remainder = targetCount - counts.reduce((a, b) => a + b, 0);
+    [...exact.keys()]
+      .sort((a, b) => exact[b]! - counts[b]! - (exact[a]! - counts[a]!))
+      .forEach((idx) => {
+        if (remainder > 0) {
+          counts[idx]!++;
+          remainder--;
+        }
+      });
 
     const plan: Array<{ chapterId: string; chapterTitle: string; order: number; passage: string }> = [];
-    let carried = 0;
-    for (const ch of chapters) {
-      const words = (ch.content ?? '').trim().split(/\s+/);
-      const available = carried + words.length;
-      const count = Math.floor(available / wordsPerImage);
-      carried = available - count * wordsPerImage;
-      for (let i = 0; i < count; i++) {
+    chapters.forEach((ch, ci) => {
+      const k = counts[ci]!;
+      const words = chapterWords[ci]!;
+      for (let i = 0; i < k; i++) {
         plan.push({
           chapterId: ch.id.value,
           chapterTitle: ch.title,
           order: i,
           // Passage = the slice of the chapter this slot sits over, so the prompt
           // (and therefore the art) matches the text it will be placed beside.
-          passage: sliceWords(words, i, count, 160),
+          passage: sliceWords(words, i, k, 160),
         });
       }
-    }
+    });
 
     if (plan.length === 0) return Result.ok({ generated: 0, attempted: 0 });
 

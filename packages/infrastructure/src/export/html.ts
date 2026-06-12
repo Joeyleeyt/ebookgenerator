@@ -31,22 +31,11 @@ export function renderHtml(doc: AssembledDocument): string {
 
   const backMatter = doc.backMatter.map(matter).join('\n');
 
-  // Page 1 — cover art (only when generated): the book's main IDEA/TOPIC on the TOP half,
-  // everything else (promise + author byline) on the BOTTOM half. The art is textless, so
-  // this text is always crisp and on-brand.
-  const idea = doc.subtitle || doc.promise || doc.title;
-  const bottomLine = doc.promise && doc.promise !== idea ? doc.promise : '';
+  // Page 1 — the AI-generated cover. The full premium design (incl. the title
+  // typography) is rendered INTO the image, so we show it full-bleed with no
+  // overlay — the artwork IS the cover.
   const coverArt = doc.coverImage
-    ? `<section class="cover--art" style="background-image:url('${esc(doc.coverImage)}')">
-        <div class="cover__scrim"></div>
-        <div class="cover__inner">
-          <div class="cover__top"><h1 class="cover__idea">${esc(idea)}</h1></div>
-          <div class="cover__bottom">
-            ${bottomLine ? `<p class="cover__promise">${esc(bottomLine)}</p>` : ''}
-            <p class="cover__byline">${esc(doc.author)}</p>
-          </div>
-        </div>
-      </section>`
+    ? `<section class="cover--art cover--full" style="background-image:url('${esc(doc.coverImage)}')"></section>`
     : '';
 
   // Title page — the classic typographic page carrying the actual book title.
@@ -59,10 +48,11 @@ export function renderHtml(doc: AssembledDocument): string {
       <p class="title-page__author">${esc(doc.author)}</p>
     </section>`;
 
-  // Closing image page (only when there is generated art): the same illustration with a
-  // simple overview of the book over it.
+  // Closing page (only when a cover was generated): a clean navy "About This Book"
+  // page. It does NOT reuse the cover artwork — that now carries the baked-in title,
+  // so reusing it would read as a second front cover.
   const backCover = doc.coverImage
-    ? `<section class="cover--art cover--back" style="background-image:url('${esc(doc.coverImage)}')">
+    ? `<section class="cover--art cover--back">
         <div class="cover__scrim"></div>
         <div class="cover__inner">
           <p class="cover__eyebrow">About This Book</p>
