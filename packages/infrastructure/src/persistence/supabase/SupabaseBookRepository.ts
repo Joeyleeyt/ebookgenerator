@@ -37,8 +37,20 @@ export class SupabaseBookRepository implements BookRepository {
   }
 
   async save(book: Book): Promise<void> {
+    // Omit cover_image_path when this instance doesn't have one. The cover is
+    // generated concurrently with front/back matter (both load the book, both
+    // full-save). A copy loaded before the cover existed carries a null path, and
+    // including it here would overwrite the cover the other job just wrote. On a
+    // conflict-update an omitted column keeps its existing DB value, so only the
+    // job that actually has the path ever sets it — no lost update.
     const { error: bookErr } = await this.db.from('books').upsert(
-      { id: book.id.value, project_id: book.projectId, title: book.title, status: 'GENERATING', cover_image_path: book.coverImagePath },
+      {
+        id: book.id.value,
+        project_id: book.projectId,
+        title: book.title,
+        status: 'GENERATING',
+        ...(book.coverImagePath ? { cover_image_path: book.coverImagePath } : {}),
+      },
       { onConflict: 'project_id' },
     );
     if (bookErr) throw new Error(bookErr.message);
