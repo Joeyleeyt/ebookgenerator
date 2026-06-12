@@ -33,13 +33,18 @@ export const QUEUE_CONFIG: Record<QueueName, QueueConfig> = {
   // concurrent downloads spread across proxies instead of hammering one. Keep
   // concurrency <= the number of working proxies so each lands on its own IP.
   'transcript-fetch': { concurrency: 6, attempts: 4 },
-  'whisper-transcribe': { concurrency: 2, attempts: 3 },
+  // Audio download + Whisper transcription, the slowest per-video stage. Bounded
+  // by the Whisper API and worker CPU/network (not the Anthropic tier), so raised
+  // modestly rather than to the chapter-queue levels.
+  'whisper-transcribe': { concurrency: 4, attempts: 3 },
   'video-summarize': { concurrency: 6, attempts: 4, limiter: { max: 50, duration: 60_000 } },
   'analyze-comments': { concurrency: 8, attempts: 4, limiter: { max: 100, duration: 60_000 } },
   'knowledge-base': { concurrency: 4, attempts: 4 },
   'book-strategy': { concurrency: 4, attempts: 4 },
   'outline-generate': { concurrency: 4, attempts: 4 },
-  'chapter-research': { concurrency: 8, attempts: 4, limiter: { max: 60, duration: 60_000 } },
+  // Per-chapter research (Sonnet) — raised alongside the chapter queues so a
+  // whole book's research fans out at once on Tier 3+.
+  'chapter-research': { concurrency: 16, attempts: 4, limiter: { max: 100, duration: 60_000 } },
   // Drafting runs on Sonnet (fast, high tier limits). Tier 3+: let all chapters
   // of a typical book draft at once so the stage collapses to ~one chapter's latency.
   'chapter-generate': { concurrency: 16, attempts: 3, limiter: { max: 100, duration: 60_000 } },

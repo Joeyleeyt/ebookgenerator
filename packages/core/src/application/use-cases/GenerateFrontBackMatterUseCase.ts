@@ -41,7 +41,11 @@ export class GenerateFrontBackMatterUseCase {
     const ctx = await this.books.loadSharedContext(projectId);
     const tableOfContents = [...book.chapters].sort((a, b) => a.position - b.position).map((c) => c.title);
 
-    let generated = 0;
+    // Decide what needs generating and assign positions SYNCHRONOUSLY first, so
+    // the per-placement position counter (book.nextSectionPosition) is computed
+    // deterministically before any concurrency. The actual generations are then
+    // independent, so run them in parallel rather than one Opus call at a time.
+    const pending: { def: (typeof DEFAULT_SECTIONS)[number]; section: BookSection }[] = [];
     for (const def of DEFAULT_SECTIONS) {
       const existing = book.bookSections.find((s) => s.kind === def.kind);
       if (existing?.status === 'DONE' && existing.content) continue; // idempotent
@@ -57,30 +61,41 @@ export class GenerateFrontBackMatterUseCase {
           prompt: null,
         });
       if (!existing) book.addBookSection(section);
-
-      const prompt = ExtraContentPrompt.build({
-        kind: def.kind,
-        bookTitle: book.title ?? 'Untitled',
-        bookStrategy: ctx.bookStrategy,
-        knowledgeBase: ctx.knowledgeBase,
-        tone: ctx.tone,
-        authorVoice: ctx.authorVoice,
-        tableOfContents,
-      });
-      const completion = await this.ai.generate({
-        model: 'claude-opus-4-8',
-        system: prompt.system,
-        messages: [{ role: 'user', content: prompt.user }],
-        maxTokens: prompt.maxTokens,
-        cacheControl: { systemPrefix: true },
-        metadata: { projectId: cmd.projectId, stage: 'front-back-matter' },
-      });
-      if (completion.isFail()) return Result.fail(completion.error.type);
-
-      section.fill(completion.value.text);
-      generated += 1;
+      pending.push({ def, section });
     }
 
+    // Publishing matter (Preface/Conclusion/Acknowledgments) is boilerplate, not
+    // core content, so Sonnet is plenty — and far faster than Opus.
+    const results = await Promise.all(
+      pending.map(({ def, section }) => {
+        const prompt = ExtraContentPrompt.build({
+          kind: def.kind,
+          bookTitle: book.title ?? 'Untitled',
+          bookStrategy: ctx.bookStrategy,
+          knowledgeBase: ctx.knowledgeBase,
+          tone: ctx.tone,
+          authorVoice: ctx.authorVoice,
+          tableOfContents,
+        });
+        return this.ai
+          .generate({
+            model: 'claude-sonnet-4-6',
+            system: prompt.system,
+            messages: [{ role: 'user', content: prompt.user }],
+            maxTokens: prompt.maxTokens,
+            cacheControl: { systemPrefix: true },
+            metadata: { projectId: cmd.projectId, stage: 'front-back-matter' },
+          })
+          .then((completion) => ({ section, completion }));
+      }),
+    );
+
+    for (const { section, completion } of results) {
+      if (completion.isFail()) return Result.fail(completion.error.type);
+      section.fill(completion.value.text);
+    }
+
+    const generated = pending.length;
     if (generated > 0) await this.books.save(book);
     return Result.ok({ generated });
   }
