@@ -3,6 +3,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Result, type AudioDownloader, type ObjectStorage } from '@yeg/core';
+import { youtubeProxyList } from '../net/ProxyRotator.js';
 
 const AUDIO_BUCKET = 'audio';
 
@@ -32,7 +33,7 @@ export class YtDlpAudioDownloader implements AudioDownloader {
     private readonly binary: string = process.env.YT_DLP_PATH || 'yt-dlp',
     private readonly cookiesFromBrowser: string | undefined = process.env.YT_DLP_COOKIES_FROM_BROWSER || undefined,
     private readonly cookiesFile: string | undefined = process.env.YT_DLP_COOKIES_FILE || undefined,
-    private readonly proxies: string[] = parseProxies(),
+    private readonly proxies: string[] = youtubeProxyList(),
     // ffmpeg/ffprobe do the audio extraction. Defaults to PATH lookup (Docker
     // installs them); set YT_DLP_FFMPEG_LOCATION to the bin folder (or binary)
     // when they aren't on the worker's PATH.
@@ -101,12 +102,4 @@ export class YtDlpAudioDownloader implements AudioDownloader {
       proc.on('error', reject);
     });
   }
-}
-
-/** Proxy pool from YT_DLP_PROXIES (comma/newline-separated), else the single YT_DLP_PROXY. */
-function parseProxies(): string[] {
-  const multi = process.env.YT_DLP_PROXIES;
-  if (multi) return multi.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
-  const single = process.env.YT_DLP_PROXY?.trim();
-  return single ? [single] : [];
 }
