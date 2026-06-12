@@ -7,6 +7,7 @@ import { Outline } from './Outline.js';
 import { PageBudget } from './PageBudget.js';
 import { BookSection } from './BookSection.js';
 import { BookSectionId } from './ids.js';
+import { Illustration } from './Illustration.js';
 import { ChapterGenerated } from './events/ChapterGenerated.js';
 
 interface BookProps {
@@ -17,6 +18,8 @@ interface BookProps {
   outline?: Outline;
   chapters: Chapter[];
   bookSections: BookSection[];
+  /** In-chapter illustrations (empty until generated at the assembling stage). */
+  illustrations: Illustration[];
   /** Storage path of the AI-generated cover illustration (null until generated). */
   coverImagePath: string | null;
 }
@@ -31,6 +34,7 @@ export class Book extends AggregateRoot<BookProps, BookId> {
         status: 'PENDING',
         chapters: [],
         bookSections: [],
+        illustrations: [],
         coverImagePath: null,
       },
       input.id,
@@ -66,6 +70,24 @@ export class Book extends AggregateRoot<BookProps, BookId> {
 
   setCoverImagePath(path: string): void {
     this.props.coverImagePath = path;
+  }
+
+  // ── In-chapter illustrations ───────────────────────────────────────────────
+  get illustrations(): readonly Illustration[] {
+    return this.props.illustrations;
+  }
+  /** Illustrations for one chapter, ordered by their slot. */
+  illustrationsForChapter(chapterId: string): Illustration[] {
+    return this.props.illustrations
+      .filter((i) => i.chapterId === chapterId)
+      .sort((a, b) => a.orderInChapter - b.orderInChapter);
+  }
+  addIllustration(illustration: Illustration): void {
+    // Replace any existing illustration in the same slot so re-runs don't duplicate.
+    this.props.illustrations = this.props.illustrations.filter(
+      (i) => !(i.chapterId === illustration.chapterId && i.orderInChapter === illustration.orderInChapter),
+    );
+    this.props.illustrations.push(illustration);
   }
 
   /** Assign the outline and derive per-chapter word targets from the page budget. */

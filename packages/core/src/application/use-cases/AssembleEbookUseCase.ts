@@ -48,6 +48,20 @@ export class AssembleEbookUseCase {
       if (inlined.isOk()) coverImage = inlined.value;
     }
 
+    // Inline each chapter's illustrations as base64 data URIs (same network-fetch
+    // reasons as the cover). Best-effort: an unreadable illustration is dropped.
+    const illustrationsByChapter = new Map<string, Array<{ dataUri: string; alt: string }>>();
+    for (const ch of orderedChapters) {
+      const ills = book.illustrationsForChapter(ch.id.value);
+      if (ills.length === 0) continue;
+      const inlined: Array<{ dataUri: string; alt: string }> = [];
+      for (const ill of ills) {
+        const uri = await this.storage.getDataUri(EXPORT_BUCKET, ill.storagePath);
+        if (uri.isOk()) inlined.push({ dataUri: uri.value, alt: `${cleanChapterTitle(ch.title)} illustration` });
+      }
+      if (inlined.length > 0) illustrationsByChapter.set(ch.id.value, inlined);
+    }
+
     const doc: AssembledDocument = {
       title: strategy?.title ?? 'Generated Ebook',
       subtitle: strategy?.subtitle ?? '',
@@ -62,15 +76,19 @@ export class AssembleEbookUseCase {
         .frontMatter()
         .filter((s) => s.status === 'DONE' && s.content)
         .map((s) => ({ title: s.title, content: stripLeadingHeadings(s.content ?? '') })),
-      chapters: orderedChapters.map((c) => ({
-        title: cleanChapterTitle(c.title),
-        // Chapters are pure prose: the renderer prints the chapter number + title, and the
-        // book must carry no in-chapter subtitles, so strip every heading from the body.
-        content: stripAllHeadings(c.content ?? ''),
-        sections: [...c.sections]
-          .sort((a, b) => a.position - b.position)
-          .map((s) => ({ title: s.title, content: s.content ?? '' })),
-      })),
+      chapters: orderedChapters.map((c) => {
+        const ills = illustrationsByChapter.get(c.id.value);
+        return {
+          title: cleanChapterTitle(c.title),
+          // Chapters are pure prose: the renderer prints the chapter number + title, and the
+          // book must carry no in-chapter subtitles, so strip every heading from the body.
+          content: stripAllHeadings(c.content ?? ''),
+          sections: [...c.sections]
+            .sort((a, b) => a.position - b.position)
+            .map((s) => ({ title: s.title, content: s.content ?? '' })),
+          ...(ills && ills.length > 0 ? { illustrations: ills } : {}),
+        };
+      }),
       // Back matter (Conclusion, plus any author-added FAQ/resources/glossary/bonus).
       backMatter: book
         .backMatter()

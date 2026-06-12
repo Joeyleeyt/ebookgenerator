@@ -8,6 +8,8 @@ import {
   SectionId,
   BookSection,
   BookSectionId,
+  Illustration,
+  IllustrationId,
   Outline,
   ProjectId,
   type BookRepository,
@@ -20,7 +22,7 @@ export class SupabaseBookRepository implements BookRepository {
   async findByProject(projectId: ProjectId): Promise<Book | null> {
     const { data } = await this.db
       .from('books')
-      .select('*, outlines(*), chapters(*, sections(*)), book_sections(*)')
+      .select('*, outlines(*), chapters(*, sections(*)), book_sections(*), book_illustrations(*)')
       .eq('project_id', projectId.value)
       .maybeSingle();
     if (!data) return null;
@@ -30,7 +32,7 @@ export class SupabaseBookRepository implements BookRepository {
   async findById(id: BookId): Promise<Book | null> {
     const { data } = await this.db
       .from('books')
-      .select('*, outlines(*), chapters(*, sections(*)), book_sections(*)')
+      .select('*, outlines(*), chapters(*, sections(*)), book_sections(*), book_illustrations(*)')
       .eq('id', id.value)
       .maybeSingle();
     return data ? this.toDomain(data) : null;
@@ -80,6 +82,22 @@ export class SupabaseBookRepository implements BookRepository {
           status: bs.status,
         },
         { onConflict: 'id' },
+      );
+    }
+
+    // In-chapter illustrations (generated at the assembling stage). Keyed by
+    // (chapter_id, order_in_chapter) so a re-run overwrites in place, never duplicates.
+    for (const ill of book.illustrations) {
+      await this.db.from('book_illustrations').upsert(
+        {
+          id: ill.id.value,
+          book_id: book.id.value,
+          chapter_id: ill.chapterId,
+          order_in_chapter: ill.orderInChapter,
+          storage_path: ill.storagePath,
+          prompt: ill.prompt,
+        },
+        { onConflict: 'chapter_id,order_in_chapter' },
       );
     }
   }
@@ -187,6 +205,17 @@ export class SupabaseBookRepository implements BookRepository {
               ChapterId.from(c.id),
             ),
           ),
+        illustrations: (row.book_illustrations ?? []).map((i: any) =>
+          Illustration.rehydrate(
+            {
+              chapterId: i.chapter_id,
+              orderInChapter: i.order_in_chapter,
+              storagePath: i.storage_path,
+              prompt: i.prompt ?? null,
+            },
+            IllustrationId.from(i.id),
+          ),
+        ),
         bookSections: (row.book_sections ?? []).map((s: any) =>
           BookSection.rehydrate(
             {

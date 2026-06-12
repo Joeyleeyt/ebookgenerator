@@ -34,6 +34,7 @@ export * from './domain/book/PageBudget.js';
 export * from './domain/book/BookStrategy.js';
 export * from './domain/book/ChapterResearch.js';
 export * from './domain/book/BookSection.js';
+export * from './domain/book/Illustration.js';
 export * from './domain/book/events/ChapterGenerated.js';
 export * from './domain/export/ExportArtifact.js';
 
@@ -92,3 +93,4 @@ export * from './application/use-cases/AddExtraContentUseCase.js';
 export * from './application/use-cases/GenerateExtraContentUseCase.js';
 export * from './application/use-cases/GenerateFrontBackMatterUseCase.js';
 export * from './application/use-cases/GenerateCoverImageUseCase.js';
+export * from './application/use-cases/GenerateIllustrationsUseCase.js';

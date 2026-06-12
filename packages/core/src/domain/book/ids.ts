@@ -20,3 +20,8 @@ export class BookSectionId extends Identifier {
     return new BookSectionId(value);
   }
 }
+export class IllustrationId extends Identifier {
+  static from(value: string): IllustrationId {
+    return new IllustrationId(value);
+  }
+}

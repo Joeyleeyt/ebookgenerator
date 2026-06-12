@@ -38,6 +38,7 @@ export default function ProjectsPage() {
   const [url, setUrl] = useState('');
   const [pages, setPages] = useState(100);
   const [videos, setVideos] = useState(30);
+  const [illustrations, setIllustrations] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,7 +65,11 @@ export default function ProjectsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           channelUrl: url,
-          options: { targetPages: clampInt(pages, 10, 200, 100), maxVideos: clampInt(videos, 5, 50, 30) },
+          options: {
+            targetPages: clampInt(pages, 10, 200, 100),
+            maxVideos: clampInt(videos, 5, 50, 30),
+            includeIllustrations: illustrations,
+          },
         }),
       });
       const data = await res.json();
@@ -141,6 +146,15 @@ export default function ProjectsPage() {
                 onChange={(e) => setVideos(e.target.valueAsNumber)}
                 className="w-16 rounded-md border border-border bg-surface px-2 py-1 text-foreground tabular-nums outline-none focus:border-primary"
               />
+            </label>
+            <label className="flex cursor-pointer items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={illustrations}
+                onChange={(e) => setIllustrations(e.target.checked)}
+                className="size-3.5 accent-primary"
+              />
+              Illustrations
             </label>
             <span className="text-muted-foreground/70">≈ {estimateChapters(pages)} chapters</span>
           </div>

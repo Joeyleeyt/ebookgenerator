@@ -22,6 +22,10 @@ const EnvSchema = z.object({
 
   WHISPER_PROVIDER: z.enum(['openai', 'self-hosted']).default('openai'),
   OPENAI_API_KEY: z.string().optional(),
+
+  // 69labs (default model "nano-banana-2") — generates ONLY the in-chapter
+  // illustrations. If unset, books carry no illustrations.
+  LABS69_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

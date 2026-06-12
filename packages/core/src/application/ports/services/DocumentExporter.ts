@@ -18,6 +18,12 @@ export interface AssembledDocument {
     title: string;
     content: string; // markdown
     sections: Array<{ title: string; content: string }>;
+    /**
+     * In-chapter illustrations as base64 data URIs, in order. The renderer spreads
+     * them evenly across the chapter's paragraphs. Inlined (not URLs) for the same
+     * reason as the cover — Paged.js drops network images after re-chunking.
+     */
+    illustrations?: Array<{ dataUri: string; alt: string }>;
   }>;
   /** Optional back-matter (conclusion, resources, glossary, about author). */
   backMatter: Array<{ title: string; content: string }>;

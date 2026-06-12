@@ -24,7 +24,7 @@ export function renderHtml(doc: AssembledDocument): string {
         `<p class="chapter-eyebrow">Chapter ${i + 1}</p>` +
         `<h1 class="chapter-title">${esc(c.title)}</h1>` +
         `<p class="chapter-ornament">···</p>` +
-        `${md(c.content)}${sections}</section>`
+        `${renderBody(c.content, c.illustrations)}${sections}</section>`
       );
     })
     .join('\n');
@@ -175,6 +175,12 @@ export function renderHtml(doc: AssembledDocument): string {
     .chapter-eyebrow { text-align: center; text-transform: uppercase; letter-spacing: 0.25em; font-size: 11pt; font-weight: 600; color: #8a8a8a; margin: 0 0 1.2em; }
     .chapter-title { text-align: center; font-size: 24pt; font-weight: 700; margin: 0 auto 0.4em; max-width: 18em; line-height: 1.2; page-break-after: avoid; }
     .chapter-ornament { text-align: center; color: #bbb; letter-spacing: 0.4em; margin: 0 0 1.6em; page-break-after: avoid; }
+
+    /* In-chapter illustrations — a partial-page, centered inset that flows with the
+       text (NOT a full page), and never splits across a page break. */
+    figure.illustration { margin: 1.7em 0; text-align: center; page-break-inside: avoid; break-inside: avoid; }
+    figure.illustration img { display: block; width: 76%; max-width: 125mm; max-height: 95mm;
+      margin: 0 auto; object-fit: contain; border-radius: 5px; box-shadow: 0 1px 6px rgba(0,0,0,.12); }
   </style></head><body>
     ${coverArt}
     ${titlePage}
@@ -188,6 +194,11 @@ export function renderHtml(doc: AssembledDocument): string {
 
 /** Minimal block-level Markdown: headings, bullet/numbered/checkbox lists, paragraphs. */
 function md(text: string): string {
+  return renderBlocks(text).join('\n');
+}
+
+/** Render markdown to one HTML string per block (so figures can be interleaved). */
+function renderBlocks(text: string): string[] {
   return text
     .split(/\n{2,}/)
     .map((block) => {
@@ -210,7 +221,33 @@ function md(text: string): string {
       }
       return `<p>${inline(esc(t.replace(/\n/g, ' ')))}</p>`;
     })
-    .join('\n');
+    .filter(Boolean);
+}
+
+/**
+ * Render a chapter body with its illustrations spread evenly across the
+ * paragraphs. Each figure is inserted AFTER an interior block at position
+ * (k+1)/(M+1) of the body, so the art lands beside the passage it depicts and
+ * never opens or closes the chapter.
+ */
+function renderBody(content: string, illustrations?: Array<{ dataUri: string; alt: string }>): string {
+  const blocks = renderBlocks(content);
+  const figs = illustrations ?? [];
+  if (figs.length === 0 || blocks.length === 0) return blocks.join('\n');
+
+  const positions = figs.map((_, k) =>
+    Math.min(blocks.length, Math.max(1, Math.round(((k + 1) / (figs.length + 1)) * blocks.length))),
+  );
+  const out: string[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    out.push(blocks[i]!);
+    figs.forEach((f, k) => {
+      if (positions[k] === i + 1) {
+        out.push(`<figure class="illustration"><img src="${esc(f.dataUri)}" alt="${esc(f.alt)}"></figure>`);
+      }
+    });
+  }
+  return out.join('\n');
 }
 
 function inline(text: string): string {

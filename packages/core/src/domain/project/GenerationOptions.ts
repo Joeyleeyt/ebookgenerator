@@ -7,6 +7,10 @@ interface GenerationOptionsProps {
   maxVideos: number;
   tone: Tone;
   includeComments: boolean;
+  /** Generate full-color in-chapter illustrations (69labs). Off by default. */
+  includeIllustrations: boolean;
+  /** Roughly one illustration per this many finished pages. */
+  illustrationEveryPages: number;
 }
 
 export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
@@ -16,6 +20,8 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
       maxVideos: props.maxVideos ?? 30,
       tone: props.tone ?? 'professional',
       includeComments: props.includeComments ?? true,
+      includeIllustrations: props.includeIllustrations ?? false,
+      illustrationEveryPages: props.illustrationEveryPages ?? 5,
     });
   }
 
@@ -30,5 +36,11 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
   }
   get includeComments() {
     return this.props.includeComments;
+  }
+  get includeIllustrations() {
+    return this.props.includeIllustrations;
+  }
+  get illustrationEveryPages() {
+    return this.props.illustrationEveryPages;
   }
 }

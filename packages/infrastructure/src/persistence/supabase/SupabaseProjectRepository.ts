@@ -16,7 +16,14 @@ interface ProjectRow {
   owner_id: string;
   channel_url: string;
   status: ProjectState;
-  options: { targetPages: number; maxVideos: number; tone: Tone; includeComments: boolean };
+  options: {
+    targetPages: number;
+    maxVideos: number;
+    tone: Tone;
+    includeComments: boolean;
+    includeIllustrations?: boolean;
+    illustrationEveryPages?: number;
+  };
   pending_counts: Record<string, number>;
   version: number;
   error: string | null;
@@ -45,6 +52,8 @@ export class SupabaseProjectRepository implements ProjectRepository {
         maxVideos: project.options.maxVideos,
         tone: project.options.tone,
         includeComments: project.options.includeComments,
+        includeIllustrations: project.options.includeIllustrations,
+        illustrationEveryPages: project.options.illustrationEveryPages,
       },
       pending_counts: project.pendingCounts,
       error: project.error ?? null,

@@ -239,9 +239,10 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
       // and its cover illustration before assembling. The two are independent, so
       // run them concurrently. Both are best-effort: a matter failure assembles
       // without it; a cover failure falls back to the typographic cover.
-      const [matter, cover] = await Promise.all([
+      const [matter, cover, illustrations] = await Promise.all([
         useCases.generateFrontBackMatter.execute(p),
         useCases.generateCoverImage.execute(p),
+        useCases.generateIllustrations.execute(p),
       ]);
       if (matter.isFail()) {
         container.logger.warn('front/back matter generation failed; assembling without it', {
@@ -253,6 +254,17 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
         container.logger.warn('cover image generation failed; using typographic cover', {
           projectId: p.projectId,
           error: cover.error,
+        });
+      }
+      if (illustrations.isFail()) {
+        container.logger.warn('illustration generation failed; assembling without illustrations', {
+          projectId: p.projectId,
+          error: illustrations.error,
+        });
+      } else if (illustrations.value.generated > 0) {
+        container.logger.info('🖼️  generated in-chapter illustrations', {
+          projectId: p.projectId,
+          count: illustrations.value.generated,
         });
       }
       const assembled = await useCases.assembleEbook.execute(p);

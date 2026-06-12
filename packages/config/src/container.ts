@@ -24,6 +24,7 @@ import {
   GenerateExtraContentUseCase,
   GenerateFrontBackMatterUseCase,
   GenerateCoverImageUseCase,
+  GenerateIllustrationsUseCase,
   type DocumentExporter,
 } from '@yeg/core';
 import {
@@ -34,6 +35,7 @@ import {
   PinoTelemetry,
   ClaudeTextGenerator,
   OpenAIImageGenerator,
+  Labs69ImageGenerator,
   YouTubeDataApiProvider,
   YouTubeTranscriptProvider,
   WhisperSpeechToText,
@@ -75,7 +77,11 @@ export function buildContainer(env: Env = loadEnv()) {
   const storage = new SupabaseStorageAdapter(supabase);
   const queue = new BullJobQueue(redis);
   const ai = ClaudeTextGenerator.fromApiKey(env.ANTHROPIC_API_KEY, telemetry);
+  // OpenAI gpt-image-1 powers the COVER art.
   const images = OpenAIImageGenerator.fromApiKey(env.OPENAI_API_KEY ?? '');
+  // 69labs (nano-banana-2) powers the in-chapter ILLUSTRATIONS. Both fall back
+  // gracefully when their key is unset.
+  const illustrationImages = Labs69ImageGenerator.fromApiKey(env.LABS69_API_KEY ?? '');
   const youtube = new YouTubeDataApiProvider(env.YOUTUBE_API_KEY);
   const transcripts = new YouTubeTranscriptProvider();
   const audio = new YtDlpAudioDownloader(storage);
@@ -113,6 +119,7 @@ export function buildContainer(env: Env = loadEnv()) {
     polishChapter: new PolishChapterUseCase(books, knowledge, ai, clock),
     generateFrontBackMatter: new GenerateFrontBackMatterUseCase(books, ai, ids),
     generateCoverImage: new GenerateCoverImageUseCase(books, knowledge, images, storage),
+    generateIllustrations: new GenerateIllustrationsUseCase(books, projects, illustrationImages, storage, ids),
     assembleEbook: new AssembleEbookUseCase(books, knowledge, clock, storage),
     exportEbook: new ExportEbookUseCase(exporters, storage, artifacts),
     regenerateChapter: new RegenerateChapterUseCase(books, queue, hasher),

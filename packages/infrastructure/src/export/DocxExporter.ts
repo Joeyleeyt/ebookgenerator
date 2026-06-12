@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, HeadingLevel, TextRun, ImageRun } from 'docx';
+import { Document, Packer, Paragraph, HeadingLevel, TextRun, ImageRun, AlignmentType } from 'docx';
 import { Result, ExportFormat, type DocumentExporter, type AssembledDocument, type ExportedDocument } from '@yeg/core';
 
 /** Renders the assembled document to a .docx using the `docx` library. */
@@ -40,7 +40,7 @@ export class DocxExporter implements DocumentExporter {
 
       for (const chapter of doc.chapters) {
         children.push(new Paragraph({ text: chapter.title, heading: HeadingLevel.HEADING_1, pageBreakBefore: true }));
-        children.push(...toParagraphs(chapter.content));
+        children.push(...withIllustrations(toParagraphs(chapter.content), chapter.illustrations));
         for (const section of chapter.sections) {
           children.push(new Paragraph({ text: section.title, heading: HeadingLevel.HEADING_2 }));
           children.push(...toParagraphs(section.content));
@@ -66,6 +66,43 @@ export class DocxExporter implements DocumentExporter {
       return Result.fail(e instanceof Error ? e.message : String(e));
     }
   }
+}
+
+/**
+ * Spread a chapter's illustrations evenly across its paragraphs — each image
+ * inserted after an interior paragraph at position (k+1)/(M+1), mirroring the PDF.
+ */
+function withIllustrations(
+  paragraphs: Paragraph[],
+  illustrations?: Array<{ dataUri: string; alt: string }>,
+): Paragraph[] {
+  const figs = illustrations ?? [];
+  if (figs.length === 0 || paragraphs.length === 0) return paragraphs;
+
+  const decoded = figs
+    .map((f) => decodeImageDataUri(f.dataUri))
+    .filter((d): d is { bytes: Buffer; type: 'png' | 'jpg' | 'gif' | 'bmp' } => d !== null);
+  if (decoded.length === 0) return paragraphs;
+
+  const positions = decoded.map((_, k) =>
+    Math.min(paragraphs.length, Math.max(1, Math.round(((k + 1) / (decoded.length + 1)) * paragraphs.length))),
+  );
+  const out: Paragraph[] = [];
+  for (let i = 0; i < paragraphs.length; i++) {
+    out.push(paragraphs[i]!);
+    decoded.forEach((img, k) => {
+      if (positions[k] === i + 1) {
+        out.push(
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            // Partial-page inset (~4.7"×3.1"), centered and flowing with the text — not a full page.
+            children: [new ImageRun({ data: img.bytes, type: img.type, transformation: { width: 450, height: 300 } })],
+          }),
+        );
+      }
+    });
+  }
+  return out;
 }
 
 /** Decode a `data:image/...;base64,...` URI into the bytes + type the docx ImageRun needs. */
