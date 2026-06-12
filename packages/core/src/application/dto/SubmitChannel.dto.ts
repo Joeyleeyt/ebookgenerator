@@ -5,7 +5,7 @@ export const SubmitChannelDto = z.object({
   options: z
     .object({
       targetPages: z.number().int().min(10).max(200).default(100),
-      maxVideos: z.number().int().min(5).max(50).default(10),
+      maxVideos: z.number().int().min(5).max(50).default(30),
       tone: z.enum(['educational', 'conversational', 'professional']).default('professional'),
       includeComments: z.boolean().default(true),
     })

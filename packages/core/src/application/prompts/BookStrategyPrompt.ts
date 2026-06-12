@@ -1,6 +1,7 @@
 export const BookStrategyPrompt = {
   build(input: { knowledgeBase: string; targetPages: number; tone: string; channelTitle: string }) {
-    const chapterCount = Math.max(2, Math.min(14, Math.round(input.targetPages / 8)));
+    // Keep in step with GenerateOutlineUseCase's deterministic count (≈14 at 100 pages).
+    const chapterCount = Math.max(2, Math.min(14, Math.round(input.targetPages / 7)));
     return {
       system:
         'You are a bestselling non-fiction book strategist. From a channel knowledge base, design the ' +
