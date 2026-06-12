@@ -18,12 +18,26 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'completed', label: 'Completed' },
 ];
 
+/** Clamp a (possibly NaN) number input to the DTO's allowed range. */
+function clampInt(n: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+/** Mirror of the backend chapter-count formula (round(pages/7), clamped 2–14). */
+function estimateChapters(pages: number): number {
+  const p = Number.isFinite(pages) ? pages : 100;
+  return Math.max(2, Math.min(14, Math.round(p / 7)));
+}
+
 export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<ProjectCardData[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('all');
   const [url, setUrl] = useState('');
+  const [pages, setPages] = useState(100);
+  const [videos, setVideos] = useState(30);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,7 +62,10 @@ export default function ProjectsPage() {
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channelUrl: url, options: { targetPages: 100, maxVideos: 30 } }),
+        body: JSON.stringify({
+          channelUrl: url,
+          options: { targetPages: clampInt(pages, 10, 200, 100), maxVideos: clampInt(videos, 5, 50, 30) },
+        }),
       });
       const data = await res.json();
       if (!res.ok) return setError(data.error ?? 'Could not start analysis');
@@ -82,25 +99,51 @@ export default function ProjectsPage() {
         </div>
 
         {/* Create row */}
-        <form
-          onSubmit={createProject}
-          className={cn(
-            'flex items-center gap-2 rounded-input border bg-surface p-1.5 pl-3.5 transition-colors',
-            error ? 'border-error' : 'border-border focus-within:border-primary',
-          )}
-        >
-          <Youtube className="size-5 shrink-0 text-error" />
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="Paste a YouTube channel URL to start a new book…"
-            required
-            className="h-10 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-          />
-          <Button type="submit" size="sm" disabled={submitting}>
-            {submitting ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
-            {submitting ? 'Starting…' : 'Analyze'}
-          </Button>
+        <form onSubmit={createProject} className="flex flex-col gap-2.5">
+          <div
+            className={cn(
+              'flex items-center gap-2 rounded-input border bg-surface p-1.5 pl-3.5 transition-colors',
+              error ? 'border-error' : 'border-border focus-within:border-primary',
+            )}
+          >
+            <Youtube className="size-5 shrink-0 text-error" />
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="Paste a YouTube channel URL to start a new book…"
+              required
+              className="h-10 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+            <Button type="submit" size="sm" disabled={submitting}>
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
+              {submitting ? 'Starting…' : 'Analyze'}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-1.5 text-xs text-muted-foreground">
+            <label className="flex items-center gap-1.5">
+              Pages
+              <input
+                type="number"
+                min={10}
+                max={200}
+                value={Number.isFinite(pages) ? pages : ''}
+                onChange={(e) => setPages(e.target.valueAsNumber)}
+                className="w-16 rounded-md border border-border bg-surface px-2 py-1 text-foreground tabular-nums outline-none focus:border-primary"
+              />
+            </label>
+            <label className="flex items-center gap-1.5">
+              Videos
+              <input
+                type="number"
+                min={5}
+                max={50}
+                value={Number.isFinite(videos) ? videos : ''}
+                onChange={(e) => setVideos(e.target.valueAsNumber)}
+                className="w-16 rounded-md border border-border bg-surface px-2 py-1 text-foreground tabular-nums outline-none focus:border-primary"
+              />
+            </label>
+            <span className="text-muted-foreground/70">≈ {estimateChapters(pages)} chapters</span>
+          </div>
         </form>
         {error && <p className="-mt-3 text-sm text-error">{error}</p>}
 

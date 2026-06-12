@@ -6,6 +6,18 @@ import { ArrowRight, Loader2, Sparkles, Youtube } from 'lucide-react';
 import { Button } from '../ui/button.js';
 import { cn } from '../../lib/utils.js';
 
+/** Clamp a (possibly NaN) number input to the DTO's allowed range. */
+function clampInt(n: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+/** Mirror of the backend chapter-count formula (round(pages/7), clamped 2–14). */
+function estimateChapters(pages: number): number {
+  const p = Number.isFinite(pages) ? pages : 100;
+  return Math.max(2, Math.min(14, Math.round(p / 7)));
+}
+
 /**
  * Command-center hero. The channel input is the product's single most important
  * action — paste a channel, AI does the rest — so it leads the page. POSTs to
@@ -14,6 +26,8 @@ import { cn } from '../../lib/utils.js';
 export function WelcomeBanner({ name, activeCount }: { name: string; activeCount: number }) {
   const router = useRouter();
   const [url, setUrl] = useState('');
+  const [pages, setPages] = useState(100);
+  const [videos, setVideos] = useState(30);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +39,10 @@ export function WelcomeBanner({ name, activeCount }: { name: string; activeCount
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channelUrl: url, options: { targetPages: 100, maxVideos: 30 } }),
+        body: JSON.stringify({
+          channelUrl: url,
+          options: { targetPages: clampInt(pages, 10, 200, 100), maxVideos: clampInt(videos, 5, 50, 30) },
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -79,6 +96,31 @@ export function WelcomeBanner({ name, activeCount }: { name: string; activeCount
               {submitting ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
               {submitting ? 'Starting…' : 'Analyze'}
             </Button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 pl-1.5 text-xs text-muted-foreground">
+            <label className="flex items-center gap-1.5">
+              Pages
+              <input
+                type="number"
+                min={10}
+                max={200}
+                value={Number.isFinite(pages) ? pages : ''}
+                onChange={(e) => setPages(e.target.valueAsNumber)}
+                className="w-16 rounded-md border border-border bg-surface px-2 py-1 text-foreground tabular-nums outline-none focus:border-primary"
+              />
+            </label>
+            <label className="flex items-center gap-1.5">
+              Videos
+              <input
+                type="number"
+                min={5}
+                max={50}
+                value={Number.isFinite(videos) ? videos : ''}
+                onChange={(e) => setVideos(e.target.valueAsNumber)}
+                className="w-16 rounded-md border border-border bg-surface px-2 py-1 text-foreground tabular-nums outline-none focus:border-primary"
+              />
+            </label>
+            <span className="text-muted-foreground/70">≈ {estimateChapters(pages)} chapters</span>
           </div>
           {error && <p className="mt-2 text-sm text-error">{error}</p>}
           <p className="mt-2 text-xs text-muted-foreground">
