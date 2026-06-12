@@ -87,6 +87,12 @@ export class GenerateOutlineUseCase {
       book = book ?? Book.create({ id: BookId.from(this.ids.uuid()), projectId: projectId.value, targetPages: project.options.targetPages });
       book.setTitle(strategy.title);
       book.setOutline(Outline.create({ version: 1, entries: parsed.value.entries, inputHash }));
+      // Derive the per-chapter word target deterministically from the page budget
+      // and the ACTUAL number of chapters the model returned. The model's own
+      // entry.wordTarget is unreliable — it tends to return modest numbers that
+      // starve chapter length — so the book never reaches its target page count.
+      // Computing it here guarantees the chapters sum to ~targetPages × 450 words.
+      const perChapterWords = budget.perChapterWords(parsed.value.entries.length);
       // Materialize chapters from the outline (Phase 9 → chapters).
       parsed.value.entries.forEach((entry, index) => {
         book!.addChapter(
@@ -98,7 +104,7 @@ export class GenerateOutlineUseCase {
             topic: entry.purpose,
             promise: entry.promise,
             keyPoints: entry.keyPoints,
-            wordTarget: entry.wordTarget,
+            wordTarget: perChapterWords,
           }),
         );
       });
