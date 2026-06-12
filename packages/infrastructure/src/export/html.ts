@@ -81,6 +81,13 @@ export function renderHtml(doc: AssembledDocument): string {
         content: "${cssString(doc.title)}";
         font-family: 'Georgia', serif; font-size: 8pt; letter-spacing: 0.18em; text-transform: uppercase; color: #c2c2c2;
       }
+      /* Page number on every page. The full-bleed cover has margin:0, so its
+         margin boxes have no room and it stays unnumbered — every other page shows
+         its own number. */
+      @bottom-center {
+        content: counter(page);
+        font-family: 'Georgia', serif; font-size: 9pt; color: #999;
+      }
     }
     /* Running header suppressed on the cover, title page, and the first page of each chapter.
        Named pages must restate size:A4 — otherwise Paged.js sizes their sheet to its default
@@ -129,8 +136,8 @@ export function renderHtml(doc: AssembledDocument): string {
     .title-page__title { font-size: 30pt; font-weight: 700; letter-spacing: -0.5px; margin: 0 auto; line-height: 1.15; max-width: 22em; }
     .title-page__subtitle { font-size: 14pt; font-style: italic; color: #555; margin: 16px auto 0; max-width: 30em; }
     .title-page__promise { font-size: 12pt; font-style: italic; color: #777; margin: 12px auto 0; max-width: 28em; }
-    .title-page__ornament { color: #aaa; letter-spacing: 0.4em; margin: 22px 0; }
-    .title-page__author { margin: 8mm auto 0; font-size: 13pt; letter-spacing: 0.5px; color: #333; }
+    .title-page__ornament { text-align: center; color: #aaa; letter-spacing: 0.4em; margin: 22px 0; }
+    .title-page__author { text-align: center; margin: 8mm auto 0; font-size: 13pt; letter-spacing: 0.5px; color: #333; }
 
     /* Cover — full-bleed generated art. Heavy scrim + shadows guarantee the title
        stays legible no matter how light or busy the generated illustration is. */
