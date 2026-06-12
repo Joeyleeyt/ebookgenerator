@@ -9,7 +9,7 @@ import { PolishPrompt } from '../prompts/PolishPrompt.js';
 import type { PolishChapterJob } from '../dto/jobs.dto.js';
 
 /**
- * Phase 12 (Opus). Polishes ONE chapter for flow, transitions, consistency and
+ * Phase 12 (Sonnet). Polishes ONE chapter for flow, transitions, consistency and
  * readability. Fanned out by StartBookPolishUseCase so chapters polish in
  * parallel instead of in a serial loop. The previous chapter's title is read
  * from the outline order (not threaded through state), preserving smooth
@@ -51,7 +51,7 @@ export class PolishChapterUseCase {
     const previousChapterTitle = index > 0 ? (ordered[index - 1]?.title ?? null) : null;
 
     const completion = await this.ai.generate({
-      model: 'claude-opus-4-8',
+      model: 'claude-sonnet-4-6',
       system: PolishPrompt.system({ tone, authorVoice }),
       messages: [{ role: 'user', content: PolishPrompt.user({ title: chapter.title, content: chapter.content, previousChapterTitle }) }],
       maxTokens: 8000,

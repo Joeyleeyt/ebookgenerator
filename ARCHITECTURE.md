@@ -29,8 +29,8 @@ A SaaS that turns a YouTube channel into a ~100‑page ebook (PDF + DOCX) throug
 
 **Claude model routing** (exact IDs):
 - `claude-haiku-4-5` — comment analysis / audience psychology extraction, cheap classification.
-- `claude-sonnet-4-6` — video knowledge extraction, channel knowledge base, book strategy, outline, chapter research.
-- `claude-opus-4-8` — chapter prose, book polishing, chapter regeneration, bonus sections (long-form quality).
+- `claude-sonnet-4-6` — video knowledge extraction, channel knowledge base, book strategy, outline, chapter research, chapter prose + polish.
+- `claude-opus-4-8` — section additions, bonus / extra content (long-form quality, user-triggered).
 
 Prompt-cache the large shared context (channel summary + outline) so every chapter generation reuses it.
 
@@ -341,7 +341,7 @@ async onStageItemCompleted(projectId, stage) {
 | `outline-generate` | 4 | Anthropic tier | 4×, exp | Sonnet; materializes chapters (Phase 9) |
 | `chapter-research` | 5 | Anthropic tier | 4×, exp | Sonnet; fan-out, barrier (Phase 10) |
 | `chapter-generate` | 4 | Anthropic tier | 3×, exp 10s→5m | Opus, long output (Phase 11) |
-| `polish-book` | 2 | Anthropic tier | 3× | Opus — manuscript pass (Phase 12) |
+| `polish-book` | 2 | Anthropic tier | 3× | Sonnet — surgical-edit pass (Phase 12) |
 | `extra-content` | 3 | Anthropic tier | 3× | Opus — bonus chapters (Phase 13); user-triggered |
 | `ebook-assemble` | 4 | — | 3× | deterministic (Phase 14) |
 | `export` | 3 | Puppeteer mem | 3× | pdf + docx (Phase 15) |
