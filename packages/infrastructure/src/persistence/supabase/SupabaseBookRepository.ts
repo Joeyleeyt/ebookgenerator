@@ -20,21 +20,25 @@ export class SupabaseBookRepository implements BookRepository {
   constructor(private readonly db: SupabaseClient) {}
 
   async findByProject(projectId: ProjectId): Promise<Book | null> {
-    const { data } = await this.db
+    const { data, error } = await this.db
       .from('books')
       .select('*, outlines(*), chapters(*, sections(*)), book_sections(*), book_illustrations(*)')
       .eq('project_id', projectId.value)
       .maybeSingle();
+    // Surface real query failures (e.g. a missing table before its migration is
+    // applied) instead of returning null and masquerading as "not found".
+    if (error) throw new Error(error.message);
     if (!data) return null;
     return this.toDomain(data);
   }
 
   async findById(id: BookId): Promise<Book | null> {
-    const { data } = await this.db
+    const { data, error } = await this.db
       .from('books')
       .select('*, outlines(*), chapters(*, sections(*)), book_sections(*), book_illustrations(*)')
       .eq('id', id.value)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return data ? this.toDomain(data) : null;
   }
 

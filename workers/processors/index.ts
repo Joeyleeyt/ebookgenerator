@@ -235,37 +235,68 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     ...QUEUE_CONFIG['ebook-assemble'],
     payloadSchema: ProjectJob,
     handler: async (p) => {
-      // Give the book its publishing structure (Preface, Introduction, Conclusion)
-      // and its cover illustration before assembling. The two are independent, so
-      // run them concurrently. Both are best-effort: a matter failure assembles
-      // without it; a cover failure falls back to the typographic cover.
-      const [matter, cover, illustrations] = await Promise.all([
+      // Give the book its publishing structure (Preface, Introduction, Conclusion),
+      // its cover illustration, and its in-chapter illustrations before assembling.
+      // All three are independent and STRICTLY best-effort — a thrown error (e.g. a
+      // missing column before its migration runs) must degrade gracefully, never
+      // abort assembly. allSettled keeps one failure from taking down the others.
+      const [matterS, coverS, illustrationsS] = await Promise.allSettled([
         useCases.generateFrontBackMatter.execute(p),
         useCases.generateCoverImage.execute(p),
         useCases.generateIllustrations.execute(p),
       ]);
-      if (matter.isFail()) {
+
+      if (matterS.status === 'rejected') {
+        container.logger.warn('front/back matter generation threw; assembling without it', {
+          projectId: p.projectId,
+          error: String(matterS.reason),
+        });
+      } else if (matterS.value.isFail()) {
         container.logger.warn('front/back matter generation failed; assembling without it', {
           projectId: p.projectId,
-          error: matter.error,
+          error: matterS.value.error,
         });
       }
-      if (cover.isFail()) {
+      if (coverS.status === 'rejected') {
+        container.logger.warn('cover image generation threw; using typographic cover', {
+          projectId: p.projectId,
+          error: String(coverS.reason),
+        });
+      } else if (coverS.value.isFail()) {
         container.logger.warn('cover image generation failed; using typographic cover', {
           projectId: p.projectId,
-          error: cover.error,
+          error: coverS.value.error,
         });
       }
-      if (illustrations.isFail()) {
+      if (illustrationsS.status === 'rejected') {
+        container.logger.warn('illustration generation threw; assembling without illustrations', {
+          projectId: p.projectId,
+          error: String(illustrationsS.reason),
+        });
+      } else if (illustrationsS.value.isFail()) {
         container.logger.warn('illustration generation failed; assembling without illustrations', {
           projectId: p.projectId,
-          error: illustrations.error,
+          error: illustrationsS.value.error,
         });
-      } else if (illustrations.value.generated > 0) {
-        container.logger.info('🖼️  generated in-chapter illustrations', {
-          projectId: p.projectId,
-          count: illustrations.value.generated,
-        });
+      } else {
+        const { generated, attempted, error } = illustrationsS.value.value;
+        if (attempted > 0 && generated < attempted) {
+          // Some/all images failed (e.g. 69labs error or out of credits). Surface
+          // the first reason so an empty/short bucket is diagnosable, not silent.
+          container.logger.warn('some in-chapter illustrations failed to generate', {
+            projectId: p.projectId,
+            generated,
+            attempted,
+            sampleError: error,
+          });
+        }
+        if (generated > 0) {
+          container.logger.info('🖼️  generated in-chapter illustrations', {
+            projectId: p.projectId,
+            generated,
+            attempted,
+          });
+        }
       }
       const assembled = await useCases.assembleEbook.execute(p);
       if (assembled.isFail()) throw new Error(assembled.error);

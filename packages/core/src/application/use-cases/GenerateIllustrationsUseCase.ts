@@ -30,16 +30,16 @@ export class GenerateIllustrationsUseCase {
     private readonly ids: IdGenerator,
   ) {}
 
-  async execute(cmd: { projectId: string }): Promise<Result<{ generated: number }>> {
+  async execute(cmd: { projectId: string }): Promise<Result<{ generated: number; attempted: number; error?: string }>> {
     const projectId = ProjectId.from(cmd.projectId);
 
     const project = await this.projects.findById(projectId);
     if (!project) return Result.fail('Project not found');
-    if (!project.options.includeIllustrations) return Result.ok({ generated: 0 }); // feature off
+    if (!project.options.includeIllustrations) return Result.ok({ generated: 0, attempted: 0 }); // feature off
 
     const book = await this.books.findByProject(projectId);
     if (!book) return Result.fail('Book not found');
-    if (book.illustrations.length > 0) return Result.ok({ generated: 0 }); // idempotent
+    if (book.illustrations.length > 0) return Result.ok({ generated: 0, attempted: 0 }); // idempotent
 
     const ctx = await this.books.loadSharedContext(projectId);
     const everyPages = Math.max(1, project.options.illustrationEveryPages);
@@ -71,11 +71,12 @@ export class GenerateIllustrationsUseCase {
       }
     }
 
-    if (plan.length === 0) return Result.ok({ generated: 0 });
+    if (plan.length === 0) return Result.ok({ generated: 0, attempted: 0 });
 
-    // Generate concurrently; a failed image is skipped, not fatal.
-    const results = await Promise.all(
-      plan.map(async (slot) => {
+    // Generate concurrently; a failed image is skipped, not fatal — but its reason
+    // is captured so the caller can log WHY the bucket ended up short.
+    const outcomes = await Promise.all(
+      plan.map(async (slot): Promise<{ illustration?: Illustration; error?: string }> => {
         const prompt = IllustrationPrompt.build({
           chapterTitle: slot.chapterTitle,
           passage: slot.passage,
@@ -83,25 +84,32 @@ export class GenerateIllustrationsUseCase {
           tone: ctx.tone,
         });
         const image = await this.images.generate({ prompt, size: '1536x1024' });
-        if (image.isFail()) return null;
+        if (image.isFail()) return { error: `generate: ${image.error}` };
         const path = `${projectId.value}/illustrations/${slot.chapterId}-${slot.order}.png`;
         const put = await this.storage.put(EXPORT_BUCKET, path, image.value.bytes, image.value.contentType);
-        if (put.isFail()) return null;
-        return Illustration.create({
-          id: IllustrationId.from(this.ids.uuid()),
-          chapterId: slot.chapterId,
-          orderInChapter: slot.order,
-          storagePath: path,
-          prompt,
-        });
+        if (put.isFail()) return { error: `store: ${put.error}` };
+        return {
+          illustration: Illustration.create({
+            id: IllustrationId.from(this.ids.uuid()),
+            chapterId: slot.chapterId,
+            orderInChapter: slot.order,
+            storagePath: path,
+            prompt,
+          }),
+        };
       }),
     );
 
-    const made = results.filter((r): r is Illustration => r !== null);
+    const made = outcomes.map((o) => o.illustration).filter((i): i is Illustration => i !== undefined);
     for (const ill of made) book.addIllustration(ill);
     if (made.length > 0) await this.books.save(book);
 
-    return Result.ok({ generated: made.length });
+    const firstError = outcomes.find((o) => o.error)?.error;
+    return Result.ok({
+      generated: made.length,
+      attempted: plan.length,
+      ...(firstError ? { error: firstError } : {}),
+    });
   }
 }
 
