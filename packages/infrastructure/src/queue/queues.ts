@@ -37,8 +37,14 @@ export const QUEUE_CONFIG: Record<QueueName, QueueConfig> = {
   // by the Whisper API and worker CPU/network (not the Anthropic tier), so raised
   // modestly rather than to the chapter-queue levels.
   'whisper-transcribe': { concurrency: 4, attempts: 3 },
-  'video-summarize': { concurrency: 6, attempts: 4, limiter: { max: 50, duration: 60_000 } },
-  'analyze-comments': { concurrency: 8, attempts: 4, limiter: { max: 100, duration: 60_000 } },
+  // Per-video summary (Haiku — cheap, fast, high tier limits). Raised so a large
+  // channel's videos summarize in parallel rather than draining at 50/min.
+  'video-summarize': { concurrency: 16, attempts: 4, limiter: { max: 200, duration: 60_000 } },
+  // Per-video comment analysis — fanned out one job per video; raised alongside
+  // summarize so the per-video AI phase isn't the throughput floor on Tier 3+.
+  'analyze-comments': { concurrency: 16, attempts: 4, limiter: { max: 150, duration: 60_000 } },
+  // One call per book (concurrency parallelizes across projects, not within one),
+  // so leave as-is — raising it wouldn't speed a single run.
   'knowledge-base': { concurrency: 4, attempts: 4 },
   'book-strategy': { concurrency: 4, attempts: 4 },
   'outline-generate': { concurrency: 4, attempts: 4 },
