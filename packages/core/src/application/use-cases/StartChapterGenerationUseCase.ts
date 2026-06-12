@@ -8,8 +8,17 @@ import type { Hasher } from '../ports/Hasher.js';
 import type { ProjectJob } from '../dto/jobs.dto.js';
 
 /**
+ * Delay applied to every chapter job except the first, so the first warms the
+ * shared cached system prefix before the rest read it. Comfortably inside the
+ * 5-minute ephemeral cache TTL.
+ */
+const CACHE_WARMUP_DELAY_MS = 20_000;
+
+/**
  * Bridges GENERATING_CHAPTER_RESEARCH → GENERATING_CHAPTERS: advances the status,
  * sets the chapter fan-in barrier, and enqueues one chapter-generate job per chapter.
+ * The first chapter is released immediately and the rest are briefly delayed to
+ * warm the shared prompt cache (see CACHE_WARMUP_DELAY_MS).
  */
 export class StartChapterGenerationUseCase {
   constructor(
@@ -31,7 +40,13 @@ export class StartChapterGenerationUseCase {
     project.advanceTo('GENERATING_CHAPTERS', this.clock.now());
     await this.projects.save(project);
 
-    for (const chapter of book.chapters) {
+    // Warm the cache before fanning out. Every chapter shares the same cached
+    // system prefix (book strategy + knowledge base). If all jobs fire at once
+    // none has written the cache yet, so each pays a full cache-write on that
+    // large prefix. Release the first chapter immediately and delay the rest by
+    // a short window so the first call writes the cache and the others read it.
+    for (let index = 0; index < book.chapters.length; index += 1) {
+      const chapter = book.chapters[index]!;
       const inputHash = this.hasher.hash({
         title: chapter.title,
         promise: chapter.promise,
@@ -41,7 +56,10 @@ export class StartChapterGenerationUseCase {
       await this.queue.enqueue(
         'chapter-generate',
         { projectId: projectId.value, chapterId: chapter.id.value, inputHash, mode: 'generate' },
-        { jobId: `chapter:${projectId.value}:${chapter.id.value}:${inputHash}` },
+        {
+          jobId: `chapter:${projectId.value}:${chapter.id.value}:${inputHash}`,
+          ...(index === 0 ? {} : { delayMs: CACHE_WARMUP_DELAY_MS }),
+        },
       );
     }
     return Result.ok();

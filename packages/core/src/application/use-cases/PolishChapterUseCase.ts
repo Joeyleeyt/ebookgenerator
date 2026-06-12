@@ -59,9 +59,15 @@ export class PolishChapterUseCase {
     });
     if (completion.isFail()) return Result.fail(completion.error.type);
 
+    // Polish returns surgical find/replace edits, not the whole chapter, so we
+    // apply them onto the existing content. An unparseable response or absent
+    // `find` span degrades to "no change" rather than blocking the pipeline.
+    const edits = PolishPrompt.parseEdits(completion.value.text);
+    const polished = PolishPrompt.applyEdits(chapter.content, edits);
+
     const applied = book.regenerateChapter(
       chapter.id,
-      { content: completion.value.text, inputHash: `polished:v${chapter.version}` },
+      { content: polished.text, inputHash: `polished:v${chapter.version}` },
       this.clock.now(),
     );
     if (applied.isFail()) return Result.fail(applied.error);

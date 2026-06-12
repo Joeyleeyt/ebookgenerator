@@ -40,11 +40,14 @@ export const QUEUE_CONFIG: Record<QueueName, QueueConfig> = {
   'book-strategy': { concurrency: 4, attempts: 4 },
   'outline-generate': { concurrency: 4, attempts: 4 },
   'chapter-research': { concurrency: 8, attempts: 4, limiter: { max: 60, duration: 60_000 } },
-  'chapter-generate': { concurrency: 8, attempts: 3, limiter: { max: 50, duration: 60_000 } },
+  // Drafting runs on Sonnet (fast, high tier limits). Tier 3+: let all chapters
+  // of a typical book draft at once so the stage collapses to ~one chapter's latency.
+  'chapter-generate': { concurrency: 16, attempts: 3, limiter: { max: 100, duration: 60_000 } },
   // Controller only — fans out one polish-chapter job per chapter; no LLM call here.
   'polish-book': { concurrency: 4, attempts: 3 },
-  // The actual per-chapter polishing LLM work — parallelized, was a serial loop.
-  'polish-chapter': { concurrency: 8, attempts: 3, limiter: { max: 50, duration: 60_000 } },
+  // The actual per-chapter polishing LLM work (Opus) — parallelized, was a serial
+  // loop. Limiter a touch lower than drafting since Opus tier limits are tighter.
+  'polish-chapter': { concurrency: 16, attempts: 3, limiter: { max: 80, duration: 60_000 } },
   'extra-content': { concurrency: 3, attempts: 3, limiter: { max: 30, duration: 60_000 } },
   'ebook-assemble': { concurrency: 4, attempts: 3 },
   export: { concurrency: 3, attempts: 3 },

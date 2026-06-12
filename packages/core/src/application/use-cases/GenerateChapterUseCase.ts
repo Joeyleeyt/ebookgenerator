@@ -9,9 +9,10 @@ import { ChapterPrompt } from '../prompts/ChapterPrompt.js';
 import type { ChapterJob } from '../dto/jobs.dto.js';
 
 /**
- * Phase 11 (Opus). Writes one chapter using the 9-part structure, fed by the
- * book strategy + knowledge base (cached system prefix) and this chapter's
- * research package. Idempotent on inputHash.
+ * Phase 11. Writes one chapter using the 9-part structure, fed by the book
+ * strategy + knowledge base (cached system prefix) and this chapter's research
+ * package. Drafts on Sonnet — far faster token generation than Opus — and the
+ * Phase 12 polish pass (Opus) recovers quality. Idempotent on inputHash.
  */
 export class GenerateChapterUseCase {
   constructor(
@@ -34,7 +35,7 @@ export class GenerateChapterUseCase {
     chapter.markGenerating();
 
     const completion = await this.ai.generate({
-      model: 'claude-opus-4-8',
+      model: 'claude-sonnet-4-6',
       system: ChapterPrompt.system({
         bookStrategy: ctx.bookStrategy,
         knowledgeBase: ctx.knowledgeBase,

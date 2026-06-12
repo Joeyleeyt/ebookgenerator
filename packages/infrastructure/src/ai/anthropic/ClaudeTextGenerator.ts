@@ -5,6 +5,9 @@ import { Result, type AiTextGenerator, type AiGenerateInput, type AiCompletion, 
  * The only AI provider. Maps the Anthropic SDK to the AiTextGenerator port.
  * Prompt caching: when cacheControl.systemPrefix is set, the system block is
  * marked ephemeral so the shared context is reused across chapter generations.
+ * Requests are streamed (.stream().finalMessage()) so long high-maxTokens
+ * generations hold the connection open instead of risking an HTTP read timeout;
+ * the awaited final message is identical to a non-streamed response.
  * Every successful call is reported to Telemetry (model, tokens, cost) when wired.
  */
 export class ClaudeTextGenerator implements AiTextGenerator {
@@ -23,13 +26,15 @@ export class ClaudeTextGenerator implements AiTextGenerator {
         ? [{ type: 'text' as const, text: input.system, cache_control: { type: 'ephemeral' as const } }]
         : input.system;
 
-      const response = await this.client.messages.create({
-        model: input.model,
-        max_tokens: input.maxTokens,
-        system,
-        messages: input.messages.map((m) => ({ role: m.role, content: m.content })),
-        ...(input.metadata ? { metadata: { user_id: input.metadata.projectId } } : {}),
-      });
+      const response = await this.client.messages
+        .stream({
+          model: input.model,
+          max_tokens: input.maxTokens,
+          system,
+          messages: input.messages.map((m) => ({ role: m.role, content: m.content })),
+          ...(input.metadata ? { metadata: { user_id: input.metadata.projectId } } : {}),
+        })
+        .finalMessage();
 
       const text = response.content
         .filter((b): b is Anthropic.TextBlock => b.type === 'text')
