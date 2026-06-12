@@ -58,11 +58,10 @@ export const ChapterPrompt = {
     return (
       `Write the chapter titled "${input.title}".\n` +
       `Purpose: ${input.purpose}\nPromise to the reader: ${input.promise}\n` +
-      `LENGTH REQUIREMENT — MANDATORY: write a full, in-depth book chapter of AT LEAST ${input.wordTarget} words. ` +
-      'This is a full chapter of a published book, not an article or blog post. Develop every beat below ' +
-      'thoroughly — in particular, tell each of the three case studies as a substantial ~400–600 word story with ' +
-      'real texture (situation, tension, action, result, lesson). Do not stop early and do not summarize to wrap ' +
-      `up; a chapter shorter than ${input.wordTarget} words is unacceptable and must be expanded.\n\n` +
+      `TARGET LENGTH: about ${input.wordTarget} words — write a focused, complete chapter close to this length, ` +
+      'neither cut short nor padded past it. Cover every beat below, telling each of the three case studies as a ' +
+      'tight ~250-word story (situation, tension, action, result, lesson). Write to the target and stop — do not ' +
+      'pad or repeat to fill space.\n\n' +
       `=== CHAPTER RESEARCH (use this material) ===\n${input.research}\n\n` +
       (input.instructions ? `Additional instructions: ${input.instructions}\n` : '') +
       'Output only the chapter body as flowing prose — no title heading, no subheadings, no lists, no chapter number, ' +
@@ -77,13 +76,13 @@ export const ChapterPrompt = {
    */
   expand(input: { title: string; draft: string; currentWords: number; targetWords: number; research: string }) {
     return (
-      `The draft below for the chapter "${input.title}" is too short: about ${input.currentWords} words, but it ` +
-      `must be AT LEAST ${input.targetWords} words.\n\n` +
-      `Rewrite and EXPAND it to at least ${input.targetWords} words by developing every beat in greater depth — ` +
-      'fuller storytelling in the case studies, more complete explanation and reasoning, richer concrete detail and ' +
-      'examples, stronger objection handling. Do NOT pad, repeat, or restate; do NOT add headings, lists, or a ' +
-      'summary. Preserve the existing voice, narrative order, and the single **bold** core-principle sentence, and ' +
-      'keep it one seamless chapter.\n\n' +
+      `The draft below for the chapter "${input.title}" is short: about ${input.currentWords} words, but it ` +
+      `should be about ${input.targetWords} words.\n\n` +
+      `Rewrite it to about ${input.targetWords} words by developing the thinner beats in a little more depth — ` +
+      'fuller storytelling in the case studies, more complete explanation and reasoning, a bit more concrete detail. ' +
+      'Do NOT pad, repeat, or restate, and do not overshoot the target; do NOT add headings, lists, or a summary. ' +
+      'Preserve the existing voice, narrative order, and the single **bold** core-principle sentence, and keep it ' +
+      'one seamless chapter.\n\n' +
       `=== DRAFT TO EXPAND ===\n${input.draft}\n\n` +
       `=== CHAPTER RESEARCH (use for the added depth) ===\n${input.research}\n\n` +
       'Output only the full expanded chapter body as flowing prose — no title, no headings, no lists, no summary.'
