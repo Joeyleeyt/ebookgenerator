@@ -55,7 +55,10 @@ export class GenerateChapterUseCase {
           }),
         },
       ],
-      maxTokens: 8000,
+      // ~100-page book ⇒ ~3,500–4,500 words/chapter. 8000 tokens (~6k words) can
+      // truncate a long chapter once the "write the full length" instruction is
+      // honored, so give headroom.
+      maxTokens: 12000,
       cacheControl: { systemPrefix: true },
       metadata: { projectId: cmd.projectId, stage: 'chapter-generate' },
     });

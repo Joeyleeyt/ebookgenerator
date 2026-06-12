@@ -48,7 +48,7 @@ export default function ProjectsPage() {
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channelUrl: url, options: { targetPages: 10, maxVideos: 10 } }),
+        body: JSON.stringify({ channelUrl: url, options: { targetPages: 100, maxVideos: 10 } }),
       });
       const data = await res.json();
       if (!res.ok) return setError(data.error ?? 'Could not start analysis');

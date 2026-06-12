@@ -12,7 +12,7 @@ interface GenerationOptionsProps {
 export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
   static create(props: Partial<GenerationOptionsProps>): GenerationOptions {
     return new GenerationOptions({
-      targetPages: props.targetPages ?? 10,
+      targetPages: props.targetPages ?? 100,
       maxVideos: props.maxVideos ?? 10,
       tone: props.tone ?? 'professional',
       includeComments: props.includeComments ?? true,
