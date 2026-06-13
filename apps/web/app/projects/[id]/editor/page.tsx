@@ -43,20 +43,34 @@ interface Chapter {
   content: string | null;
   sections: Section[];
 }
+// Front/back matter — preface, acknowledgments, introduction, conclusion, …
+interface BookSectionData {
+  id: string;
+  kind: string;
+  title: string;
+  status: string;
+  content: string | null;
+}
 interface BookData {
   title: string | null;
   estimatedPages: number;
   chapters: Chapter[];
+  frontMatter: BookSectionData[];
+  backMatter: BookSectionData[];
 }
 
 function statusVariant(status: string) {
-  if (status === 'COMPLETED') return 'success' as const;
+  if (status === 'COMPLETED' || status === 'DONE') return 'success' as const;
   if (status === 'FAILED') return 'error' as const;
   if (status === 'PARTIAL') return 'warning' as const;
   return 'primary' as const;
 }
 function isChapterActive(status: string) {
   return status !== 'COMPLETED' && status !== 'FAILED';
+}
+/** Human label for a book-section kind (e.g. 'acknowledgments' → 'Acknowledgments'). */
+function kindLabel(kind: string): string {
+  return kind.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 // ── Live preview rendering ────────────────────────────────────────────────────
@@ -111,14 +125,55 @@ const PREVIEW_STYLES = `
 .book-preview .bp-eyebrow { text-align: center; text-transform: uppercase; letter-spacing: .25em; font-size: 11px; font-weight: 600; color: #8a8a8a; margin: 0 0 1em; }
 .book-preview .bp-title { text-align: center; font-size: 26px; font-weight: 700; margin: 0 auto .3em; line-height: 1.2; color: #111; max-width: 18em; }
 .book-preview .bp-ornament { text-align: center; color: #bbb; letter-spacing: .4em; margin: 0 0 1.4em; }
-.book-preview .bp-body > p:first-of-type::first-letter { float: left; font-family: Georgia, serif; font-weight: 700; font-size: 3.2em; line-height: .72; padding: .02em .1em 0 0; color: #1a1a1a; }
+/* Drop cap only on chapters. Front/back matter (.bp-matter) has none — in the
+   exported PDF, Paged.js re-wraps paragraphs during pagination and breaks the
+   '.matter-ornament + p' adjacency, so the real book shows no drop cap there. */
+.book-preview:not(.bp-matter) .bp-body > p:first-of-type::first-letter { float: left; font-family: Georgia, serif; font-weight: 700; font-size: 3.2em; line-height: .72; padding: .02em .1em 0 0; color: #1a1a1a; }
 `;
+
+/** Sidebar entry for a front/back-matter section. */
+function SectionButton({
+  section,
+  on,
+  onClick,
+}: {
+  section: BookSectionData;
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'group rounded-input border p-3 text-left transition-colors',
+        on
+          ? 'border-primary/40 bg-primary-soft'
+          : 'border-border bg-surface hover:border-border-strong hover:bg-surface-hover',
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-medium text-muted-foreground">{kindLabel(section.kind)}</span>
+        {section.status === 'DONE' ? (
+          <Check className="ml-auto size-3.5 text-success" strokeWidth={3} />
+        ) : section.status === 'FAILED' ? (
+          <CircleDot className="ml-auto size-3.5 text-error" />
+        ) : section.status === 'GENERATING' ? (
+          <Loader2 className="ml-auto size-3.5 animate-spin text-primary" />
+        ) : (
+          <CircleDot className="ml-auto size-3.5 text-muted-foreground/40" />
+        )}
+      </div>
+      <p className="mt-0.5 line-clamp-2 text-sm font-semibold">{section.title}</p>
+    </button>
+  );
+}
 
 export default function EditorPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { id } = params;
   const [book, setBook] = useState<BookData | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // What's being edited: a chapter or a front/back-matter section.
+  const [selectedRef, setSelectedRef] = useState<{ kind: 'chapter' | 'section'; id: string } | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
@@ -133,22 +188,59 @@ export default function EditorPage({ params }: { params: { id: string } }) {
     if (res.status === 401) return router.push(`/login?next=/projects/${id}/editor`);
     const data = await res.json();
     setBook(data.book);
-    if (data.book?.chapters?.length && !selectedId) {
-      setSelectedId(data.book.chapters[0].id);
+    if (data.book?.chapters?.length && !selectedRef) {
+      setSelectedRef({ kind: 'chapter', id: data.book.chapters[0].id });
       setDraft(data.book.chapters[0].content ?? '');
     }
-  }, [id, router, selectedId]);
+  }, [id, router, selectedRef]);
 
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selected = book?.chapters.find((c) => c.id === selectedId) ?? null;
+  // Resolve the current selection (a chapter or a book section) into one
+  // normalized shape the editor renders, so the center pane stays uniform.
+  const allSections = book ? [...book.frontMatter, ...book.backMatter] : [];
+  const selectedChapter =
+    selectedRef?.kind === 'chapter' ? book?.chapters.find((c) => c.id === selectedRef.id) ?? null : null;
+  const selectedSection =
+    selectedRef?.kind === 'section' ? allSections.find((s) => s.id === selectedRef.id) ?? null : null;
 
-  function select(ch: Chapter) {
-    setSelectedId(ch.id);
+  const selected = selectedChapter
+    ? {
+        kind: 'chapter' as const,
+        id: selectedChapter.id,
+        title: selectedChapter.title,
+        subtitle: selectedChapter.promise || selectedChapter.topic,
+        eyebrow: `Chapter ${selectedChapter.position + 1}`,
+        status: selectedChapter.status,
+        version: selectedChapter.version as number | null,
+        wordTarget: selectedChapter.wordTarget as number | null,
+        sections: selectedChapter.sections,
+      }
+    : selectedSection
+      ? {
+          kind: 'section' as const,
+          id: selectedSection.id,
+          title: selectedSection.title,
+          subtitle: kindLabel(selectedSection.kind),
+          eyebrow: kindLabel(selectedSection.kind),
+          status: selectedSection.status,
+          version: null as number | null,
+          wordTarget: null as number | null,
+          sections: [] as Section[],
+        }
+      : null;
+
+  function selectChapter(ch: Chapter) {
+    setSelectedRef({ kind: 'chapter', id: ch.id });
     setDraft(ch.content ?? '');
+    setNotice(null);
+  }
+  function selectSection(s: BookSectionData) {
+    setSelectedRef({ kind: 'section', id: s.id });
+    setDraft(s.content ?? '');
     setNotice(null);
   }
 
@@ -157,7 +249,9 @@ export default function EditorPage({ params }: { params: { id: string } }) {
     setBusy('save');
     setNotice(null);
     try {
-      const res = await fetch(`/api/chapters/${selected.id}`, {
+      const endpoint =
+        selected.kind === 'chapter' ? `/api/chapters/${selected.id}` : `/api/book-sections/${selected.id}`;
+      const res = await fetch(endpoint, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: id, content: draft }),
@@ -165,7 +259,8 @@ export default function EditorPage({ params }: { params: { id: string } }) {
       const data = await res.json();
       if (!res.ok) setNotice({ kind: 'err', text: data.error ?? 'Save failed' });
       else {
-        setNotice({ kind: 'ok', text: `Saved · v${data.version} · ${data.wordCount} words` });
+        const versionPart = data.version ? `v${data.version} · ` : '';
+        setNotice({ kind: 'ok', text: `Saved · ${versionPart}${data.wordCount} words` });
         void load();
         void reexport(); // rebuild the PDF/DOCX so the download reflects this edit
       }
@@ -261,43 +356,89 @@ export default function EditorPage({ params }: { params: { id: string } }) {
             <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
               Structure
             </p>
-            {/* Full-height, scrollable chapter list. */}
-            <div className="flex max-h-[60vh] flex-1 flex-col gap-1.5 overflow-y-auto pr-1 lg:max-h-none">
-              {book.chapters.map((ch) => {
-                const on = ch.id === selectedId;
-                const pct = ch.wordTarget
-                  ? Math.min(100, Math.round((ch.wordCount / ch.wordTarget) * 100))
-                  : 0;
-                return (
-                  <button
-                    key={ch.id}
-                    onClick={() => select(ch)}
-                    className={cn(
-                      'group rounded-input border p-3 text-left transition-colors',
-                      on
-                        ? 'border-primary/40 bg-primary-soft'
-                        : 'border-border bg-surface hover:border-border-strong hover:bg-surface-hover',
-                    )}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-medium text-muted-foreground">
-                        Chapter {ch.position + 1}
-                      </span>
-                      {ch.status === 'COMPLETED' ? (
-                        <Check className="ml-auto size-3.5 text-success" strokeWidth={3} />
-                      ) : isChapterActive(ch.status) ? (
-                        <Loader2 className="ml-auto size-3.5 animate-spin text-primary" />
-                      ) : (
-                        <CircleDot className="ml-auto size-3.5 text-error" />
-                      )}
-                    </div>
-                    <p className="mt-0.5 line-clamp-2 text-sm font-semibold">{ch.title}</p>
-                    <div className="mt-2 h-1 overflow-hidden rounded-full bg-surface-hover">
-                      <div className="h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
-                    </div>
-                  </button>
-                );
-              })}
+            {/* Full-height, scrollable list: front matter → chapters → back matter. */}
+            <div className="flex max-h-[60vh] flex-1 flex-col gap-4 overflow-y-auto pr-1 lg:max-h-none">
+              {/* Front matter (preface, foreword, introduction, …). */}
+              {book.frontMatter.length > 0 && (
+                <div>
+                  <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                    Front matter
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    {book.frontMatter.map((s) => (
+                      <SectionButton
+                        key={s.id}
+                        section={s}
+                        on={selectedRef?.kind === 'section' && selectedRef.id === s.id}
+                        onClick={() => selectSection(s)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Chapters. */}
+              <div>
+                <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                  Chapters
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {book.chapters.map((ch) => {
+                    const on = selectedRef?.kind === 'chapter' && selectedRef.id === ch.id;
+                    const pct = ch.wordTarget
+                      ? Math.min(100, Math.round((ch.wordCount / ch.wordTarget) * 100))
+                      : 0;
+                    return (
+                      <button
+                        key={ch.id}
+                        onClick={() => selectChapter(ch)}
+                        className={cn(
+                          'group rounded-input border p-3 text-left transition-colors',
+                          on
+                            ? 'border-primary/40 bg-primary-soft'
+                            : 'border-border bg-surface hover:border-border-strong hover:bg-surface-hover',
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-medium text-muted-foreground">
+                            Chapter {ch.position + 1}
+                          </span>
+                          {ch.status === 'COMPLETED' ? (
+                            <Check className="ml-auto size-3.5 text-success" strokeWidth={3} />
+                          ) : isChapterActive(ch.status) ? (
+                            <Loader2 className="ml-auto size-3.5 animate-spin text-primary" />
+                          ) : (
+                            <CircleDot className="ml-auto size-3.5 text-error" />
+                          )}
+                        </div>
+                        <p className="mt-0.5 line-clamp-2 text-sm font-semibold">{ch.title}</p>
+                        <div className="mt-2 h-1 overflow-hidden rounded-full bg-surface-hover">
+                          <div className="h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Back matter (conclusion, acknowledgments, resources, …). */}
+              {book.backMatter.length > 0 && (
+                <div>
+                  <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                    Back matter
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    {book.backMatter.map((s) => (
+                      <SectionButton
+                        key={s.id}
+                        section={s}
+                        on={selectedRef?.kind === 'section' && selectedRef.id === s.id}
+                        onClick={() => selectSection(s)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </aside>
 
@@ -308,9 +449,7 @@ export default function EditorPage({ params }: { params: { id: string } }) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="text-xl font-semibold tracking-tight">{selected.title}</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {selected.promise || selected.topic}
-                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">{selected.subtitle}</p>
                   </div>
                   <Badge variant={statusVariant(selected.status)} className="shrink-0 capitalize">
                     {selected.status.toLowerCase().replace(/_/g, ' ')}
@@ -319,11 +458,17 @@ export default function EditorPage({ params }: { params: { id: string } }) {
 
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3 text-xs text-muted-foreground tabular-nums">
-                    <span>
-                      {draftWords} / {selected.wordTarget} words
-                    </span>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span>v{selected.version}</span>
+                    {selected.kind === 'chapter' ? (
+                      <>
+                        <span>
+                          {draftWords} / {selected.wordTarget} words
+                        </span>
+                        <span className="text-muted-foreground/40">·</span>
+                        <span>v{selected.version}</span>
+                      </>
+                    ) : (
+                      <span>{draftWords} words</span>
+                    )}
                   </div>
                   {/* View toggle — switch between editing, a live side-by-side preview, or preview only. */}
                   <div className="inline-flex rounded-input border border-border bg-surface p-0.5 text-xs">
@@ -359,15 +504,15 @@ export default function EditorPage({ params }: { params: { id: string } }) {
                     <textarea
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
-                      placeholder="Chapter content (markdown)…"
+                      placeholder={`${selected.kind === 'chapter' ? 'Chapter' : 'Section'} content (markdown)…`}
                       className="min-h-[28rem] w-full resize-y rounded-input border border-border bg-canvas/40 p-4 text-[15px] leading-relaxed outline-none transition-colors focus:border-primary"
                     />
                   )}
                   {view !== 'edit' && (
                     <div className="max-h-[44rem] min-h-[28rem] overflow-auto rounded-input border border-border bg-white p-8 shadow-inner">
                       {draft.trim() ? (
-                        <div className="book-preview">
-                          <p className="bp-eyebrow">Chapter {selected.position + 1}</p>
+                        <div className={cn('book-preview', selected.kind === 'section' && 'bp-matter')}>
+                          <p className="bp-eyebrow">{selected.eyebrow}</p>
                           <h1 className="bp-title">{selected.title}</h1>
                           <p className="bp-ornament">···</p>
                           <div
@@ -438,7 +583,7 @@ export default function EditorPage({ params }: { params: { id: string } }) {
                   </div>
                 )}
 
-                {selected.sections.length > 0 && (
+                {selected.kind === 'chapter' && selected.sections.length > 0 && (
                   <div className="mt-8">
                     <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                       Sections
@@ -462,7 +607,7 @@ export default function EditorPage({ params }: { params: { id: string } }) {
               </Card>
             ) : (
               <Card className="grid place-items-center p-16 text-center text-sm text-muted-foreground">
-                Select a chapter to start editing.
+                Select a chapter or section to start editing.
               </Card>
             )}
           </section>

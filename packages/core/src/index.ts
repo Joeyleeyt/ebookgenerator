@@ -89,6 +89,7 @@ export * from './application/use-cases/AssembleEbookUseCase.js';
 export * from './application/use-cases/ExportEbookUseCase.js';
 export * from './application/use-cases/RegenerateChapterUseCase.js';
 export * from './application/use-cases/EditChapterUseCase.js';
+export * from './application/use-cases/EditBookSectionUseCase.js';
 export * from './application/use-cases/AddSectionUseCase.js';
 export * from './application/use-cases/AddExtraContentUseCase.js';
 export * from './application/use-cases/GenerateExtraContentUseCase.js';
