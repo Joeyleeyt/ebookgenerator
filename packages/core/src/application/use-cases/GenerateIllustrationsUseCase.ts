@@ -22,6 +22,11 @@ import { EXPORT_BUCKET } from './ExportEbookUseCase.js';
  * regenerate nor double-bill. Individual image failures are skipped, never fatal.
  */
 export class GenerateIllustrationsUseCase {
+  // Cap concurrent 69labs jobs: the API queues jobs and shared keys have a
+  // concurrent-job limit, so firing a whole book's illustrations at once made the
+  // excess jobs fail. A small pool keeps throughput high without flooding.
+  private static readonly MAX_CONCURRENT_IMAGES = 4;
+
   constructor(
     private readonly books: BookRepository,
     private readonly projects: ProjectRepository,
@@ -107,8 +112,10 @@ export class GenerateIllustrationsUseCase {
     // give a live "N/total" progress trail in the logs.
     let done = 0;
     let failed = 0;
-    const outcomes = await Promise.all(
-      plan.map(async (slot): Promise<{ illustration?: Illustration; error?: string }> => {
+    const outcomes = await mapWithConcurrency(
+      plan,
+      GenerateIllustrationsUseCase.MAX_CONCURRENT_IMAGES,
+      async (slot): Promise<{ illustration?: Illustration; error?: string }> => {
         const prompt = IllustrationPrompt.build({
           chapterTitle: slot.chapterTitle,
           passage: slot.passage,
@@ -147,7 +154,7 @@ export class GenerateIllustrationsUseCase {
             prompt,
           }),
         };
-      }),
+      },
     );
 
     const made = outcomes.map((o) => o.illustration).filter((i): i is Illustration => i !== undefined);
@@ -167,6 +174,24 @@ export class GenerateIllustrationsUseCase {
       ...(firstError ? { error: firstError } : {}),
     });
   }
+}
+
+/**
+ * Run `fn` over every item with at most `limit` in flight at once, preserving
+ * input order in the result. A bounded pool (vs. Promise.all) keeps us from
+ * flooding the image API while still overlapping the slow per-image polling.
+ */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 /** The `index`-th of `count` equal word-slices of a chapter, trimmed to `maxWords`. */

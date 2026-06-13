@@ -103,12 +103,17 @@ export class Labs69ImageGenerator implements ImageGenerator {
           if (res.status >= 500) continue; // transient — keep polling
           return { ok: false, retryable: false, error: `69labs status ${res.status}` };
         }
-        const data = (await res.json()) as { status?: string; outputMetadata?: { format?: string } };
+        const data = (await res.json()) as { status?: string; userMessage?: string; outputMetadata?: { format?: string } };
         status = (data.status ?? '').toUpperCase();
         if (data.outputMetadata?.format) format = data.outputMetadata.format;
         if (status === 'COMPLETED') break;
         // Transient provider failure → a fresh job usually succeeds, so retry it.
-        if (status === 'FAILED' || status === 'ERROR') return { ok: false, retryable: true, error: `69labs job ${status.toLowerCase()}` };
+        // 69labs reports the real reason (content policy, billing, prompt rejection)
+        // in `userMessage` — surface it so the failure isn't opaque in the logs.
+        if (status === 'FAILED' || status === 'ERROR') {
+          const reason = data.userMessage ? `: ${data.userMessage}` : '';
+          return { ok: false, retryable: true, error: `69labs job ${status.toLowerCase()}${reason}` };
+        }
         // Cancellation is intentional — never retry.
         if (status === 'CANCELLED' || status === 'CANCELED') return { ok: false, retryable: false, error: '69labs job cancelled' };
       }
