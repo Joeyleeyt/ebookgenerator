@@ -28,7 +28,7 @@ export function WelcomeBanner({ name, activeCount }: { name: string; activeCount
   const [url, setUrl] = useState('');
   const [pages, setPages] = useState(100);
   const [videos, setVideos] = useState(30);
-  const [illustrations, setIllustrations] = useState(false);
+  const [illustrations, setIllustrations] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

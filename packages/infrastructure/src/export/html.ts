@@ -35,7 +35,9 @@ export function renderHtml(doc: AssembledDocument): string {
   // typography) is rendered INTO the image, so we show it full-bleed with no
   // overlay — the artwork IS the cover.
   const coverArt = doc.coverImage
-    ? `<section class="cover--art cover--full" style="background-image:url('${esc(doc.coverImage)}')"></section>`
+    ? `<section class="cover--art cover--full" style="background-image:url('${esc(doc.coverImage)}')">${
+        doc.subtitle ? `<p class="cover__subtitle">${esc(doc.subtitle)}</p>` : ''
+      }</section>`
     : '';
 
   // Title page — the classic typographic page carrying the actual book title.
@@ -133,6 +135,15 @@ export function renderHtml(doc: AssembledDocument): string {
        stays legible no matter how light or busy the generated illustration is. */
     .cover--art { page: cover; break-after: page; position: relative; width: 210mm; height: 297mm; margin: 0; padding: 0;
       color: #fff; text-align: left; background-color: #0b1220; background-size: cover; background-position: center; }
+    /* Front cover: show the WHOLE generated cover (incl. baked-in title) — 'contain'
+       never crops an edge; the navy page colour hides the thin side bars. */
+    .cover--full { background-size: contain !important; background-repeat: no-repeat; }
+    /* Subtitle is typeset (not baked into the art) and pinned to the bottom with a
+       real margin, so it is always fully visible and never clipped. */
+    .cover__subtitle { position: absolute; left: 0; right: 0; bottom: 18mm; margin: 0 auto; max-width: 78%;
+      z-index: 2; text-align: center; text-transform: uppercase; letter-spacing: 0.08em;
+      font-family: 'Georgia', serif; font-weight: 700; font-size: 14pt; line-height: 1.4; color: #e8c074;
+      text-shadow: 0 1px 10px rgba(0,0,0,.9), 0 0 2px rgba(0,0,0,.85); }
     .cover--art .cover__scrim { position: absolute; inset: 0;
       background: linear-gradient(180deg, rgba(7,12,22,.88) 0%, rgba(7,12,22,.52) 30%, rgba(7,12,22,.52) 60%, rgba(7,12,22,.92) 100%); }
     /* Inner splits the page: idea on the TOP half, promise + byline on the BOTTOM half */

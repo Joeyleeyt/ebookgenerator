@@ -20,7 +20,7 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
       maxVideos: props.maxVideos ?? 30,
       tone: props.tone ?? 'professional',
       includeComments: props.includeComments ?? true,
-      includeIllustrations: props.includeIllustrations ?? false,
+      includeIllustrations: props.includeIllustrations ?? true,
       illustrationEveryPages: props.illustrationEveryPages ?? 5,
     });
   }

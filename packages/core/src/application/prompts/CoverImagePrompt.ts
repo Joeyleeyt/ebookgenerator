@@ -7,18 +7,18 @@ interface CoverImageInput {
 }
 
 /**
- * Builds a premium, bestseller-grade cover brief. Unlike the old textless art,
- * the TITLE TYPOGRAPHY is rendered INTO the image (the AI designs the whole
- * cover), so the title/subtitle are injected verbatim. The fixed STYLE / COLOR /
- * COMPOSITION / TYPOGRAPHY / QUALITY rules give every book the same high-end
- * navy-and-gold, blueprint-to-reality look, while the CORE CONCEPT and VISUAL
- * DIRECTION adapt to THIS book's subject (from the channel knowledge base).
+ * Builds a premium, bestseller-grade cover brief. The TITLE is rendered INTO the
+ * image (the AI designs the whole cover), but the SUBTITLE is NOT baked in — it
+ * is typeset over the bottom of the cover in HTML so its position/margin are
+ * exact and it can never be clipped. The fixed STYLE / COLOR / COMPOSITION /
+ * TYPOGRAPHY / QUALITY rules give every book the same high-end navy-and-gold,
+ * blueprint-to-reality look, while the CORE CONCEPT and VISUAL DIRECTION adapt to
+ * THIS book's subject (from the channel knowledge base).
  */
 export const CoverImagePrompt = {
   build(input: CoverImageInput): string {
     const subject = input.knowledgeBase.replace(/\s+/g, ' ').trim().slice(0, 600);
     const title = input.title.replace(/\s+/g, ' ').trim();
-    const subtitle = input.subtitle.replace(/\s+/g, ' ').trim();
 
     return [
       'Design a premium bestselling NON-FICTION book cover.',
@@ -49,14 +49,16 @@ export const CoverImagePrompt = {
       '- Instantly recognizable as a premium nonfiction book',
       '',
       'TYPOGRAPHY:',
-      `- Render the book TITLE text, spelled EXACTLY and correctly: "${title}"`,
-      subtitle ? `- Render the SUBTITLE text, spelled exactly: "${subtitle}"` : '- No subtitle',
-      '- Extremely large bold title',
+      `- Render ONLY the book TITLE text, spelled EXACTLY and correctly: "${title}"`,
+      '- Do NOT render a subtitle, byline, or any other text — render ONLY the title.',
+      '- Extremely large bold title in the UPPER portion of the cover',
       '- Title occupies 30-40% of the cover',
-      '- Professional sans-serif typography',
-      '- Multiple font weights',
-      '- Clear hierarchy between title and subtitle',
+      '- Professional sans-serif typography with multiple font weights',
       '- Typography integrated into the design',
+      '- CRITICAL: every letter of the title must be FULLY VISIBLE and contained well',
+      '  inside the cover with generous safe margins — never cropped or overflowing.',
+      '- Leave the BOTTOM ~20% of the cover as clean, calm negative space (no text, no',
+      '  busy detail) so a subtitle can be placed there afterward.',
       '',
       'COLOR PALETTE:',
       '- Deep navy background',
