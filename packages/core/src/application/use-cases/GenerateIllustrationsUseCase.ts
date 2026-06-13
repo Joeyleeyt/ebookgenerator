@@ -5,6 +5,7 @@ import { IllustrationId } from '../../domain/book/ids.js';
 import type { BookRepository } from '../ports/repositories/BookRepository.js';
 import type { ProjectRepository } from '../ports/repositories/ProjectRepository.js';
 import type { ImageGenerator } from '../ports/services/ImageGenerator.js';
+import type { ImageProcessor } from '../ports/services/ImageProcessor.js';
 import type { ObjectStorage } from '../ports/services/ObjectStorage.js';
 import type { IdGenerator } from '../ports/IdGenerator.js';
 import type { Logger } from '../ports/Logger.js';
@@ -27,10 +28,17 @@ export class GenerateIllustrationsUseCase {
   // excess jobs fail. A small pool keeps throughput high without flooding.
   private static readonly MAX_CONCURRENT_IMAGES = 4;
 
+  // Illustrations render at ~76% page width (≤125mm); ~1024px wide JPEG at q82 is
+  // plenty for print and a fraction of the source PNG's size, so the inlined PDF
+  // stays small and exports fast.
+  private static readonly MAX_IMAGE_WIDTH = 1024;
+  private static readonly JPEG_QUALITY = 82;
+
   constructor(
     private readonly books: BookRepository,
     private readonly projects: ProjectRepository,
     private readonly images: ImageGenerator,
+    private readonly imageProcessor: ImageProcessor,
     private readonly storage: ObjectStorage,
     private readonly ids: IdGenerator,
     private readonly logger: Logger,
@@ -133,8 +141,21 @@ export class GenerateIllustrationsUseCase {
           });
           return { error: `generate: ${image.error}` };
         }
-        const path = `${projectId.value}/illustrations/${slot.chapterId}-${slot.order}.png`;
-        const put = await this.storage.put(EXPORT_BUCKET, path, image.value.bytes, image.value.contentType);
+
+        // Downscale + re-encode to JPEG before storing so the inlined PDF stays
+        // small (gpt-image-1 PNGs are ~3MB). Best-effort: if processing fails we
+        // store the original bytes rather than dropping the illustration.
+        const shrunk = await this.imageProcessor.downscaleToJpeg({
+          bytes: image.value.bytes,
+          maxWidth: GenerateIllustrationsUseCase.MAX_IMAGE_WIDTH,
+          quality: GenerateIllustrationsUseCase.JPEG_QUALITY,
+        });
+        const bytes = shrunk.isOk() ? shrunk.value.bytes : image.value.bytes;
+        const contentType = shrunk.isOk() ? shrunk.value.contentType : image.value.contentType;
+        const ext = contentType === 'image/jpeg' ? 'jpg' : 'png';
+
+        const path = `${projectId.value}/illustrations/${slot.chapterId}-${slot.order}.${ext}`;
+        const put = await this.storage.put(EXPORT_BUCKET, path, bytes, contentType);
         if (put.isFail()) {
           this.logger.warn(`🖼️  illustration store failed (${++failed} failed, ${done} done / ${total})`, {
             projectId: projectId.value,

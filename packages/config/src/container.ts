@@ -37,6 +37,7 @@ import {
   OpenAIImageGenerator,
   Labs69ImageGenerator,
   FallbackImageGenerator,
+  SharpImageProcessor,
   YouTubeDataApiProvider,
   YouTubeTranscriptProvider,
   WhisperSpeechToText,
@@ -85,6 +86,8 @@ export function buildContainer(env: Env = loadEnv()) {
   // FallbackImageGenerator only pays for OpenAI when a 69labs job fails.
   const labs69 = Labs69ImageGenerator.fromApiKey(env.LABS69_API_KEY ?? '', env.LABS69_IMAGE_MODEL, logger.child({ adapter: '69labs' }));
   const illustrationImages = new FallbackImageGenerator(labs69, images, logger.child({ adapter: 'image-fallback' }));
+  // Downscales generated illustrations to a print-appropriate JPEG before storage.
+  const imageProcessor = new SharpImageProcessor();
   const youtube = new YouTubeDataApiProvider(env.YOUTUBE_API_KEY);
   const transcripts = new YouTubeTranscriptProvider();
   const audio = new YtDlpAudioDownloader(storage);
@@ -122,7 +125,7 @@ export function buildContainer(env: Env = loadEnv()) {
     polishChapter: new PolishChapterUseCase(books, knowledge, ai, clock),
     generateFrontBackMatter: new GenerateFrontBackMatterUseCase(books, ai, ids),
     generateCoverImage: new GenerateCoverImageUseCase(books, knowledge, images, storage),
-    generateIllustrations: new GenerateIllustrationsUseCase(books, projects, illustrationImages, storage, ids, logger.child({ useCase: 'illustrations' })),
+    generateIllustrations: new GenerateIllustrationsUseCase(books, projects, illustrationImages, imageProcessor, storage, ids, logger.child({ useCase: 'illustrations' })),
     assembleEbook: new AssembleEbookUseCase(books, knowledge, clock, storage),
     exportEbook: new ExportEbookUseCase(exporters, storage, artifacts),
     regenerateChapter: new RegenerateChapterUseCase(books, queue, hasher),

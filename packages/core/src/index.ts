@@ -57,6 +57,7 @@ export * from './application/ports/services/SpeechToText.js';
 export * from './application/ports/services/AudioDownloader.js';
 export * from './application/ports/services/ObjectStorage.js';
 export * from './application/ports/services/ImageGenerator.js';
+export * from './application/ports/services/ImageProcessor.js';
 export * from './application/ports/services/DocumentExporter.js';
 export * from './application/ports/services/JobQueue.js';
 export * from './application/ports/services/IdempotencyStore.js';

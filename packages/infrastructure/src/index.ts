@@ -11,6 +11,9 @@ export * from './ai/openai/OpenAIImageGenerator.js';
 export * from './ai/labs69/Labs69ImageGenerator.js';
 export * from './ai/FallbackImageGenerator.js';
 
+// ── Image processing (sharp) ────────────────────────────────────────────────
+export * from './image/SharpImageProcessor.js';
+
 // ── YouTube ─────────────────────────────────────────────────────────────────
 export * from './youtube/YouTubeDataApiProvider.js';
 export * from './youtube/YouTubeTranscriptProvider.js';
