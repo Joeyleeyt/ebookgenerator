@@ -17,6 +17,7 @@ interface ProjectRow {
   channel_url: string;
   status: ProjectState;
   options: {
+    bookTitle?: string;
     targetPages: number;
     maxVideos: number;
     tone: Tone;
@@ -48,6 +49,7 @@ export class SupabaseProjectRepository implements ProjectRepository {
       channel_url: project.channelUrl.raw,
       status: project.status.value,
       options: {
+        ...(project.options.bookTitle ? { bookTitle: project.options.bookTitle } : {}),
         targetPages: project.options.targetPages,
         maxVideos: project.options.maxVideos,
         tone: project.options.tone,

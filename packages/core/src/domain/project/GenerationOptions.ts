@@ -3,6 +3,8 @@ import { ValueObject } from '../shared/ValueObject.js';
 export type Tone = 'educational' | 'conversational' | 'professional';
 
 interface GenerationOptionsProps {
+  /** User-provided book title. When set, it overrides the AI-generated title. */
+  bookTitle?: string | undefined;
   targetPages: number;
   maxVideos: number;
   tone: Tone;
@@ -15,7 +17,9 @@ interface GenerationOptionsProps {
 
 export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
   static create(props: Partial<GenerationOptionsProps>): GenerationOptions {
+    const bookTitle = props.bookTitle?.trim();
     return new GenerationOptions({
+      ...(bookTitle ? { bookTitle } : {}),
       targetPages: props.targetPages ?? 100,
       maxVideos: props.maxVideos ?? 30,
       tone: props.tone ?? 'professional',
@@ -25,6 +29,9 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
     });
   }
 
+  get bookTitle() {
+    return this.props.bookTitle;
+  }
   get targetPages() {
     return this.props.targetPages;
   }

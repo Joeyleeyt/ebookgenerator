@@ -88,7 +88,8 @@ export class GenerateOutlineUseCase {
       if (parsed.isFail()) return Result.fail(parsed.error);
 
       book = book ?? Book.create({ id: BookId.from(this.ids.uuid()), projectId: projectId.value, targetPages: project.options.targetPages });
-      book.setTitle(strategy.title);
+      // Prefer the user-provided title; fall back to the AI-generated strategy title.
+      book.setTitle(project.options.bookTitle ?? strategy.title);
       book.setOutline(Outline.create({ version: 1, entries: parsed.value.entries, inputHash }));
       // Derive the per-chapter word target deterministically from the page budget
       // and the ACTUAL number of chapters the model returned. The model's own

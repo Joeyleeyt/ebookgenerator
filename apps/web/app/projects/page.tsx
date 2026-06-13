@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Loader2, Youtube } from 'lucide-react';
+import { ArrowRight, BookOpen, Loader2, Youtube } from 'lucide-react';
 import { AppShell } from '../../components/app/AppShell.js';
 import { ProjectCard, type ProjectCardData } from '../../components/projects/ProjectCard.js';
 import { Button } from '../../components/ui/button.js';
@@ -36,6 +36,7 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('all');
   const [url, setUrl] = useState('');
+  const [title, setTitle] = useState('');
   const [pages, setPages] = useState(100);
   const [videos, setVideos] = useState(30);
   const [illustrations, setIllustrations] = useState(true);
@@ -57,6 +58,18 @@ export default function ProjectsPage() {
 
   async function createProject(e: React.FormEvent) {
     e.preventDefault();
+    const trimmedTitle = title.trim();
+    const trimmedUrl = url.trim();
+    if (!trimmedTitle || !trimmedUrl) {
+      setError(
+        !trimmedTitle && !trimmedUrl
+          ? 'Please enter a book title and a YouTube channel URL.'
+          : !trimmedTitle
+            ? 'Please enter a book title.'
+            : 'Please enter a YouTube channel URL.',
+      );
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -64,8 +77,9 @@ export default function ProjectsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          channelUrl: url,
+          channelUrl: trimmedUrl,
           options: {
+            bookTitle: trimmedTitle,
             targetPages: clampInt(pages, 10, 200, 100),
             maxVideos: clampInt(videos, 5, 50, 30),
             includeIllustrations: illustrations,
@@ -104,25 +118,37 @@ export default function ProjectsPage() {
         </div>
 
         {/* Create row */}
-        <form onSubmit={createProject} className="flex flex-col gap-2.5">
+        <form onSubmit={createProject} noValidate className="flex flex-col gap-2.5">
           <div
             className={cn(
-              'flex items-center gap-2 rounded-input border bg-surface p-1.5 pl-3.5 transition-colors',
+              'flex flex-col rounded-input border bg-surface transition-colors',
               error ? 'border-error' : 'border-border focus-within:border-primary',
             )}
           >
-            <Youtube className="size-5 shrink-0 text-error" />
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="Paste a YouTube channel URL to start a new book…"
-              required
-              className="h-10 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            />
-            <Button type="submit" size="sm" disabled={submitting}>
-              {submitting ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
-              {submitting ? 'Starting…' : 'Analyze'}
-            </Button>
+            <div className="flex items-center gap-2 border-b border-border px-3.5">
+              <BookOpen className="size-5 shrink-0 text-muted-foreground" />
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Book title…"
+                required
+                className="h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+            <div className="flex items-center gap-2 p-1.5 pl-3.5">
+              <Youtube className="size-5 shrink-0 text-error" />
+              <input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="Paste a YouTube channel URL to start a new book…"
+                required
+                className="h-10 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+              <Button type="submit" size="sm" disabled={submitting}>
+                {submitting ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
+                {submitting ? 'Starting…' : 'Analyze'}
+              </Button>
+            </div>
           </div>
           <div className="hidden">
             <label className="flex items-center gap-1.5">
