@@ -10,8 +10,27 @@ export class SupabaseExportArtifactRepository implements ExportArtifactRepositor
       format: artifact.format,
       storage_path: artifact.storagePath,
       page_count: artifact.pageCount,
+      byte_size: artifact.byteSize,
+      book_version: artifact.bookVersion,
     });
     if (error) throw new Error(error.message);
+  }
+
+  /**
+   * The highest export version recorded for a project (0 if none yet). Used to
+   * derive the next version so each (re-)export lands at its own storage path —
+   * avoiding stale-CDN reads on an overwritten object and letting the UI detect
+   * when a fresh PDF is ready by watching for a higher version.
+   */
+  async latestVersion(projectId: ProjectId): Promise<number> {
+    const { data } = await this.db
+      .from('export_artifacts')
+      .select('book_version')
+      .eq('project_id', projectId.value)
+      .order('book_version', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return (data?.book_version as number | undefined) ?? 0;
   }
 
   async findById(id: string): Promise<{ projectId: string; storagePath: string; format: string } | null> {

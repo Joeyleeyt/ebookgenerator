@@ -25,4 +25,10 @@ export class ExportArtifact extends ValueObject<ExportArtifactProps> {
   get pageCount() {
     return this.props.pageCount;
   }
+  get byteSize() {
+    return this.props.byteSize;
+  }
+  get bookVersion() {
+    return this.props.bookVersion;
+  }
 }

@@ -35,7 +35,13 @@ async function main() {
   loadDotEnv();
   const apiKey = process.env.LABS69_API_KEY ?? '';
   const model = process.env.LABS69_IMAGE_MODEL ?? 'img-flux';
-  const prompt = process.argv[2] ?? 'A serene mountain landscape at sunrise, soft watercolor illustration';
+  // Prompt source: --file <path> (avoids shell mangling of long/multiline
+  // prompts), else the first positional arg, else a default.
+  const fileFlag = process.argv.indexOf('--file');
+  const prompt =
+    fileFlag !== -1 && process.argv[fileFlag + 1]
+      ? readFileSync(process.argv[fileFlag + 1]!, 'utf8')
+      : (process.argv[2] ?? 'A serene mountain landscape at sunrise, soft watercolor illustration');
 
   if (!apiKey) {
     console.error('LABS69_API_KEY is not set (.env or environment).');

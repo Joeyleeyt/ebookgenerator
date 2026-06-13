@@ -322,9 +322,14 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
       if (assembled.isFail()) throw new Error(assembled.error);
       const formats =
         p.format === 'both' ? [ExportFormat.PDF, ExportFormat.DOCX] : [p.format === 'pdf' ? ExportFormat.PDF : ExportFormat.DOCX];
-      const r = await useCases.exportEbook.execute({ projectId: p.projectId, doc: assembled.value, formats, bookVersion: 1 });
+      // Each (re-)export lands at its own version so an edit-then-re-export writes a
+      // NEW storage path (no stale-CDN read on an overwritten object) and the editor
+      // can detect the fresh PDF by watching for a higher version.
+      const bookVersion = (await container.repositories.artifacts.latestVersion(ProjectId.from(p.projectId))) + 1;
+      const r = await useCases.exportEbook.execute({ projectId: p.projectId, doc: assembled.value, formats, bookVersion });
       if (r.isFail()) throw new Error(r.error);
-      await orchestrator.advance(p.projectId, 'EXPORTING'); // → COMPLETED
+      await orchestrator.advance(p.projectId, 'EXPORTING'); // → COMPLETED (no-op on a manual re-export)
+      container.logger.info('📄 export complete', { projectId: p.projectId, bookVersion, formats: formats.length });
       return r.value;
     },
   });

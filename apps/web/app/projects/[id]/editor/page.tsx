@@ -8,10 +8,12 @@ import {
   BookOpen,
   Check,
   CircleDot,
+  Download,
   FileText,
   Loader2,
   Save,
   Sparkles,
+  TriangleAlert,
   Wand2,
 } from 'lucide-react';
 import { AppShell } from '../../../../components/app/AppShell.js';
@@ -65,6 +67,9 @@ export default function EditorPage({ params }: { params: { id: string } }) {
   const [instructions, setInstructions] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  // PDF/DOCX re-export state, driven automatically after a successful save.
+  const [exportState, setExportState] = useState<'idle' | 'building' | 'ready' | 'error'>('idle');
+  const [exports, setExports] = useState<Array<{ format: string; url: string | null; bookVersion: number }>>([]);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/projects/${id}/book`);
@@ -105,9 +110,45 @@ export default function EditorPage({ params }: { params: { id: string } }) {
       else {
         setNotice({ kind: 'ok', text: `Saved · v${data.version} · ${data.wordCount} words` });
         void load();
+        void reexport(); // rebuild the PDF/DOCX so the download reflects this edit
       }
     } finally {
       setBusy(null);
+    }
+  }
+
+  // Enqueue a re-export and poll until an artifact at the new version is ready, so
+  // the download link reflects the just-saved edit. Runs in the background — it does
+  // not block the Save button.
+  async function reexport() {
+    setExportState('building');
+    try {
+      const res = await fetch('/api/exports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: id, format: 'both' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setExportState('error');
+        return;
+      }
+      const target = data.nextVersion as number;
+      const deadline = Date.now() + 180_000; // exports can take a while for image-heavy books
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2500));
+        const r = await fetch(`/api/exports?projectId=${id}`);
+        if (!r.ok) continue;
+        const list = (await r.json()).artifacts as Array<{ format: string; url: string | null; bookVersion: number }>;
+        if (list.some((a) => a.bookVersion >= target)) {
+          setExports(list);
+          setExportState('ready');
+          return;
+        }
+      }
+      setExportState('error'); // timed out
+    } catch {
+      setExportState('error');
     }
   }
 
@@ -271,6 +312,43 @@ export default function EditorPage({ params }: { params: { id: string } }) {
                     </span>
                   )}
                 </div>
+
+                {/* PDF/DOCX rebuild status — runs automatically after a save so the
+                    download reflects the edit. */}
+                {exportState !== 'idle' && (
+                  <div className="mt-3 flex flex-wrap items-center gap-3 rounded-input border border-border bg-surface px-3 py-2.5 text-sm">
+                    {exportState === 'building' && (
+                      <span className="flex items-center gap-2 text-muted-foreground">
+                        <Loader2 className="size-4 animate-spin" />
+                        Updating PDF &amp; DOCX with your edit…
+                      </span>
+                    )}
+                    {exportState === 'ready' && (
+                      <>
+                        <span className="flex items-center gap-2 text-success">
+                          <Check className="size-4" strokeWidth={3} />
+                          Updated files ready
+                        </span>
+                        {exports
+                          .filter((e) => e.url)
+                          .map((e) => (
+                            <Button key={e.format} asChild variant="secondary" size="sm">
+                              <a href={e.url!} target="_blank" rel="noreferrer">
+                                <Download className="size-4" />
+                                {e.format.toUpperCase()}
+                              </a>
+                            </Button>
+                          ))}
+                      </>
+                    )}
+                    {exportState === 'error' && (
+                      <span className="flex items-center gap-2 text-error">
+                        <TriangleAlert className="size-4" />
+                        Couldn’t rebuild the files — try again from the project page.
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {selected.sections.length > 0 && (
                   <div className="mt-8">
