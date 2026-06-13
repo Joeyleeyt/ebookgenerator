@@ -1,19 +1,26 @@
 import { Result, type ImageGenerator, type GeneratedImage } from '@yeg/core';
 
 /**
- * Image generator backed by the 69labs API (default model "nano-banana-2").
- * Used ONLY for the in-chapter illustrations; the cover uses OpenAI gpt-image-1.
+ * Image generator backed by the 69labs API (default model "img-flux" / Flux
+ * Schnell). Used ONLY for the in-chapter illustrations; the cover uses OpenAI
+ * gpt-image-1.
  *
  * 69labs generation is asynchronous, so one call to `generate` runs the whole
  * job lifecycle behind the synchronous port:
  *   1. POST /api/v1/images/generate          → { id, queuePosition }
  *   2. poll GET /api/v1/images/status/:id     → until status === "COMPLETED"
  *   3. GET  /api/v1/images/download/:id        → 302 → presigned URL → raw bytes
- * Auth is a bearer token on every request. Any failure (HTTP error, job failure,
- * timeout) returns Result.fail so the caller can skip that illustration.
+ *
+ * img-flux occasionally returns a TRANSIENT job failure ("This job failed to
+ * complete. Please try again.") — a fresh, identical request then succeeds — so
+ * a FAILED/ERROR job (and network/5xx blips) is retried a few times. Genuinely
+ * non-retryable outcomes (CANCELLED, a 4xx like an invalid aspect ratio, or a
+ * timeout) fail fast. After exhausting retries we return Result.fail and the
+ * caller skips that one illustration (generation is best-effort).
  */
 export class Labs69ImageGenerator implements ImageGenerator {
   private static readonly BASE = 'https://69labs.vip/api/v1/images';
+  private static readonly MAX_ATTEMPTS = 3;
 
   constructor(
     private readonly apiKey: string,
@@ -30,6 +37,22 @@ export class Labs69ImageGenerator implements ImageGenerator {
 
   async generate(input: { prompt: string; size?: string }): Promise<Result<GeneratedImage>> {
     if (!this.apiKey) return Result.fail('LABS69_API_KEY is not configured');
+
+    let lastError = 'unknown error';
+    for (let attempt = 1; attempt <= Labs69ImageGenerator.MAX_ATTEMPTS; attempt++) {
+      const outcome = await this.runOnce(input);
+      if (outcome.ok) return Result.ok(outcome.image);
+      lastError = outcome.error;
+      if (!outcome.retryable) return Result.fail(outcome.error); // permanent — don't waste attempts
+      if (attempt < Labs69ImageGenerator.MAX_ATTEMPTS) await sleep(1000);
+    }
+    return Result.fail(`69labs failed after ${Labs69ImageGenerator.MAX_ATTEMPTS} attempts (last: ${lastError})`);
+  }
+
+  /** One full enqueue → poll → download cycle, classified as retryable or not. */
+  private async runOnce(
+    input: { prompt: string; size?: string },
+  ): Promise<{ ok: true; image: GeneratedImage } | { ok: false; retryable: boolean; error: string }> {
     const auth = { Authorization: `Bearer ${this.apiKey}` };
     try {
       // 1) Enqueue the job.
@@ -43,10 +66,12 @@ export class Labs69ImageGenerator implements ImageGenerator {
         body: JSON.stringify(body),
       });
       if (!enqueue.ok) {
-        return Result.fail(`69labs generate ${enqueue.status}: ${(await safeText(enqueue)).slice(0, 300)}`);
+        // 5xx / 429 are transient; other 4xx (e.g. invalid aspect ratio) are permanent.
+        const retryable = enqueue.status >= 500 || enqueue.status === 429;
+        return { ok: false, retryable, error: `69labs generate ${enqueue.status}: ${(await safeText(enqueue)).slice(0, 300)}` };
       }
       const job = (await enqueue.json()) as { id?: string };
-      if (!job.id) return Result.fail('69labs generate returned no job id');
+      if (!job.id) return { ok: false, retryable: true, error: '69labs generate returned no job id' };
 
       // 2) Poll until the job reaches a terminal state.
       const deadline = Date.now() + this.timeoutMs;
@@ -57,31 +82,29 @@ export class Labs69ImageGenerator implements ImageGenerator {
         const res = await fetch(`${Labs69ImageGenerator.BASE}/status/${job.id}`, { headers: auth });
         if (!res.ok) {
           if (res.status >= 500) continue; // transient — keep polling
-          return Result.fail(`69labs status ${res.status}`);
+          return { ok: false, retryable: false, error: `69labs status ${res.status}` };
         }
         const data = (await res.json()) as { status?: string; outputMetadata?: { format?: string } };
         status = (data.status ?? '').toUpperCase();
         if (data.outputMetadata?.format) format = data.outputMetadata.format;
         if (status === 'COMPLETED') break;
-        if (['FAILED', 'ERROR', 'CANCELLED', 'CANCELED'].includes(status)) {
-          return Result.fail(`69labs job ${status.toLowerCase()}`);
-        }
+        // Transient provider failure → a fresh job usually succeeds, so retry it.
+        if (status === 'FAILED' || status === 'ERROR') return { ok: false, retryable: true, error: `69labs job ${status.toLowerCase()}` };
+        // Cancellation is intentional — never retry.
+        if (status === 'CANCELLED' || status === 'CANCELED') return { ok: false, retryable: false, error: '69labs job cancelled' };
       }
-      if (status !== 'COMPLETED') return Result.fail('69labs job timed out');
+      if (status !== 'COMPLETED') return { ok: false, retryable: false, error: '69labs job timed out' };
 
       // 3) Download the output. The endpoint 302-redirects to a presigned URL;
       // fetch follows it (and drops the bearer header cross-origin, which the
       // presigned URL doesn't need).
-      const dl = await fetch(`${Labs69ImageGenerator.BASE}/download/${job.id}`, {
-        headers: auth,
-        redirect: 'follow',
-      });
-      if (!dl.ok) return Result.fail(`69labs download ${dl.status}`);
+      const dl = await fetch(`${Labs69ImageGenerator.BASE}/download/${job.id}`, { headers: auth, redirect: 'follow' });
+      if (!dl.ok) return { ok: false, retryable: dl.status >= 500, error: `69labs download ${dl.status}` };
       const bytes = new Uint8Array(await dl.arrayBuffer());
-      const contentType = normalizeContentType(dl.headers.get('content-type'), format);
-      return Result.ok({ bytes, contentType });
+      return { ok: true, image: { bytes, contentType: normalizeContentType(dl.headers.get('content-type'), format) } };
     } catch (e) {
-      return Result.fail(e instanceof Error ? e.message : String(e));
+      // Network/transport errors are transient → retryable.
+      return { ok: false, retryable: true, error: e instanceof Error ? e.message : String(e) };
     }
   }
 }
@@ -98,7 +121,12 @@ async function safeText(res: Response): Promise<string> {
   }
 }
 
-/** Map a legacy "WxH" size hint to a 69labs aspect-ratio string. */
+/**
+ * Map a legacy "WxH" size hint to a 69labs aspect-ratio string. NOTE: img-flux
+ * (Flux Schnell) only accepts 16:9 among the ratios we use — illustrations always
+ * request landscape (1536x1024 → 16:9), so this is safe. Do NOT switch
+ * illustrations to square/portrait with img-flux, or 69labs rejects the request.
+ */
 function aspectRatioFor(size?: string): string | null {
   const m = size ? /^(\d+)x(\d+)$/.exec(size) : null;
   if (!m) return null;
