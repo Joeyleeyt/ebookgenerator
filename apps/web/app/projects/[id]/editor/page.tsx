@@ -124,11 +124,13 @@ const PREVIEW_STYLES = `
 .book-preview em { font-style: italic; }
 .book-preview .bp-eyebrow { text-align: center; text-transform: uppercase; letter-spacing: .25em; font-size: 11px; font-weight: 600; color: #8a8a8a; margin: 0 0 1em; }
 .book-preview .bp-title { text-align: center; font-size: 26px; font-weight: 700; margin: 0 auto .3em; line-height: 1.2; color: #111; max-width: 18em; }
+/* Front/back matter heading — matches the real book's '.matter h1': centered,
+   uppercase, letter-spaced, grey. Same for every section (preface, foreword, …). */
+.book-preview .bp-matter-title { text-align: center; text-transform: uppercase; letter-spacing: .25em; font-weight: 600; font-size: 20px; color: #555; margin: 0 0 .5em; line-height: 1.25; }
 .book-preview .bp-ornament { text-align: center; color: #bbb; letter-spacing: .4em; margin: 0 0 1.4em; }
-/* Drop cap only on chapters. Front/back matter (.bp-matter) has none — in the
-   exported PDF, Paged.js re-wraps paragraphs during pagination and breaks the
-   '.matter-ornament + p' adjacency, so the real book shows no drop cap there. */
-.book-preview:not(.bp-matter) .bp-body > p:first-of-type::first-letter { float: left; font-family: Georgia, serif; font-weight: 700; font-size: 3.2em; line-height: .72; padding: .02em .1em 0 0; color: #1a1a1a; }
+/* No drop cap: in the exported PDF, Paged.js re-wraps paragraphs during
+   pagination and breaks the 'ornament + p' adjacency the drop-cap rule relies on,
+   so the real book renders none — on chapters or matter alike. */
 `;
 
 /** Sidebar entry for a front/back-matter section. */
@@ -511,9 +513,15 @@ export default function EditorPage({ params }: { params: { id: string } }) {
                   {view !== 'edit' && (
                     <div className="max-h-[44rem] min-h-[28rem] overflow-auto rounded-input border border-border bg-white p-8 shadow-inner">
                       {draft.trim() ? (
-                        <div className={cn('book-preview', selected.kind === 'section' && 'bp-matter')}>
-                          <p className="bp-eyebrow">{selected.eyebrow}</p>
-                          <h1 className="bp-title">{selected.title}</h1>
+                        <div className="book-preview">
+                          {selected.kind === 'chapter' ? (
+                            <>
+                              <p className="bp-eyebrow">{selected.eyebrow}</p>
+                              <h1 className="bp-title">{selected.title}</h1>
+                            </>
+                          ) : (
+                            <h1 className="bp-matter-title">{selected.title}</h1>
+                          )}
                           <p className="bp-ornament">···</p>
                           <div
                             className="bp-body"
