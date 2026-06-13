@@ -9,6 +9,7 @@ export * from './observability/PinoTelemetry.js';
 export * from './ai/anthropic/ClaudeTextGenerator.js';
 export * from './ai/openai/OpenAIImageGenerator.js';
 export * from './ai/labs69/Labs69ImageGenerator.js';
+export * from './ai/FallbackImageGenerator.js';
 
 // ── YouTube ─────────────────────────────────────────────────────────────────
 export * from './youtube/YouTubeDataApiProvider.js';
