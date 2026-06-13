@@ -32,7 +32,12 @@ export class PuppeteerPdfExporter implements DocumentExporter {
     const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
     try {
       const page = await browser.newPage();
-      await page.setContent(renderHtml(doc), { waitUntil: 'networkidle0' });
+      // Books with illustrations inline many large base64 images (OpenAI PNGs are
+      // ~3MB each → ~4MB as base64), so parsing/decoding the document can exceed
+      // Puppeteer's default 30s navigation timeout on a constrained container.
+      // Everything is inlined as data URIs (no real network), so raise the ceiling
+      // generously rather than waiting on a network that never fires.
+      await page.setContent(renderHtml(doc), { waitUntil: 'networkidle0', timeout: 120_000 });
       // Configure Paged.js to auto-run with a completion flag, THEN load the polyfill.
       // (Auto-mode is the only path that honours `@page { size }`; calling preview()
       // manually leaves the sheet at Paged.js's US-Letter default, which shrinks the
