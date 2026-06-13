@@ -102,7 +102,7 @@ export function WelcomeBanner({ name, activeCount }: { name: string; activeCount
               {submitting ? 'Starting…' : 'Analyze'}
             </Button>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 pl-1.5 text-xs text-muted-foreground">
+          <div className="hidden">
             <label className="flex items-center gap-1.5">
               Pages
               <input
