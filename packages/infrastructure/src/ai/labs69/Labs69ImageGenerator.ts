@@ -1,4 +1,15 @@
-import { Result, type ImageGenerator, type GeneratedImage } from '@yeg/core';
+import { Result, type ImageGenerator, type GeneratedImage, type Logger } from '@yeg/core';
+
+/** No-op logger so the adapter still works if constructed without one. */
+const NOOP_LOGGER: Logger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  child() {
+    return NOOP_LOGGER;
+  },
+};
 
 /**
  * Image generator backed by the 69labs API (default model "img-flux" / Flux
@@ -29,10 +40,11 @@ export class Labs69ImageGenerator implements ImageGenerator {
     // noticeable dead time after the image is already ready.
     private readonly pollIntervalMs = 1200,
     private readonly timeoutMs = 180_000,
+    private readonly logger: Logger = NOOP_LOGGER,
   ) {}
 
-  static fromApiKey(apiKey: string, model?: string): Labs69ImageGenerator {
-    return new Labs69ImageGenerator(apiKey, model);
+  static fromApiKey(apiKey: string, model?: string, logger?: Logger): Labs69ImageGenerator {
+    return new Labs69ImageGenerator(apiKey, model, undefined, undefined, logger ?? NOOP_LOGGER);
   }
 
   async generate(input: { prompt: string; size?: string }): Promise<Result<GeneratedImage>> {
@@ -40,10 +52,14 @@ export class Labs69ImageGenerator implements ImageGenerator {
 
     let lastError = 'unknown error';
     for (let attempt = 1; attempt <= Labs69ImageGenerator.MAX_ATTEMPTS; attempt++) {
-      const outcome = await this.runOnce(input);
+      const outcome = await this.runOnce(input, attempt);
       if (outcome.ok) return Result.ok(outcome.image);
       lastError = outcome.error;
-      if (!outcome.retryable) return Result.fail(outcome.error); // permanent — don't waste attempts
+      if (!outcome.retryable) {
+        this.logger.debug('69labs: permanent failure, not retrying', { attempt, error: outcome.error });
+        return Result.fail(outcome.error); // permanent — don't waste attempts
+      }
+      this.logger.warn('69labs: image attempt failed', { attempt, maxAttempts: Labs69ImageGenerator.MAX_ATTEMPTS, error: outcome.error });
       if (attempt < Labs69ImageGenerator.MAX_ATTEMPTS) await sleep(1000);
     }
     return Result.fail(`69labs failed after ${Labs69ImageGenerator.MAX_ATTEMPTS} attempts (last: ${lastError})`);
@@ -52,8 +68,10 @@ export class Labs69ImageGenerator implements ImageGenerator {
   /** One full enqueue → poll → download cycle, classified as retryable or not. */
   private async runOnce(
     input: { prompt: string; size?: string },
+    attempt: number,
   ): Promise<{ ok: true; image: GeneratedImage } | { ok: false; retryable: boolean; error: string }> {
     const auth = { Authorization: `Bearer ${this.apiKey}` };
+    const startedAt = Date.now();
     try {
       // 1) Enqueue the job.
       const body: Record<string, unknown> = { prompt: input.prompt, model: this.model };
@@ -70,8 +88,9 @@ export class Labs69ImageGenerator implements ImageGenerator {
         const retryable = enqueue.status >= 500 || enqueue.status === 429;
         return { ok: false, retryable, error: `69labs generate ${enqueue.status}: ${(await safeText(enqueue)).slice(0, 300)}` };
       }
-      const job = (await enqueue.json()) as { id?: string };
+      const job = (await enqueue.json()) as { id?: string; queuePosition?: number };
       if (!job.id) return { ok: false, retryable: true, error: '69labs generate returned no job id' };
+      this.logger.debug('69labs: job enqueued', { jobId: job.id, queuePosition: job.queuePosition, model: this.model, attempt });
 
       // 2) Poll until the job reaches a terminal state.
       const deadline = Date.now() + this.timeoutMs;
@@ -101,6 +120,7 @@ export class Labs69ImageGenerator implements ImageGenerator {
       const dl = await fetch(`${Labs69ImageGenerator.BASE}/download/${job.id}`, { headers: auth, redirect: 'follow' });
       if (!dl.ok) return { ok: false, retryable: dl.status >= 500, error: `69labs download ${dl.status}` };
       const bytes = new Uint8Array(await dl.arrayBuffer());
+      this.logger.debug('69labs: job completed', { jobId: job.id, ms: Date.now() - startedAt, bytes: bytes.length });
       return { ok: true, image: { bytes, contentType: normalizeContentType(dl.headers.get('content-type'), format) } };
     } catch (e) {
       // Network/transport errors are transient → retryable.

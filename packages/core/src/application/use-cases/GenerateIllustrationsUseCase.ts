@@ -7,6 +7,7 @@ import type { ProjectRepository } from '../ports/repositories/ProjectRepository.
 import type { ImageGenerator } from '../ports/services/ImageGenerator.js';
 import type { ObjectStorage } from '../ports/services/ObjectStorage.js';
 import type { IdGenerator } from '../ports/IdGenerator.js';
+import type { Logger } from '../ports/Logger.js';
 import { IllustrationPrompt } from '../prompts/IllustrationPrompt.js';
 import { EXPORT_BUCKET } from './ExportEbookUseCase.js';
 
@@ -27,6 +28,7 @@ export class GenerateIllustrationsUseCase {
     private readonly images: ImageGenerator,
     private readonly storage: ObjectStorage,
     private readonly ids: IdGenerator,
+    private readonly logger: Logger,
   ) {}
 
   async execute(cmd: { projectId: string }): Promise<Result<{ generated: number; attempted: number; error?: string }>> {
@@ -90,8 +92,21 @@ export class GenerateIllustrationsUseCase {
 
     if (plan.length === 0) return Result.ok({ generated: 0, attempted: 0 });
 
+    const total = plan.length;
+    this.logger.info(`🖼️  illustrations: generating ${total} image(s) with 69labs`, {
+      projectId: projectId.value,
+      planned: total,
+      targetCount,
+      everyPages,
+      eligibleChapters: chapters.length,
+    });
+
     // Generate concurrently; a failed image is skipped, not fatal — but its reason
-    // is captured so the caller can log WHY the bucket ended up short.
+    // is captured so the caller can log WHY the bucket ended up short. `done`/`failed`
+    // are bumped as each image settles (JS is single-threaded, so the ++ is safe) to
+    // give a live "N/total" progress trail in the logs.
+    let done = 0;
+    let failed = 0;
     const outcomes = await Promise.all(
       plan.map(async (slot): Promise<{ illustration?: Illustration; error?: string }> => {
         const prompt = IllustrationPrompt.build({
@@ -100,11 +115,29 @@ export class GenerateIllustrationsUseCase {
           bookSubject: ctx.knowledgeBase,
           tone: ctx.tone,
         });
+        this.logger.debug('🖼️  illustration: requesting image', { projectId: projectId.value, chapter: slot.chapterTitle, order: slot.order });
         const image = await this.images.generate({ prompt, size: '1536x1024' });
-        if (image.isFail()) return { error: `generate: ${image.error}` };
+        if (image.isFail()) {
+          this.logger.warn(`🖼️  illustration failed (${++failed} failed, ${done} done / ${total})`, {
+            projectId: projectId.value,
+            chapter: slot.chapterTitle,
+            order: slot.order,
+            error: image.error,
+          });
+          return { error: `generate: ${image.error}` };
+        }
         const path = `${projectId.value}/illustrations/${slot.chapterId}-${slot.order}.png`;
         const put = await this.storage.put(EXPORT_BUCKET, path, image.value.bytes, image.value.contentType);
-        if (put.isFail()) return { error: `store: ${put.error}` };
+        if (put.isFail()) {
+          this.logger.warn(`🖼️  illustration store failed (${++failed} failed, ${done} done / ${total})`, {
+            projectId: projectId.value,
+            chapter: slot.chapterTitle,
+            order: slot.order,
+            error: put.error,
+          });
+          return { error: `store: ${put.error}` };
+        }
+        this.logger.info(`🖼️  illustration ${++done}/${total} done`, { projectId: projectId.value, chapter: slot.chapterTitle });
         return {
           illustration: Illustration.create({
             id: IllustrationId.from(this.ids.uuid()),
@@ -120,6 +153,12 @@ export class GenerateIllustrationsUseCase {
     const made = outcomes.map((o) => o.illustration).filter((i): i is Illustration => i !== undefined);
     for (const ill of made) book.addIllustration(ill);
     if (made.length > 0) await this.books.save(book);
+
+    this.logger.info(`🖼️  illustrations: finished — ${made.length}/${total} generated`, {
+      projectId: projectId.value,
+      generated: made.length,
+      attempted: total,
+    });
 
     const firstError = outcomes.find((o) => o.error)?.error;
     return Result.ok({

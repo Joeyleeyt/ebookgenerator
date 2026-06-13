@@ -81,7 +81,7 @@ export function buildContainer(env: Env = loadEnv()) {
   const images = OpenAIImageGenerator.fromApiKey(env.OPENAI_API_KEY ?? '');
   // 69labs powers the in-chapter ILLUSTRATIONS (default model img-flux for speed).
   // Both fall back gracefully when their key is unset.
-  const illustrationImages = Labs69ImageGenerator.fromApiKey(env.LABS69_API_KEY ?? '', env.LABS69_IMAGE_MODEL);
+  const illustrationImages = Labs69ImageGenerator.fromApiKey(env.LABS69_API_KEY ?? '', env.LABS69_IMAGE_MODEL, logger.child({ adapter: '69labs' }));
   const youtube = new YouTubeDataApiProvider(env.YOUTUBE_API_KEY);
   const transcripts = new YouTubeTranscriptProvider();
   const audio = new YtDlpAudioDownloader(storage);
@@ -119,7 +119,7 @@ export function buildContainer(env: Env = loadEnv()) {
     polishChapter: new PolishChapterUseCase(books, knowledge, ai, clock),
     generateFrontBackMatter: new GenerateFrontBackMatterUseCase(books, ai, ids),
     generateCoverImage: new GenerateCoverImageUseCase(books, knowledge, images, storage),
-    generateIllustrations: new GenerateIllustrationsUseCase(books, projects, illustrationImages, storage, ids),
+    generateIllustrations: new GenerateIllustrationsUseCase(books, projects, illustrationImages, storage, ids, logger.child({ useCase: 'illustrations' })),
     assembleEbook: new AssembleEbookUseCase(books, knowledge, clock, storage),
     exportEbook: new ExportEbookUseCase(exporters, storage, artifacts),
     regenerateChapter: new RegenerateChapterUseCase(books, queue, hasher),
