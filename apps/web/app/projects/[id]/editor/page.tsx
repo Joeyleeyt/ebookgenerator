@@ -8,13 +8,14 @@ import {
   BookOpen,
   Check,
   CircleDot,
+  Columns2,
   Download,
+  Eye,
   FileText,
   Loader2,
+  Pencil,
   Save,
-  Sparkles,
   TriangleAlert,
-  Wand2,
 } from 'lucide-react';
 import { AppShell } from '../../../../components/app/AppShell.js';
 import { Card } from '../../../../components/ui/card.js';
@@ -58,18 +59,74 @@ function isChapterActive(status: string) {
   return status !== 'COMPLETED' && status !== 'FAILED';
 }
 
+// ── Live preview rendering ────────────────────────────────────────────────────
+// A lightweight, client-side port of the same block-level markdown rules the PDF
+// exporter uses (packages/infrastructure/src/export/html.ts), so the live preview
+// matches what lands in the exported book. Headings, bullet/numbered/checkbox
+// lists, paragraphs, and **bold**/*italic* inline marks.
+function escHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function inlineMd(text: string): string {
+  return text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>');
+}
+function renderMarkdownPreview(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((block) => {
+      const t = block.trim();
+      if (!t) return '';
+      if (t.startsWith('### ')) return `<h3>${inlineMd(escHtml(t.slice(4)))}</h3>`;
+      if (t.startsWith('## ')) return `<h2>${inlineMd(escHtml(t.slice(3)))}</h2>`;
+      if (t.startsWith('# ')) return `<h2>${inlineMd(escHtml(t.slice(2)))}</h2>`;
+      const lines = t.split('\n');
+      if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
+        const items = lines
+          .map((l) => `<li>${inlineMd(escHtml(l.replace(/^\s*[-*]\s+(\[[ xX]\]\s+)?/, '')))}</li>`)
+          .join('');
+        return `<ul>${items}</ul>`;
+      }
+      if (lines.every((l) => /^\s*\d+[.)]\s+/.test(l))) {
+        const items = lines.map((l) => `<li>${inlineMd(escHtml(l.replace(/^\s*\d+[.)]\s+/, '')))}</li>`).join('');
+        return `<ol>${items}</ol>`;
+      }
+      return `<p>${inlineMd(escHtml(t.replace(/\n/g, ' ')))}</p>`;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+// Book-page typography for the preview — a CSS subset of the PDF exporter so the
+// pane reads like a real page (Georgia serif, justified body, centered chapter
+// opener, drop-cap on the first paragraph), independent of the app's theme.
+const PREVIEW_STYLES = `
+.book-preview { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; font-size: 15px; line-height: 1.65; }
+.book-preview p { margin: 0 0 .85em; text-align: justify; hyphens: auto; }
+.book-preview h2 { font-family: Georgia, serif; font-size: 18px; margin: 1.5em 0 .5em; color: #111; line-height: 1.25; }
+.book-preview h3 { font-family: Georgia, serif; font-size: 15px; margin: 1.3em 0 .4em; color: #111; }
+.book-preview ul, .book-preview ol { margin: 0 0 .9em; padding-left: 1.4em; }
+.book-preview li { margin: 0 0 .35em; text-align: left; }
+.book-preview strong { font-weight: 700; }
+.book-preview em { font-style: italic; }
+.book-preview .bp-eyebrow { text-align: center; text-transform: uppercase; letter-spacing: .25em; font-size: 11px; font-weight: 600; color: #8a8a8a; margin: 0 0 1em; }
+.book-preview .bp-title { text-align: center; font-size: 26px; font-weight: 700; margin: 0 auto .3em; line-height: 1.2; color: #111; max-width: 18em; }
+.book-preview .bp-ornament { text-align: center; color: #bbb; letter-spacing: .4em; margin: 0 0 1.4em; }
+.book-preview .bp-body > p:first-of-type::first-letter { float: left; font-family: Georgia, serif; font-weight: 700; font-size: 3.2em; line-height: .72; padding: .02em .1em 0 0; color: #1a1a1a; }
+`;
+
 export default function EditorPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { id } = params;
   const [book, setBook] = useState<BookData | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  const [instructions, setInstructions] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   // PDF/DOCX re-export state, driven automatically after a successful save.
   const [exportState, setExportState] = useState<'idle' | 'building' | 'ready' | 'error'>('idle');
   const [exports, setExports] = useState<Array<{ format: string; url: string | null; bookVersion: number }>>([]);
+  // Editor layout: live side-by-side preview ('split'), editor only, or preview only.
+  const [view, setView] = useState<'edit' | 'split' | 'preview'>('split');
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/projects/${id}/book`);
@@ -152,40 +209,17 @@ export default function EditorPage({ params }: { params: { id: string } }) {
     }
   }
 
-  async function regenerate() {
-    if (!selected) return;
-    setBusy('regen');
-    setNotice(null);
-    try {
-      const res = await fetch(`/api/chapters/${selected.id}/regenerate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: id, instructions: instructions || undefined }),
-      });
-      const data = await res.json();
-      if (!res.ok) setNotice({ kind: 'err', text: data.error ?? 'Regenerate failed' });
-      else
-        setNotice({
-          kind: 'ok',
-          text: 'Regeneration queued — refresh in a moment to see the new draft.',
-        });
-    } finally {
-      setBusy(null);
-    }
-  }
-
   const totalWords = book?.chapters.reduce((sum, c) => sum + (c.wordCount ?? 0), 0) ?? 0;
 
   // ── Loading shell ─────────────────────────────────────────────────────────
   if (!book) {
     return (
       <AppShell>
-        <div className="mx-auto max-w-7xl">
+        <div className="mx-auto max-w-[1700px]">
           <Skeleton className="h-7 w-48" />
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[260px_1fr_300px]">
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[240px_1fr]">
             <Skeleton className="h-96 rounded-card" />
             <Skeleton className="h-[28rem] rounded-card" />
-            <Skeleton className="hidden h-72 rounded-card lg:block" />
           </div>
         </div>
       </AppShell>
@@ -196,7 +230,8 @@ export default function EditorPage({ params }: { params: { id: string } }) {
 
   return (
     <AppShell>
-      <div className="mx-auto flex max-w-7xl flex-col gap-5">
+      <style>{PREVIEW_STYLES}</style>
+      <div className="mx-auto flex max-w-[1700px] flex-col gap-5">
         {/* Studio header */}
         <div className="flex flex-wrap items-center gap-3">
           <Button asChild variant="ghost" size="sm" className="-ml-2">
@@ -220,13 +255,14 @@ export default function EditorPage({ params }: { params: { id: string } }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[260px_1fr_300px]">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[240px_1fr]">
           {/* ── Left: structure ──────────────────────────────────────────── */}
-          <aside className="lg:sticky lg:top-20 lg:self-start">
+          <aside className="flex flex-col lg:sticky lg:top-20 lg:h-[calc(100vh-7rem)] lg:self-start">
             <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
               Structure
             </p>
-            <div className="flex flex-col gap-1.5">
+            {/* Full-height, scrollable chapter list. */}
+            <div className="flex max-h-[60vh] flex-1 flex-col gap-1.5 overflow-y-auto pr-1 lg:max-h-none">
               {book.chapters.map((ch) => {
                 const on = ch.id === selectedId;
                 const pct = ch.wordTarget
@@ -265,7 +301,7 @@ export default function EditorPage({ params }: { params: { id: string } }) {
             </div>
           </aside>
 
-          {/* ── Center: editor ───────────────────────────────────────────── */}
+          {/* ── Right: editor (full remaining width) ─────────────────────── */}
           <section className="min-w-0">
             {selected ? (
               <Card className="flex flex-col p-6">
@@ -281,20 +317,72 @@ export default function EditorPage({ params }: { params: { id: string } }) {
                   </Badge>
                 </div>
 
-                <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground tabular-nums">
-                  <span>
-                    {draftWords} / {selected.wordTarget} words
-                  </span>
-                  <span className="text-muted-foreground/40">·</span>
-                  <span>v{selected.version}</span>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground tabular-nums">
+                    <span>
+                      {draftWords} / {selected.wordTarget} words
+                    </span>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span>v{selected.version}</span>
+                  </div>
+                  {/* View toggle — switch between editing, a live side-by-side preview, or preview only. */}
+                  <div className="inline-flex rounded-input border border-border bg-surface p-0.5 text-xs">
+                    {(['edit', 'split', 'preview'] as const).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setView(v)}
+                        className={cn(
+                          'flex items-center gap-1.5 rounded-[6px] px-2.5 py-1 font-medium capitalize transition-colors',
+                          view === v
+                            ? 'bg-primary-soft text-primary'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        {v === 'edit' ? (
+                          <Pencil className="size-3.5" />
+                        ) : v === 'split' ? (
+                          <Columns2 className="size-3.5" />
+                        ) : (
+                          <Eye className="size-3.5" />
+                        )}
+                        {v}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <textarea
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder="Chapter content (markdown)…"
-                  className="mt-4 min-h-[28rem] w-full resize-y rounded-input border border-border bg-canvas/40 p-4 text-[15px] leading-relaxed outline-none transition-colors focus:border-primary"
-                />
+                {/* Editor + live preview. The preview re-renders from `draft` on every
+                    keystroke, so the page on the right reflects the edit in real time. */}
+                <div className={cn('mt-4 grid gap-4', view === 'split' && 'lg:grid-cols-2')}>
+                  {view !== 'preview' && (
+                    <textarea
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      placeholder="Chapter content (markdown)…"
+                      className="min-h-[28rem] w-full resize-y rounded-input border border-border bg-canvas/40 p-4 text-[15px] leading-relaxed outline-none transition-colors focus:border-primary"
+                    />
+                  )}
+                  {view !== 'edit' && (
+                    <div className="max-h-[44rem] min-h-[28rem] overflow-auto rounded-input border border-border bg-white p-8 shadow-inner">
+                      {draft.trim() ? (
+                        <div className="book-preview">
+                          <p className="bp-eyebrow">Chapter {selected.position + 1}</p>
+                          <h1 className="bp-title">{selected.title}</h1>
+                          <p className="bp-ornament">···</p>
+                          <div
+                            className="bp-body"
+                            dangerouslySetInnerHTML={{ __html: renderMarkdownPreview(draft) }}
+                          />
+                        </div>
+                      ) : (
+                        <p className="py-24 text-center text-sm text-neutral-400">
+                          Start typing to see your book preview update live…
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 <div className="mt-4 flex flex-wrap items-center gap-3">
                   <Button onClick={save} disabled={busy !== null}>
@@ -378,55 +466,6 @@ export default function EditorPage({ params }: { params: { id: string } }) {
               </Card>
             )}
           </section>
-
-          {/* ── Right: AI copilot ────────────────────────────────────────── */}
-          <aside className="flex flex-col gap-4 lg:sticky lg:top-20 lg:self-start">
-            <Card className="p-5">
-              <div className="flex items-center gap-2">
-                <span className="grid size-8 place-items-center rounded-[10px] bg-primary-soft">
-                  <Sparkles className="size-4 text-primary" />
-                </span>
-                <div>
-                  <p className="text-sm font-semibold">AI Copilot</p>
-                  <p className="text-xs text-muted-foreground">Rewrite this chapter</p>
-                </div>
-              </div>
-
-              <textarea
-                value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
-                placeholder="Optional: how should the AI change it? e.g. “more concise, add a case study”"
-                className="mt-3 min-h-20 w-full resize-y rounded-input border border-border bg-canvas/40 p-3 text-sm outline-none transition-colors focus:border-primary"
-              />
-
-              <Button
-                onClick={regenerate}
-                disabled={busy !== null || !selected}
-                variant="secondary"
-                className="mt-3 w-full"
-              >
-                {busy === 'regen' ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
-                {busy === 'regen' ? 'Queuing…' : 'Regenerate chapter'}
-              </Button>
-            </Card>
-
-            <Card className="p-5">
-              <p className="text-sm font-semibold">More AI actions</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Selection-scoped editing — expand, add statistics, change tone — lands with Book Studio.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {['Expand', 'Improve clarity', 'Add statistics', 'Change tone'].map((a) => (
-                  <span
-                    key={a}
-                    className="cursor-not-allowed rounded-full border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground/60"
-                  >
-                    {a}
-                  </span>
-                ))}
-              </div>
-            </Card>
-          </aside>
         </div>
       </div>
     </AppShell>
