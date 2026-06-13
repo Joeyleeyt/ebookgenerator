@@ -1,4 +1,5 @@
 import { Result, type ImageGenerator, type GeneratedImage, type Logger } from '@yeg/core';
+import type { ProxyRotator } from '../../net/ProxyRotator.js';
 
 /** No-op logger so the adapter still works if constructed without one. */
 const NOOP_LOGGER: Logger = {
@@ -12,9 +13,9 @@ const NOOP_LOGGER: Logger = {
 };
 
 /**
- * Image generator backed by the 69labs API (default model "img-flux" / Flux
- * Schnell). Used ONLY for the in-chapter illustrations; the cover uses OpenAI
- * gpt-image-1.
+ * Image generator backed by the 69labs API (default model "nano-banana-2";
+ * overridable via LABS69_IMAGE_MODEL). Used ONLY for the in-chapter
+ * illustrations; the cover uses OpenAI gpt-image-1.
  *
  * 69labs generation is asynchronous, so one call to `generate` runs the whole
  * job lifecycle behind the synchronous port:
@@ -28,6 +29,12 @@ const NOOP_LOGGER: Logger = {
  * non-retryable outcomes (CANCELLED, a 4xx like an invalid aspect ratio, or a
  * timeout) fail fast. After exhausting retries we return Result.fail and the
  * caller skips that one illustration (generation is best-effort).
+ *
+ * PROXY: 69labs fails jobs that originate from datacenter/cloud IPs (e.g. Railway)
+ * — the request enqueues but the job ends FAILED. When a ProxyRotator is supplied,
+ * each attempt's whole lifecycle (enqueue → poll → download) runs through the next
+ * residential proxy in the pool, presenting a residential IP so the job completes.
+ * A failed attempt retries on a different proxy.
  */
 export class Labs69ImageGenerator implements ImageGenerator {
   private static readonly BASE = 'https://69labs.vip/api/v1/images';
@@ -35,24 +42,32 @@ export class Labs69ImageGenerator implements ImageGenerator {
 
   constructor(
     private readonly apiKey: string,
-    private readonly model = 'img-flux',
+    private readonly model = 'nano-banana-2',
     // Poll fairly tightly: img-flux finishes in ~10s, so a long interval would add
     // noticeable dead time after the image is already ready.
     private readonly pollIntervalMs = 1200,
     private readonly timeoutMs = 180_000,
     private readonly logger: Logger = NOOP_LOGGER,
+    // When set, route requests through these residential proxies (rotated per
+    // attempt) so 69labs sees a residential — not datacenter — origin IP.
+    private readonly proxies?: ProxyRotator,
   ) {}
 
-  static fromApiKey(apiKey: string, model?: string, logger?: Logger): Labs69ImageGenerator {
-    return new Labs69ImageGenerator(apiKey, model, undefined, undefined, logger ?? NOOP_LOGGER);
+  static fromApiKey(apiKey: string, model?: string, logger?: Logger, proxies?: ProxyRotator): Labs69ImageGenerator {
+    return new Labs69ImageGenerator(apiKey, model, undefined, undefined, logger ?? NOOP_LOGGER, proxies);
   }
 
   async generate(input: { prompt: string; size?: string }): Promise<Result<GeneratedImage>> {
     if (!this.apiKey) return Result.fail('LABS69_API_KEY is not configured');
 
+    // One proxy-bound fetch per attempt, rotated, so a flagged IP is retried on a
+    // different one. With no proxies configured this is just the direct fetch.
+    const fetches = this.proxies?.orderedFetches() ?? [globalThis.fetch];
+
     let lastError = 'unknown error';
     for (let attempt = 1; attempt <= Labs69ImageGenerator.MAX_ATTEMPTS; attempt++) {
-      const outcome = await this.runOnce(input, attempt);
+      const doFetch = fetches[(attempt - 1) % fetches.length]!;
+      const outcome = await this.runOnce(input, attempt, doFetch);
       if (outcome.ok) return Result.ok(outcome.image);
       lastError = outcome.error;
       if (!outcome.retryable) {
@@ -69,6 +84,7 @@ export class Labs69ImageGenerator implements ImageGenerator {
   private async runOnce(
     input: { prompt: string; size?: string },
     attempt: number,
+    doFetch: typeof globalThis.fetch,
   ): Promise<{ ok: true; image: GeneratedImage } | { ok: false; retryable: boolean; error: string }> {
     const auth = { Authorization: `Bearer ${this.apiKey}` };
     const startedAt = Date.now();
@@ -78,7 +94,7 @@ export class Labs69ImageGenerator implements ImageGenerator {
       const aspectRatio = aspectRatioFor(input.size);
       if (aspectRatio) body.aspectRatio = aspectRatio;
 
-      const enqueue = await fetch(`${Labs69ImageGenerator.BASE}/generate`, {
+      const enqueue = await doFetch(`${Labs69ImageGenerator.BASE}/generate`, {
         method: 'POST',
         headers: { ...auth, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -98,7 +114,7 @@ export class Labs69ImageGenerator implements ImageGenerator {
       let format = 'png';
       while (Date.now() < deadline) {
         await sleep(this.pollIntervalMs);
-        const res = await fetch(`${Labs69ImageGenerator.BASE}/status/${job.id}`, { headers: auth });
+        const res = await doFetch(`${Labs69ImageGenerator.BASE}/status/${job.id}`, { headers: auth });
         if (!res.ok) {
           if (res.status >= 500) continue; // transient — keep polling
           return { ok: false, retryable: false, error: `69labs status ${res.status}` };
@@ -122,7 +138,7 @@ export class Labs69ImageGenerator implements ImageGenerator {
       // 3) Download the output. The endpoint 302-redirects to a presigned URL;
       // fetch follows it (and drops the bearer header cross-origin, which the
       // presigned URL doesn't need).
-      const dl = await fetch(`${Labs69ImageGenerator.BASE}/download/${job.id}`, { headers: auth, redirect: 'follow' });
+      const dl = await doFetch(`${Labs69ImageGenerator.BASE}/download/${job.id}`, { headers: auth, redirect: 'follow' });
       if (!dl.ok) return { ok: false, retryable: dl.status >= 500, error: `69labs download ${dl.status}` };
       const bytes = new Uint8Array(await dl.arrayBuffer());
       this.logger.debug('69labs: job completed', { jobId: job.id, ms: Date.now() - startedAt, bytes: bytes.length });
@@ -147,10 +163,10 @@ async function safeText(res: Response): Promise<string> {
 }
 
 /**
- * Map a legacy "WxH" size hint to a 69labs aspect-ratio string. NOTE: img-flux
- * (Flux Schnell) only accepts 16:9 among the ratios we use — illustrations always
- * request landscape (1536x1024 → 16:9), so this is safe. Do NOT switch
- * illustrations to square/portrait with img-flux, or 69labs rejects the request.
+ * Map a legacy "WxH" size hint to a 69labs aspect-ratio string. Illustrations
+ * always request landscape (1536x1024 → 16:9), which every 69labs model we use
+ * supports. NOTE: img-flux (Flux Schnell) ONLY accepts 16:9 among our ratios, so
+ * if switching back to it, keep illustrations landscape or it rejects the request.
  */
 function aspectRatioFor(size?: string): string | null {
   const m = size ? /^(\d+)x(\d+)$/.exec(size) : null;

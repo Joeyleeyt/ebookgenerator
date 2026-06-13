@@ -93,3 +93,22 @@ export function youtubeProxyList(): string[] {
 export function youtubeProxyRotator(): ProxyRotator {
   return new ProxyRotator(youtubeProxyList());
 }
+
+/**
+ * Proxy pool for 69labs image requests. 69labs fails jobs from datacenter IPs, so
+ * routing through residential proxies fixes it. Uses a dedicated LABS69_PROXIES /
+ * LABS69_PROXY if set, otherwise falls back to the existing YouTube residential
+ * pool — so a deployment that already has YT_DLP_PROXIES needs no new config.
+ */
+export function labs69ProxyList(): string[] {
+  const own = parseProxyList(process.env.LABS69_PROXIES);
+  if (own.length) return own;
+  const single = parseProxyList(process.env.LABS69_PROXY);
+  if (single.length) return single;
+  return youtubeProxyList();
+}
+
+/** Build a rotator for 69labs from its proxy env (or the YouTube pool fallback). */
+export function labs69ProxyRotator(): ProxyRotator {
+  return new ProxyRotator(labs69ProxyList());
+}

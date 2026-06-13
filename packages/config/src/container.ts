@@ -38,6 +38,7 @@ import {
   Labs69ImageGenerator,
   FallbackImageGenerator,
   SharpImageProcessor,
+  labs69ProxyRotator,
   YouTubeDataApiProvider,
   YouTubeTranscriptProvider,
   WhisperSpeechToText,
@@ -84,7 +85,14 @@ export function buildContainer(env: Env = loadEnv()) {
   // 69labs (img-flux) powers the in-chapter ILLUSTRATIONS — cheap and fast — but
   // its jobs fail intermittently, so OpenAI gpt-image-1 is a reliable fallback:
   // FallbackImageGenerator only pays for OpenAI when a 69labs job fails.
-  const labs69 = Labs69ImageGenerator.fromApiKey(env.LABS69_API_KEY ?? '', env.LABS69_IMAGE_MODEL, logger.child({ adapter: '69labs' }));
+  // 69labs blocks datacenter IPs, so route its requests through residential
+  // proxies (LABS69_PROXIES, else the shared YT_DLP_PROXIES pool).
+  const labs69 = Labs69ImageGenerator.fromApiKey(
+    env.LABS69_API_KEY ?? '',
+    env.LABS69_IMAGE_MODEL,
+    logger.child({ adapter: '69labs' }),
+    labs69ProxyRotator(),
+  );
   const illustrationImages = new FallbackImageGenerator(labs69, images, logger.child({ adapter: 'image-fallback' }));
   // Downscales generated illustrations to a print-appropriate JPEG before storage.
   const imageProcessor = new SharpImageProcessor();

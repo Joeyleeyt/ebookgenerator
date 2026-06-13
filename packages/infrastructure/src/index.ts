@@ -14,6 +14,9 @@ export * from './ai/FallbackImageGenerator.js';
 // ── Image processing (sharp) ────────────────────────────────────────────────
 export * from './image/SharpImageProcessor.js';
 
+// ── Networking (proxy rotation) ─────────────────────────────────────────────
+export * from './net/ProxyRotator.js';
+
 // ── YouTube ─────────────────────────────────────────────────────────────────
 export * from './youtube/YouTubeDataApiProvider.js';
 export * from './youtube/YouTubeTranscriptProvider.js';

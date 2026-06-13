@@ -26,10 +26,10 @@ const EnvSchema = z.object({
   // 69labs — generates ONLY the in-chapter illustrations. If unset, books carry
   // no illustrations.
   LABS69_API_KEY: z.string().optional(),
-  // Which 69labs model to use for illustrations. Defaults to "img-flux" (Flux
-  // Schnell) — ~10s/image vs ~38s for "nano-banana-2", same 1-credit cost. Set to
-  // "nano-banana-2" for max quality at the cost of speed.
-  LABS69_IMAGE_MODEL: z.string().default('img-flux'),
+  // Which 69labs model to use for illustrations. Defaults to "nano-banana-2"
+  // (higher quality, same 1-credit cost, ~38s/image). "img-flux" (Flux Schnell)
+  // is faster (~10s) but lower quality; "nano-banana-pro" is 2 credits.
+  LABS69_IMAGE_MODEL: z.string().default('nano-banana-2'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

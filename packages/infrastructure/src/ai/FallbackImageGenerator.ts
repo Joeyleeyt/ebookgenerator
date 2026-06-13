@@ -27,7 +27,11 @@ export class FallbackImageGenerator implements ImageGenerator {
       return second;
     }
 
-    // Both failed — surface both reasons so the log explains the empty slot.
+    // Both failed — log AND surface both reasons so the empty slot is explained.
+    this.logger.error('both primary and fallback image generators failed', {
+      primaryError: first.error,
+      fallbackError: second.error,
+    });
     return Result.fail(`primary: ${first.error}; fallback: ${second.error}`);
   }
 }
