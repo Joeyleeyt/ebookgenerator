@@ -280,6 +280,13 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
         });
       } else {
         const { generated, attempted, error } = illustrationsS.value.value;
+        if (attempted === 0) {
+          // Nothing was even attempted — make the reason visible instead of silent:
+          // either the option is off for this project or no chapter was eligible.
+          container.logger.info('no illustrations attempted (feature off for this project or no eligible chapters)', {
+            projectId: p.projectId,
+          });
+        }
         if (attempted > 0 && generated < attempted) {
           // Some/all images failed (e.g. 69labs error or out of credits). Surface
           // the first reason so an empty/short bucket is diagnosable, not silent.

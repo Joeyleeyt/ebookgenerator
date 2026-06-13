@@ -52,6 +52,13 @@ async function main(): Promise<void> {
 
   log.info(`workers online: ${workers.length} queues`);
 
+  // Image-provider readiness — printed at boot so a missing key in a deployed
+  // environment is obvious (illustrations/cover silently no-op without their key).
+  log.info('image providers', {
+    illustrations: env.LABS69_API_KEY ? `69labs (${env.LABS69_IMAGE_MODEL})` : 'DISABLED — LABS69_API_KEY is not set',
+    cover: env.OPENAI_API_KEY ? 'openai gpt-image-1' : 'DISABLED — OPENAI_API_KEY is not set',
+  });
+
   const shutdown = async (signal: string): Promise<void> => {
     log.info(`received ${signal}, draining workers...`);
     await Promise.all(workers.map((w: Worker) => w.close()));
