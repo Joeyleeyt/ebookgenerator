@@ -77,9 +77,10 @@ export class GenerateOutlineUseCase {
         system: prompt.system,
         messages: [{ role: 'user', content: prompt.user }],
         // Up to 14 chapter entries (title/purpose/promise/keyPoints/wordTarget
-        // each) can overflow 4000 and truncate the JSON. Ceiling only, so the
-        // headroom is free insurance.
-        maxTokens: 8000,
+        // each) can overflow and truncate the JSON mid-array — JSON.parse then
+        // fails with "Expected ',' or ']'". Ceiling only, billed on actual
+        // output, so the headroom is free insurance.
+        maxTokens: 16000,
         cacheControl: { systemPrefix: true },
         metadata: { projectId: cmd.projectId, stage: 'outline-generate' },
       });
