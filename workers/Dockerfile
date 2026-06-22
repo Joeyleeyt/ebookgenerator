@@ -19,6 +19,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PUPPETEER_SKIP_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
+# Prefer IPv4 when resolving hostnames. Belt-and-suspenders with the keepAlive:false
+# IPv4 agent in YouTubeDataApiProvider: broken IPv6 egress to googleapis.com is a
+# common cause of "Premature close" body-stream errors on the worker.
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
+
 ENV PNPM_HOME=/pnpm PATH=$PNPM_HOME:$PATH
 RUN corepack enable
 
