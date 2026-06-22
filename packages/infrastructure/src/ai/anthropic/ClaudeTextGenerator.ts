@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Result, type AiTextGenerator, type AiGenerateInput, type AiCompletion, type AiError, type Telemetry } from '@yeg/core';
+import { keepAliveAgent } from '../../net/keepAliveAgent.js';
 
 /**
  * The only AI provider. Maps the Anthropic SDK to the AiTextGenerator port.
@@ -17,7 +18,7 @@ export class ClaudeTextGenerator implements AiTextGenerator {
   ) {}
 
   static fromApiKey(apiKey: string, telemetry?: Telemetry): ClaudeTextGenerator {
-    return new ClaudeTextGenerator(new Anthropic({ apiKey }), telemetry);
+    return new ClaudeTextGenerator(new Anthropic({ apiKey, httpAgent: keepAliveAgent }), telemetry);
   }
 
   async generate(input: AiGenerateInput): Promise<Result<AiCompletion, AiError>> {

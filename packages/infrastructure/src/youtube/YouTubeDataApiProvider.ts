@@ -1,4 +1,3 @@
-import { Agent } from 'node:https';
 import { google, type youtube_v3 } from 'googleapis';
 import {
   Result,
@@ -8,24 +7,14 @@ import {
   type RawComment,
   type ChannelRef,
 } from '@yeg/core';
-
-/**
- * Dedicated HTTP agent for googleapis with keep-alive DISABLED. On a long-lived
- * worker, gaxios/node-fetch pools keep-alive sockets; when Google (or a hop in
- * Railway's egress) silently closes an idle socket and Node reuses it, the body
- * read fails mid-stream with "Premature close" — and it reproduces on every
- * retry because they all grab the same poisoned connection. A fresh socket per
- * request removes the stale-socket failure mode. `family: 4` forces IPv4, since
- * broken IPv6 paths are a common secondary cause of the same symptom.
- */
-const httpsAgent = new Agent({ keepAlive: false, family: 4 });
+import { keepAliveAgent } from '../net/keepAliveAgent.js';
 
 /** YouTube Data API v3 adapter for channel/video metadata and comments. */
 export class YouTubeDataApiProvider implements YouTubeMetadataProvider {
   private readonly yt: youtube_v3.Youtube;
 
   constructor(apiKey: string) {
-    this.yt = google.youtube({ version: 'v3', auth: apiKey, agent: httpsAgent });
+    this.yt = google.youtube({ version: 'v3', auth: apiKey, agent: keepAliveAgent });
   }
 
   async resolveChannel(ref: ChannelRef): Promise<Result<ChannelMetadata>> {

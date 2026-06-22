@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { Result, type SpeechToText, type RawTranscript, type ObjectStorage } from '@yeg/core';
+import { keepAliveAgent } from '../net/keepAliveAgent.js';
 
 const AUDIO_BUCKET = 'audio';
 
@@ -15,7 +16,7 @@ export class WhisperSpeechToText implements SpeechToText {
   ) {}
 
   static fromApiKey(apiKey: string, storage: ObjectStorage): WhisperSpeechToText {
-    return new WhisperSpeechToText(new OpenAI({ apiKey }), storage);
+    return new WhisperSpeechToText(new OpenAI({ apiKey, httpAgent: keepAliveAgent }), storage);
   }
 
   async transcribe(audioRef: string): Promise<Result<RawTranscript>> {
