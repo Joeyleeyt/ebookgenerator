@@ -116,7 +116,15 @@ export class Labs69ImageGenerator implements ImageGenerator {
         await sleep(this.pollIntervalMs);
         const res = await doFetch(`${Labs69ImageGenerator.BASE}/status/${job.id}`, { headers: auth });
         if (!res.ok) {
-          if (res.status >= 500) continue; // transient — keep polling
+          // 5xx AND 429 are transient — the job is still running, we're just being
+          // throttled or hitting a blip, so keep polling instead of abandoning a
+          // job that's likely about to complete. For 429 honor Retry-After so we
+          // back off the shared-key rate limit rather than hammering it.
+          if (res.status >= 500) continue;
+          if (res.status === 429) {
+            await sleep(retryAfterMs(res) || this.pollIntervalMs);
+            continue;
+          }
           return { ok: false, retryable: false, error: `69labs status ${res.status}` };
         }
         const data = (await res.json()) as { status?: string; userMessage?: string; outputMetadata?: { format?: string } };
@@ -139,7 +147,7 @@ export class Labs69ImageGenerator implements ImageGenerator {
       // fetch follows it (and drops the bearer header cross-origin, which the
       // presigned URL doesn't need).
       const dl = await doFetch(`${Labs69ImageGenerator.BASE}/download/${job.id}`, { headers: auth, redirect: 'follow' });
-      if (!dl.ok) return { ok: false, retryable: dl.status >= 500, error: `69labs download ${dl.status}` };
+      if (!dl.ok) return { ok: false, retryable: dl.status >= 500 || dl.status === 429, error: `69labs download ${dl.status}` };
       const bytes = new Uint8Array(await dl.arrayBuffer());
       this.logger.debug('69labs: job completed', { jobId: job.id, ms: Date.now() - startedAt, bytes: bytes.length });
       return { ok: true, image: { bytes, contentType: normalizeContentType(dl.headers.get('content-type'), format) } };
@@ -152,6 +160,14 @@ export class Labs69ImageGenerator implements ImageGenerator {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Parse a `Retry-After` header (delta-seconds form) into ms; 0 if absent/unparseable. */
+function retryAfterMs(res: Response): number {
+  const header = res.headers.get('retry-after');
+  if (!header) return 0;
+  const seconds = Number(header);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 0;
 }
 
 async function safeText(res: Response): Promise<string> {

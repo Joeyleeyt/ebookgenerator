@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { Result, type ImageGenerator, type GeneratedImage } from '@yeg/core';
+import { keepAliveAgent } from '../../net/keepAliveAgent.js';
 
 /**
  * Cover-art generator backed by OpenAI's gpt-image-1. Reuses the same API key as
@@ -10,7 +11,7 @@ export class OpenAIImageGenerator implements ImageGenerator {
   constructor(private readonly client: OpenAI) {}
 
   static fromApiKey(apiKey: string): OpenAIImageGenerator {
-    return new OpenAIImageGenerator(new OpenAI({ apiKey }));
+    return new OpenAIImageGenerator(new OpenAI({ apiKey, httpAgent: keepAliveAgent }));
   }
 
   async generate(input: { prompt: string; size?: string }): Promise<Result<GeneratedImage>> {
