@@ -37,6 +37,7 @@ export default function ProjectsPage() {
   const [tab, setTab] = useState<Tab>('all');
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
+  const [bookType, setBookType] = useState<'normal' | 'cooking'>('normal');
   const [pages, setPages] = useState(100);
   const [videos, setVideos] = useState(30);
   const [illustrations, setIllustrations] = useState(true);
@@ -80,6 +81,7 @@ export default function ProjectsPage() {
           channelUrl: trimmedUrl,
           options: {
             bookTitle: trimmedTitle,
+            bookType,
             targetPages: clampInt(pages, 10, 200, 100),
             maxVideos: clampInt(videos, 5, 50, 30),
             includeIllustrations: illustrations,
@@ -134,6 +136,15 @@ export default function ProjectsPage() {
                 required
                 className="h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
+              <select
+                value={bookType}
+                onChange={(e) => setBookType(e.target.value as 'normal' | 'cooking')}
+                aria-label="Book type"
+                className="h-8 shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-foreground outline-none focus:border-primary"
+              >
+                <option value="normal">Normal ebook</option>
+                <option value="cooking">Cooking ebook</option>
+              </select>
             </div>
             <div className="flex items-center gap-2 p-1.5 pl-3.5">
               <Youtube className="size-5 shrink-0 text-error" />

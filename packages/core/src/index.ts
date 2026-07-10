@@ -30,6 +30,7 @@ export * from './domain/book/ids.js';
 export * from './domain/book/Chapter.js';
 export * from './domain/book/Section.js';
 export * from './domain/book/Outline.js';
+export * from './domain/book/Recipe.js';
 export * from './domain/book/PageBudget.js';
 export * from './domain/book/BookStrategy.js';
 export * from './domain/book/ChapterResearch.js';

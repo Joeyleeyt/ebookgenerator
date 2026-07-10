@@ -9,6 +9,8 @@ export interface SharedChapterContext {
   tone: string;
   authorVoice: string;
   contextVersion: string;
+  /** The kind of book being written; drives recipe vs. prose generation. */
+  bookType: 'normal' | 'cooking';
 }
 
 export interface BookRepository {

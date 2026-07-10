@@ -9,6 +9,7 @@ import {
   type ProjectListItem,
   type ProjectState,
   type Tone,
+  type BookType,
 } from '@yeg/core';
 
 interface ProjectRow {
@@ -18,8 +19,10 @@ interface ProjectRow {
   status: ProjectState;
   options: {
     bookTitle?: string;
+    bookType?: BookType;
     targetPages: number;
     maxVideos: number;
+    recipeCount?: number;
     tone: Tone;
     includeComments: boolean;
     includeIllustrations?: boolean;
@@ -50,8 +53,10 @@ export class SupabaseProjectRepository implements ProjectRepository {
       status: project.status.value,
       options: {
         ...(project.options.bookTitle ? { bookTitle: project.options.bookTitle } : {}),
+        bookType: project.options.bookType,
         targetPages: project.options.targetPages,
         maxVideos: project.options.maxVideos,
+        recipeCount: project.options.recipeCount,
         tone: project.options.tone,
         includeComments: project.options.includeComments,
         includeIllustrations: project.options.includeIllustrations,

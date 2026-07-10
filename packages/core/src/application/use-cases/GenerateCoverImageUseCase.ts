@@ -31,12 +31,16 @@ export class GenerateCoverImageUseCase {
     const ctx = await this.books.loadSharedContext(projectId);
     const strategy = await this.knowledge.getBookStrategy(projectId);
 
-    const prompt = CoverImagePrompt.build({
+    const coverInput = {
       title: book.title ?? strategy?.title ?? 'Untitled',
       subtitle: strategy?.subtitle ?? '',
       knowledgeBase: ctx.knowledgeBase,
       tone: ctx.tone,
-    });
+    };
+    // Cooking books get an antique vintage-cookbook cover; everything else gets the
+    // premium blueprint-style nonfiction cover.
+    const prompt =
+      ctx.bookType === 'cooking' ? CoverImagePrompt.buildVintage(coverInput) : CoverImagePrompt.build(coverInput);
 
     const image = await this.images.generate({ prompt, size: '1024x1536' });
     if (image.isFail()) return Result.fail(image.error);

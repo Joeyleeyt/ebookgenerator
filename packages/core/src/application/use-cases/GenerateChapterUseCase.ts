@@ -1,11 +1,16 @@
 import { Result } from '../../domain/shared/Result.js';
 import { ProjectId } from '../../domain/project/ProjectId.js';
 import { ChapterId } from '../../domain/book/ids.js';
-import type { BookRepository } from '../ports/repositories/BookRepository.js';
+import type { Book } from '../../domain/book/Book.js';
+import type { Chapter } from '../../domain/book/Chapter.js';
+import type { BookRepository, SharedChapterContext } from '../ports/repositories/BookRepository.js';
 import type { KnowledgeRepository } from '../ports/repositories/KnowledgeRepository.js';
 import type { AiTextGenerator } from '../ports/services/AiTextGenerator.js';
 import type { Clock } from '../ports/Clock.js';
 import { ChapterPrompt } from '../prompts/ChapterPrompt.js';
+import { RecipePrompt } from '../prompts/RecipePrompt.js';
+import { RecipeSchema, serializeRecipe } from '../../domain/book/Recipe.js';
+import { parseJsonCompletion } from '../prompts/parse.js';
 import type { ChapterJob } from '../dto/jobs.dto.js';
 
 /** Run the expand pass when the draft lands below this fraction of its target. */
@@ -42,6 +47,12 @@ export class GenerateChapterUseCase {
     const research = await this.knowledge.getChapterResearch(chapter.id);
     const researchText = research?.toText() ?? 'No additional research available; rely on the knowledge base.';
     chapter.markGenerating();
+
+    // Cooking books: generate ONE structured recipe as JSON (not prose). The recipe
+    // description + cuisine were carried on the chapter's keyPoints by the outline step.
+    if (ctx.bookType === 'cooking') {
+      return this.generateRecipe({ cmd, book, chapter, ctx });
+    }
 
     // The shared, cacheable system prefix (book strategy + KB) — identical for the
     // draft and the expand pass, so the second call reads it from cache.
@@ -120,6 +131,54 @@ export class GenerateChapterUseCase {
     // Persist ONLY this chapter. A full save(book) re-upserts every chapter, so
     // parallel chapter jobs would clobber each other's just-written content with
     // their own stale snapshot — leaving a chapter PENDING and breaking assembly.
+    await this.books.saveChapter(book.id, chapter);
+    return Result.ok({ skipped: false });
+  }
+
+  /**
+   * Generate one recipe as structured JSON and store it (serialized) as the
+   * chapter content. No expand pass — recipe length is governed by the prompt.
+   * A malformed-JSON completion is retried once before failing.
+   */
+  private async generateRecipe(input: {
+    cmd: ChapterJob;
+    book: Book;
+    chapter: Chapter;
+    ctx: SharedChapterContext;
+  }): Promise<Result<{ skipped: boolean }>> {
+    const { cmd, book, chapter, ctx } = input;
+    // keyPoints = [description, cuisine] from the recipe-outline step.
+    const description = chapter.keyPoints[0] ?? chapter.topic ?? '';
+    const cuisine = chapter.keyPoints[1] ?? '';
+
+    const system = RecipePrompt.system({
+      bookStrategy: ctx.bookStrategy,
+      knowledgeBase: ctx.knowledgeBase,
+      cuisine,
+    });
+    const userMsg = RecipePrompt.user({ title: chapter.title, description });
+
+    let content: string | null = null;
+    for (let attempt = 0; attempt < 2 && content === null; attempt++) {
+      const completion = await this.ai.generate({
+        model: 'claude-sonnet-4-6',
+        system,
+        messages: [{ role: 'user', content: userMsg }],
+        maxTokens: 4000,
+        cacheControl: { systemPrefix: true },
+        metadata: { projectId: cmd.projectId, stage: 'chapter-generate' },
+      });
+      if (completion.isFail()) return Result.fail(completion.error.type);
+      const parsed = parseJsonCompletion(completion.value.text, RecipeSchema);
+      if (parsed.isOk()) content = serializeRecipe(parsed.value);
+    }
+    if (content === null) return Result.fail('Recipe JSON malformed after retry');
+
+    if (cmd.mode === 'regenerate') {
+      await this.books.snapshotChapterVersion(book.id, chapter.id.value);
+    }
+    const applied = book.regenerateChapter(chapter.id, { content, inputHash: cmd.inputHash }, this.clock.now());
+    if (applied.isFail()) return Result.fail(applied.error);
     await this.books.saveChapter(book.id, chapter);
     return Result.ok({ skipped: false });
   }

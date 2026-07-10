@@ -2,6 +2,8 @@ import type { Result } from '../../../domain/shared/Result.js';
 import type { ExportFormat } from '../../../domain/export/ExportArtifact.js';
 
 export interface AssembledDocument {
+  /** Book kind — the exporter uses this to pick the prose vs. recipe-card layout. */
+  bookType: 'normal' | 'cooking';
   title: string;
   subtitle: string;
   /** Optional cover promise/benefit line (the book's core promise). */

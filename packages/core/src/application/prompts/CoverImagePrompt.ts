@@ -95,4 +95,68 @@ export const CoverImagePrompt = {
       'Commercial publishing quality.',
     ].join('\n');
   },
+
+  /**
+   * Vintage cookbook cover — for cooking books. Styled after early-1900s to
+   * mid-century American recipe books (War-Time Cook Book, Book of Recipes,
+   * Metropolitan Cook Book, etc.): aged paper/cloth binding, ornate decorative
+   * typography, a framed central illustration, and a muted period palette. The
+   * TITLE is rendered into the art; the subtitle is typeset over it later in HTML.
+   */
+  buildVintage(input: CoverImageInput): string {
+    const subject = input.knowledgeBase.replace(/\s+/g, ' ').trim().slice(0, 500);
+    const title = input.title.replace(/\s+/g, ' ').trim();
+
+    return [
+      'Design the FRONT COVER of an antique vintage American cookbook, in the exact style of early-1900s to ' +
+        'mid-century recipe books (1900s-1960s).',
+      '',
+      'OVERALL LOOK:',
+      'An old, well-loved cookbook cover — aged, slightly worn and faded, as if photographed from a real ' +
+        'antique book. It should look like a genuine period artifact, NOT a modern or digital design, and NOT ' +
+        'glossy or photorealistic-modern.',
+      '',
+      'MATERIAL & TEXTURE:',
+      '- Aged cream, ecru, or lightly foxed paper, OR a cloth/linen hardcover binding',
+      '- Subtle stains, gentle wear at the edges and corners, a faint vintage patina',
+      '- A soft letterpress / worn-ink printed feel, with slightly imperfect old printing',
+      '',
+      'COMPOSITION (classic cookbook cover):',
+      '- A decorative ruled BORDER or ornamental FRAME around the whole cover (art-nouveau or deco lines, ' +
+        'corner flourishes, or a simple double-rule keyline)',
+      '- A single framed CENTRAL ILLUSTRATION in a vintage style: a hand-drawn or engraved image of a ' +
+        'homemaker/cook, a laid table, produce, or a kitchen still-life — line-art or muted flat colour, ' +
+        'in the manner of old recipe-book engravings and lithographs (NOT a modern photo)',
+      '- Symmetrical, centred, calm layout with generous margins',
+      `- The illustration should evoke the book's subject: """${subject}""".`,
+      '',
+      'TYPOGRAPHY:',
+      `- Render ONLY the book TITLE, spelled EXACTLY and correctly: "${title}"`,
+      '- Do NOT render a subtitle, author, price, or any other text — ONLY the title.',
+      '- Use ornate vintage lettering: a decorative serif, art-nouveau, or hand-lettered period style, the ' +
+        'kind seen on antique cookbook covers',
+      '- Title placed prominently in the UPPER or CENTRE of the cover, fully legible, every letter contained ' +
+        'well inside the frame with safe margins — never cropped',
+      '- Leave the BOTTOM ~18% as calm negative space (no text) so a subtitle can be typeset there afterward',
+      '',
+      'COLOR PALETTE (muted, period-authentic):',
+      '- Faded cream and ecru base',
+      '- Muted accents drawn from: dusty barn red, forest/avocado green, mustard/ochre gold, sepia brown, ' +
+        'faded teal',
+      '- Soft, low-saturation, slightly yellowed by age — NEVER bright, neon, or modern',
+      '',
+      'MOOD:',
+      'Nostalgic, homely, heritage, hand-made, trustworthy — a treasured family recipe book from decades past.',
+      '',
+      'AVOID:',
+      '- Modern/minimalist/flat-vector or Canva-style design',
+      '- Glossy studio food photography',
+      '- Neon or high-saturation colours',
+      '- Sans-serif corporate typography',
+      '- Any text other than the title',
+      '',
+      'OUTPUT:',
+      'Front cover only. Portrait book format. Ultra-high detail. Looks like a real antique cookbook.',
+    ].join('\n');
+  },
 };

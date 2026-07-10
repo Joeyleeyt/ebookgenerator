@@ -135,7 +135,7 @@ export function buildContainer(env: Env = loadEnv()) {
     generateFrontBackMatter: new GenerateFrontBackMatterUseCase(books, ai, ids),
     generateCoverImage: new GenerateCoverImageUseCase(books, knowledge, images, storage),
     generateIllustrations: new GenerateIllustrationsUseCase(books, projects, illustrationImages, imageProcessor, storage, ids, logger.child({ useCase: 'illustrations' })),
-    assembleEbook: new AssembleEbookUseCase(books, knowledge, clock, storage),
+    assembleEbook: new AssembleEbookUseCase(books, knowledge, clock, storage, projects),
     exportEbook: new ExportEbookUseCase(exporters, storage, artifacts),
     regenerateChapter: new RegenerateChapterUseCase(books, queue, hasher),
     editChapter: new EditChapterUseCase(books),

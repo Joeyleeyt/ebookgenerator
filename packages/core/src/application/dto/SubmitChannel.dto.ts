@@ -6,8 +6,11 @@ export const SubmitChannelDto = z.object({
     .object({
       /** Required user-provided book title; always used as the book's title. */
       bookTitle: z.string().trim().min(1).max(200),
+      bookType: z.enum(['normal', 'cooking']).default('normal'),
       targetPages: z.number().int().min(10).max(200).default(100),
       maxVideos: z.number().int().min(5).max(50).default(30),
+      /** Recipe count for cooking books; ignored for normal books. */
+      recipeCount: z.number().int().min(10).max(120).default(60),
       tone: z.enum(['educational', 'conversational', 'professional']).default('professional'),
       includeComments: z.boolean().default(true),
       includeIllustrations: z.boolean().default(true),

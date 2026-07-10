@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { Result, ExportFormat, type DocumentExporter, type AssembledDocument, type ExportedDocument } from '@yeg/core';
 import { renderHtml } from './html.js';
+import { renderCookbookHtml } from './cookbookHtml.js';
 
 // Paged.js polyfill — runs in the page to lay out CSS Paged Media features that
 // headless Chrome alone can't: running headers, named pages, and real TOC page
@@ -37,7 +38,8 @@ export class PuppeteerPdfExporter implements DocumentExporter {
       // Puppeteer's default 30s navigation timeout on a constrained container.
       // Everything is inlined as data URIs (no real network), so raise the ceiling
       // generously rather than waiting on a network that never fires.
-      await page.setContent(renderHtml(doc), { waitUntil: 'networkidle0', timeout: 120_000 });
+      const html = doc.bookType === 'cooking' ? renderCookbookHtml(doc) : renderHtml(doc);
+      await page.setContent(html, { waitUntil: 'networkidle0', timeout: 120_000 });
       // Configure Paged.js to auto-run with a completion flag, THEN load the polyfill.
       // (Auto-mode is the only path that honours `@page { size }`; calling preview()
       // manually leaves the sheet at Paged.js's US-Letter default, which shrinks the

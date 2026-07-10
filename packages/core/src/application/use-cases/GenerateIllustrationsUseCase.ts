@@ -10,6 +10,8 @@ import type { ObjectStorage } from '../ports/services/ObjectStorage.js';
 import type { IdGenerator } from '../ports/IdGenerator.js';
 import type { Logger } from '../ports/Logger.js';
 import { IllustrationPrompt } from '../prompts/IllustrationPrompt.js';
+import { RecipePhotoPrompt } from '../prompts/RecipePhotoPrompt.js';
+import { parseRecipe } from '../../domain/book/Recipe.js';
 import { EXPORT_BUCKET } from './ExportEbookUseCase.js';
 
 /**
@@ -49,13 +51,23 @@ export class GenerateIllustrationsUseCase {
 
     const project = await this.projects.findById(projectId);
     if (!project) return Result.fail('Project not found');
-    if (!project.options.includeIllustrations) return Result.ok({ generated: 0, attempted: 0 }); // feature off
+    // Cooking books ALWAYS get one food photo per recipe (a cookbook needs the
+    // photos); the includeIllustrations toggle only gates prose-book illustrations.
+    if (!project.options.isCooking && !project.options.includeIllustrations) {
+      return Result.ok({ generated: 0, attempted: 0 }); // feature off
+    }
 
     const book = await this.books.findByProject(projectId);
     if (!book) return Result.fail('Book not found');
     if (book.illustrations.length > 0) return Result.ok({ generated: 0, attempted: 0 }); // idempotent
 
     const ctx = await this.books.loadSharedContext(projectId);
+
+    // Cooking books: one photo per recipe-chapter, driven by the recipe itself.
+    if (project.options.isCooking) {
+      return this.generateRecipePhotos({ projectId, book });
+    }
+
     const everyPages = Math.max(1, project.options.illustrationEveryPages);
 
     // "One illustration per N pages" is anchored to the book's TARGET page count
@@ -194,6 +206,95 @@ export class GenerateIllustrationsUseCase {
       attempted: plan.length,
       ...(firstError ? { error: firstError } : {}),
     });
+  }
+
+  /**
+   * Cooking books: one photorealistic hero photo per recipe. Each recipe-chapter
+   * stores its recipe as JSON in `content`; we parse it to drive the photo prompt
+   * from the actual dish, store it as illustration order 0 for that chapter, and
+   * reuse the same downscale/store/concurrency path as prose illustrations.
+   */
+  private async generateRecipePhotos(input: {
+    projectId: ProjectId;
+    book: import('../../domain/book/Book.js').Book;
+  }): Promise<Result<{ generated: number; attempted: number; error?: string }>> {
+    const { projectId, book } = input;
+    const recipes = [...book.chapters]
+      .filter((c) => c.status === 'DONE')
+      .sort((a, b) => a.position - b.position)
+      .map((c) => ({ chapterId: c.id.value, recipe: parseRecipe(c.content) }))
+      .filter((r): r is { chapterId: string; recipe: NonNullable<ReturnType<typeof parseRecipe>> } => r.recipe !== null);
+
+    if (recipes.length === 0) return Result.ok({ generated: 0, attempted: 0 });
+
+    const total = recipes.length;
+    this.logger.info(`🍽️  recipe photos: generating ${total} food photo(s)`, {
+      projectId: projectId.value,
+      planned: total,
+    });
+
+    let done = 0;
+    let failed = 0;
+    const outcomes = await mapWithConcurrency(
+      recipes,
+      GenerateIllustrationsUseCase.MAX_CONCURRENT_IMAGES,
+      async (slot): Promise<{ illustration?: Illustration; error?: string }> => {
+        const prompt = RecipePhotoPrompt.build({
+          title: slot.recipe.title,
+          description: slot.recipe.description,
+        });
+        const image = await this.images.generate({ prompt, size: '1536x1024' });
+        if (image.isFail()) {
+          this.logger.warn(`🍽️  recipe photo failed (${++failed} failed, ${done} done / ${total})`, {
+            projectId: projectId.value,
+            recipe: slot.recipe.title,
+            error: image.error,
+          });
+          return { error: `generate: ${image.error}` };
+        }
+        const shrunk = await this.imageProcessor.downscaleToJpeg({
+          bytes: image.value.bytes,
+          maxWidth: GenerateIllustrationsUseCase.MAX_IMAGE_WIDTH,
+          quality: GenerateIllustrationsUseCase.JPEG_QUALITY,
+        });
+        const bytes = shrunk.isOk() ? shrunk.value.bytes : image.value.bytes;
+        const contentType = shrunk.isOk() ? shrunk.value.contentType : image.value.contentType;
+        const ext = contentType === 'image/jpeg' ? 'jpg' : 'png';
+        const path = `${projectId.value}/illustrations/${slot.chapterId}-0.${ext}`;
+        const put = await this.storage.put(EXPORT_BUCKET, path, bytes, contentType);
+        if (put.isFail()) {
+          this.logger.warn(`🍽️  recipe photo store failed (${++failed} failed, ${done} done / ${total})`, {
+            projectId: projectId.value,
+            recipe: slot.recipe.title,
+            error: put.error,
+          });
+          return { error: `store: ${put.error}` };
+        }
+        this.logger.info(`🍽️  recipe photo ${++done}/${total} done`, { projectId: projectId.value, recipe: slot.recipe.title });
+        return {
+          illustration: Illustration.create({
+            id: IllustrationId.from(this.ids.uuid()),
+            chapterId: slot.chapterId,
+            orderInChapter: 0,
+            storagePath: path,
+            prompt,
+          }),
+        };
+      },
+    );
+
+    const made = outcomes.map((o) => o.illustration).filter((i): i is Illustration => i !== undefined);
+    for (const ill of made) book.addIllustration(ill);
+    if (made.length > 0) await this.books.save(book);
+
+    this.logger.info(`🍽️  recipe photos: finished — ${made.length}/${total} generated`, {
+      projectId: projectId.value,
+      generated: made.length,
+      attempted: total,
+    });
+
+    const firstError = outcomes.find((o) => o.error)?.error;
+    return Result.ok({ generated: made.length, attempted: total, ...(firstError ? { error: firstError } : {}) });
   }
 }
 

@@ -151,7 +151,7 @@ export class SupabaseBookRepository implements BookRepository {
 
   async loadSharedContext(projectId: ProjectId): Promise<SharedChapterContext> {
     // The cacheable shared prefix for chapter writing: book strategy + knowledge base.
-    const [{ data: strategy }, { data: kb }] = await Promise.all([
+    const [{ data: strategy }, { data: kb }, { data: project }] = await Promise.all([
       this.db
         .from('book_strategies')
         .select('data, input_hash')
@@ -162,14 +162,17 @@ export class SupabaseBookRepository implements BookRepository {
         .select('data, input_hash')
         .eq('project_id', projectId.value)
         .maybeSingle(),
+      this.db.from('projects').select('options').eq('id', projectId.value).maybeSingle(),
     ]);
     const s = (strategy?.data ?? {}) as Record<string, unknown>;
+    const options = (project?.options ?? {}) as Record<string, unknown>;
     return {
       bookStrategy: renderRecord(s),
       knowledgeBase: renderRecord((kb?.data ?? {}) as Record<string, unknown>),
       tone: typeof s.tone === 'string' ? s.tone : 'professional',
       authorVoice: typeof s.authorVoice === 'string' ? s.authorVoice : 'authoritative and clear',
       contextVersion: `${strategy?.input_hash ?? ''}:${kb?.input_hash ?? ''}`,
+      bookType: options.bookType === 'cooking' ? 'cooking' : 'normal',
     };
   }
 

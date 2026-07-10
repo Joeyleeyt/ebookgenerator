@@ -1,5 +1,5 @@
 import { Document, Packer, Paragraph, HeadingLevel, TextRun, ImageRun, AlignmentType } from 'docx';
-import { Result, ExportFormat, type DocumentExporter, type AssembledDocument, type ExportedDocument } from '@yeg/core';
+import { Result, ExportFormat, parseRecipe, type Recipe, type DocumentExporter, type AssembledDocument, type ExportedDocument } from '@yeg/core';
 
 /** Renders the assembled document to a .docx using the `docx` library. */
 export class DocxExporter implements DocumentExporter {
@@ -39,6 +39,13 @@ export class DocxExporter implements DocumentExporter {
       }
 
       for (const chapter of doc.chapters) {
+        // Cooking books store a structured recipe as JSON — render it as readable
+        // recipe text rather than dumping the raw JSON into the document.
+        const recipe = doc.bookType === 'cooking' ? parseRecipe(chapter.content) : null;
+        if (recipe) {
+          children.push(...recipeParagraphs(recipe, chapter.illustrations));
+          continue;
+        }
         children.push(new Paragraph({ text: chapter.title, heading: HeadingLevel.HEADING_1, pageBreakBefore: true }));
         children.push(...withIllustrations(toParagraphs(chapter.content), chapter.illustrations));
         for (const section of chapter.sections) {
@@ -112,6 +119,53 @@ function decodeImageDataUri(uri: string): { bytes: Buffer; type: 'png' | 'jpg' |
   const ext = m[1]!.toLowerCase();
   const type = ext === 'jpeg' || ext === 'jpg' ? 'jpg' : (ext as 'png' | 'gif' | 'bmp');
   return { bytes: Buffer.from(m[2]!, 'base64'), type };
+}
+
+/** Render one recipe as a readable sequence of DOCX paragraphs (title, photo, meta, ingredients, steps, tips). */
+function recipeParagraphs(r: Recipe, illustrations?: Array<{ dataUri: string; alt: string }>): Paragraph[] {
+  const out: Paragraph[] = [];
+  out.push(new Paragraph({ text: r.title, heading: HeadingLevel.HEADING_1, pageBreakBefore: true }));
+
+  const photo = illustrations?.[0] ? decodeImageDataUri(illustrations[0].dataUri) : null;
+  if (photo) {
+    out.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new ImageRun({ data: photo.bytes, type: photo.type, transformation: { width: 500, height: 300 } })],
+      }),
+    );
+  }
+
+  if (r.description) out.push(new Paragraph({ children: [new TextRun({ text: r.description, italics: true })] }));
+  out.push(
+    new Paragraph({
+      children: [
+        new TextRun({ text: `Servings: ${r.servings}   Prep: ${r.prepTimeMinutes} min   Cook: ${r.cookTimeMinutes} min`, bold: true }),
+      ],
+    }),
+  );
+
+  out.push(new Paragraph({ text: 'Ingredients', heading: HeadingLevel.HEADING_2 }));
+  for (const ing of r.ingredients) out.push(new Paragraph({ text: ing, bullet: { level: 0 } }));
+
+  out.push(new Paragraph({ text: 'Instructions', heading: HeadingLevel.HEADING_2 }));
+  r.instructions.forEach((s, i) =>
+    out.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: `${i + 1}. ` }),
+          ...(s.label ? [new TextRun({ text: `${s.label}: `, bold: true })] : []),
+          new TextRun({ text: s.text }),
+        ],
+      }),
+    ),
+  );
+
+  if (r.tips.length) {
+    out.push(new Paragraph({ text: 'Tips and Variations', heading: HeadingLevel.HEADING_2 }));
+    for (const tip of r.tips) out.push(new Paragraph({ children: [new TextRun({ text: tip, italics: true })] }));
+  }
+  return out;
 }
 
 function toParagraphs(markdown: string): Paragraph[] {

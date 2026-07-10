@@ -3,7 +3,7 @@ import { Result } from '../../domain/shared/Result.js';
 import { ProjectId } from '../../domain/project/ProjectId.js';
 import { Book } from '../../domain/book/Book.js';
 import { BookId, ChapterId } from '../../domain/book/ids.js';
-import { Outline } from '../../domain/book/Outline.js';
+import { Outline, type OutlineEntry } from '../../domain/book/Outline.js';
 import { Chapter } from '../../domain/book/Chapter.js';
 import { PageBudget } from '../../domain/book/PageBudget.js';
 import type { ProjectRepository } from '../ports/repositories/ProjectRepository.js';
@@ -15,6 +15,8 @@ import type { IdGenerator } from '../ports/IdGenerator.js';
 import type { Clock } from '../ports/Clock.js';
 import type { Hasher } from '../ports/Hasher.js';
 import { OutlinePrompt } from '../prompts/OutlinePrompt.js';
+import { RecipeOutlinePrompt } from '../prompts/RecipeOutlinePrompt.js';
+import { RecipeIdeaSchema, type RecipeIdea } from '../../domain/book/Recipe.js';
 import { parseJsonCompletion } from '../prompts/parse.js';
 import type { ProjectJob } from '../dto/jobs.dto.js';
 
@@ -30,6 +32,11 @@ const Schema = z.object({
     }),
   ),
 });
+
+const RecipeIdeasSchema = z.object({ recipes: z.array(RecipeIdeaSchema) });
+
+/** Recipes are requested in batches so a large count doesn't overflow one JSON completion. */
+const RECIPE_BATCH_SIZE = 25;
 
 /**
  * Phase 9 (Sonnet): generate the outline from strategy + knowledge base,
@@ -65,41 +72,29 @@ export class GenerateOutlineUseCase {
 
     let book = await this.books.findByProject(projectId);
     if (!book?.outline || book.outline.inputHash !== inputHash) {
-      const prompt = OutlinePrompt.build({
-        bookStrategy: strategy.toText(),
-        knowledgeBase: kb.toText(),
-        chapterCount,
-        perChapterWords: budget.perChapterWords(chapterCount),
-        tone: strategy.tone,
-      });
-      const completion = await this.ai.generate({
-        model: 'claude-sonnet-4-6',
-        system: prompt.system,
-        messages: [{ role: 'user', content: prompt.user }],
-        // Up to 14 chapter entries (title/purpose/promise/keyPoints/wordTarget
-        // each) can overflow and truncate the JSON mid-array — JSON.parse then
-        // fails with "Expected ',' or ']'". Ceiling only, billed on actual
-        // output, so the headroom is free insurance.
-        maxTokens: 16000,
-        cacheControl: { systemPrefix: true },
-        metadata: { projectId: cmd.projectId, stage: 'outline-generate' },
-      });
-      if (completion.isFail()) return Result.fail(completion.error.type);
-      const parsed = parseJsonCompletion(completion.value.text, Schema);
-      if (parsed.isFail()) return Result.fail(parsed.error);
+      // Cooking books: the "outline" is a list of AI-suggested recipes; each recipe
+      // becomes one chapter whose body is generated as structured recipe JSON.
+      const entries = project.options.isCooking
+        ? await this.buildRecipeEntries({ strategy, kb, recipeCount: project.options.recipeCount, projectId: cmd.projectId })
+        : await this.buildChapterEntries({
+            strategy,
+            kb,
+            chapterCount,
+            perChapterWords: budget.perChapterWords(chapterCount),
+            projectId: cmd.projectId,
+          });
+      if (entries.isFail()) return Result.fail(entries.error);
 
       book = book ?? Book.create({ id: BookId.from(this.ids.uuid()), projectId: projectId.value, targetPages: project.options.targetPages });
       // Prefer the user-provided title; fall back to the AI-generated strategy title.
       book.setTitle(project.options.bookTitle ?? strategy.title);
-      book.setOutline(Outline.create({ version: 1, entries: parsed.value.entries, inputHash }));
-      // Derive the per-chapter word target deterministically from the page budget
-      // and the ACTUAL number of chapters the model returned. The model's own
-      // entry.wordTarget is unreliable — it tends to return modest numbers that
-      // starve chapter length — so the book never reaches its target page count.
-      // Computing it here guarantees the chapters sum to ~targetPages × 450 words.
-      const perChapterWords = budget.perChapterWords(parsed.value.entries.length);
-      // Materialize chapters from the outline (Phase 9 → chapters).
-      parsed.value.entries.forEach((entry, index) => {
+      book.setOutline(Outline.create({ version: 1, entries: entries.value, inputHash }));
+      // For prose books, derive the per-chapter word target deterministically from
+      // the page budget and the ACTUAL number of chapters. For recipes the target
+      // is a nominal value (recipe length is governed by the recipe prompt).
+      const perChapterWords = project.options.isCooking ? 250 : budget.perChapterWords(entries.value.length);
+      // Materialize chapters from the outline (Phase 9 → chapters / recipes).
+      entries.value.forEach((entry, index) => {
         book!.addChapter(
           Chapter.create({
             id: ChapterId.from(this.ids.uuid()),
@@ -129,5 +124,104 @@ export class GenerateOutlineUseCase {
       );
     }
     return Result.ok();
+  }
+
+  /** Prose books: one Sonnet call → the chapter outline. */
+  private async buildChapterEntries(input: {
+    strategy: { toText(): string; tone: string };
+    kb: { toText(): string };
+    chapterCount: number;
+    perChapterWords: number;
+    projectId: string;
+  }): Promise<Result<OutlineEntry[]>> {
+    const prompt = OutlinePrompt.build({
+      bookStrategy: input.strategy.toText(),
+      knowledgeBase: input.kb.toText(),
+      chapterCount: input.chapterCount,
+      perChapterWords: input.perChapterWords,
+      tone: input.strategy.tone,
+    });
+    const completion = await this.ai.generate({
+      model: 'claude-sonnet-4-6',
+      system: prompt.system,
+      messages: [{ role: 'user', content: prompt.user }],
+      // Up to 14 chapter entries (title/purpose/promise/keyPoints/wordTarget each)
+      // can overflow and truncate the JSON mid-array. Ceiling only, billed on actual
+      // output, so the headroom is free insurance.
+      maxTokens: 16000,
+      cacheControl: { systemPrefix: true },
+      metadata: { projectId: input.projectId, stage: 'outline-generate' },
+    });
+    if (completion.isFail()) return Result.fail(completion.error.type);
+    const parsed = parseJsonCompletion(completion.value.text, Schema);
+    if (parsed.isFail()) return Result.fail(parsed.error);
+    return Result.ok(parsed.value.entries);
+  }
+
+  /**
+   * Cooking books: ask the model for `recipeCount` distinct recipes, in batches so
+   * a large count can't truncate one JSON completion. Each recipe idea becomes a
+   * chapter entry; `keyPoints` carries the recipe description + cuisine so the
+   * chapter step can generate the recipe without re-deriving them.
+   */
+  private async buildRecipeEntries(input: {
+    strategy: { toText(): string };
+    kb: { toText(): string };
+    recipeCount: number;
+    projectId: string;
+  }): Promise<Result<OutlineEntry[]>> {
+    const ideas: RecipeIdea[] = [];
+    const seen = new Set<string>();
+    // Bounded retries: batches occasionally return fewer than asked or all-dupes.
+    // Stop early once a batch adds nothing new so we never spin to the agent cap.
+    const maxBatches = Math.ceil(input.recipeCount / RECIPE_BATCH_SIZE) + 3;
+    for (let batch = 0; batch < maxBatches && ideas.length < input.recipeCount; batch++) {
+      const need = Math.min(RECIPE_BATCH_SIZE, input.recipeCount - ideas.length);
+      const prompt = RecipeOutlinePrompt.build({
+        bookStrategy: input.strategy.toText(),
+        knowledgeBase: input.kb.toText(),
+        recipeCount: need,
+        existingTitles: ideas.map((i) => i.title),
+      });
+      const completion = await this.ai.generate({
+        model: 'claude-sonnet-4-6',
+        system: prompt.system,
+        messages: [{ role: 'user', content: prompt.user }],
+        maxTokens: 8000,
+        cacheControl: { systemPrefix: true },
+        metadata: { projectId: input.projectId, stage: 'outline-generate' },
+      });
+      if (completion.isFail()) {
+        if (ideas.length > 0) break; // keep what we have rather than fail the book
+        return Result.fail(completion.error.type);
+      }
+      const parsed = parseJsonCompletion(completion.value.text, RecipeIdeasSchema);
+      if (parsed.isFail()) {
+        if (ideas.length > 0) break;
+        return Result.fail(parsed.error);
+      }
+      let added = 0;
+      for (const r of parsed.value.recipes) {
+        const key = r.title.trim().toLowerCase();
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          ideas.push(r);
+          added++;
+          if (ideas.length >= input.recipeCount) break;
+        }
+      }
+      if (added === 0) break; // batch produced only duplicates — stop
+    }
+    if (ideas.length === 0) return Result.fail('No recipes generated');
+
+    return Result.ok(
+      ideas.map((idea) => ({
+        title: idea.title,
+        purpose: idea.description,
+        promise: idea.description,
+        keyPoints: [idea.description, idea.cuisine].filter(Boolean),
+        wordTarget: 250,
+      })),
+    );
   }
 }

@@ -2,6 +2,7 @@ import { Result } from '../../domain/shared/Result.js';
 import { ProjectId } from '../../domain/project/ProjectId.js';
 import type { BookRepository } from '../ports/repositories/BookRepository.js';
 import type { KnowledgeRepository } from '../ports/repositories/KnowledgeRepository.js';
+import type { ProjectRepository } from '../ports/repositories/ProjectRepository.js';
 import type { AssembledDocument } from '../ports/services/DocumentExporter.js';
 import type { ObjectStorage } from '../ports/services/ObjectStorage.js';
 import type { Clock } from '../ports/Clock.js';
@@ -18,12 +19,15 @@ export class AssembleEbookUseCase {
     private readonly knowledge: KnowledgeRepository,
     private readonly clock: Clock,
     private readonly storage: ObjectStorage,
+    private readonly projects: ProjectRepository,
   ) {}
 
   async execute(cmd: ProjectJob): Promise<Result<AssembledDocument>> {
     const projectId = ProjectId.from(cmd.projectId);
     const book = await this.books.findByProject(projectId);
     if (!book) return Result.fail('Book not found');
+    const project = await this.projects.findById(projectId);
+    const isCooking = project?.options.isCooking ?? false;
 
     const incomplete = book.chapters.filter((c) => c.status !== 'DONE');
     if (incomplete.length > 0) {
@@ -63,6 +67,7 @@ export class AssembleEbookUseCase {
     }
 
     const doc: AssembledDocument = {
+      bookType: isCooking ? 'cooking' : 'normal',
       title: strategy?.title ?? 'Generated Ebook',
       subtitle: strategy?.subtitle ?? '',
       promise: strategy?.corePromise ?? '',
@@ -80,9 +85,10 @@ export class AssembleEbookUseCase {
         const ills = illustrationsByChapter.get(c.id.value);
         return {
           title: cleanChapterTitle(c.title),
-          // Chapters are pure prose: the renderer prints the chapter number + title, and the
-          // book must carry no in-chapter subtitles, so strip every heading from the body.
-          content: stripAllHeadings(c.content ?? ''),
+          // Prose chapters: strip every heading so the body carries no in-chapter
+          // subtitles. Recipe chapters store structured JSON — pass it through verbatim
+          // for the cookbook renderer to parse.
+          content: isCooking ? (c.content ?? '') : stripAllHeadings(c.content ?? ''),
           sections: [...c.sections]
             .sort((a, b) => a.position - b.position)
             .map((s) => ({ title: s.title, content: s.content ?? '' })),

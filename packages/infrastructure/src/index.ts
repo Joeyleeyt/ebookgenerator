@@ -31,6 +31,7 @@ export * from './storage/SupabaseStorageAdapter.js';
 // ── Export (PDF / DOCX) ─────────────────────────────────────────────────────
 export * from './export/PuppeteerPdfExporter.js';
 export * from './export/DocxExporter.js';
+export * from './export/cookbookHtml.js';
 
 // ── Queue (BullMQ) ──────────────────────────────────────────────────────────
 export * from './queue/connection.js';
