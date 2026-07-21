@@ -59,6 +59,12 @@ export class PuppeteerPdfExporter implements DocumentExporter {
       await page.evaluate(() => {
         const doc = (globalThis as unknown as { document: any }).document;
         const cards: any[] = Array.prototype.slice.call(doc.querySelectorAll('.recipe__card'));
+        // The fit region's REAL laid-out height. Must use getBoundingClientRect(),
+        // NOT scrollHeight: under CSS `zoom`, scrollHeight is reported in the element's
+        // own zoomed coordinate space (it divides the zoom back out and stays ~constant),
+        // so it can't be compared against the unzoomed card. getBoundingClientRect()
+        // returns the true post-zoom pixel height.
+        const heightOf = (el: any) => el.getBoundingClientRect().height;
         for (const card of cards) {
           const fit = card.querySelector('.recipe__fit');
           if (!fit) continue;
@@ -73,20 +79,20 @@ export class PuppeteerPdfExporter implements DocumentExporter {
             (banner ? banner.offsetHeight : 0) -
             8;
           let z = 1;
-          if (fit.scrollHeight > avail) {
+          if (heightOf(fit) > avail) {
             // Overflowing — shrink in small steps down to 60% until it fits.
-            for (let guard = 0; guard < 24 && fit.scrollHeight > avail && z > 0.6; guard++) {
+            for (let guard = 0; guard < 40 && heightOf(fit) > avail && z > 0.6; guard++) {
               z = Math.max(0.6, z - 0.02);
               fit.style.zoom = String(z);
             }
           } else {
-            // Short recipe with surplus room — grow up to 1.35× until it nearly fills
+            // Short recipe with surplus room — grow up to 1.6× until it nearly fills
             // the card, so there's no large empty band at the bottom. Stop one step
             // BEFORE it would overflow (roll back the last step that broke the fit).
-            for (let guard = 0; guard < 24 && z < 1.35; guard++) {
-              const next = Math.min(1.35, z + 0.02);
+            for (let guard = 0; guard < 40 && z < 1.6; guard++) {
+              const next = Math.min(1.6, z + 0.02);
               fit.style.zoom = String(next);
-              if (fit.scrollHeight > avail) {
+              if (heightOf(fit) > avail) {
                 fit.style.zoom = String(z); // last good step
                 break;
               }

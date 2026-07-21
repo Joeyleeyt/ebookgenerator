@@ -97,15 +97,26 @@ export function renderCookbookHtml(doc: AssembledDocument): string {
        is auto-scaled by the fit script below so it fits WITHOUT clipping. */
     .recipe { page: recipe; page-break-before: always; position: relative; width: 210mm; height: 297mm;
       box-sizing: border-box; background: #f4ead2; padding: 12mm; overflow: hidden; }
+    /* Flex column so the banner pins to the top and the content region below it can
+       stretch to fill the card — no dead band at the bottom for short recipes. */
     .recipe__card { border: 1.5px solid #4a5223; box-sizing: border-box; height: 273mm; padding: 9mm 10mm 11mm;
-      position: relative; break-inside: avoid; page-break-inside: avoid; background:
+      position: relative; break-inside: avoid; page-break-inside: avoid;
+      display: flex; flex-direction: column; background:
         repeating-linear-gradient(0deg, rgba(74,82,35,0.015) 0, rgba(74,82,35,0.015) 1px, transparent 1px, transparent 5px); }
     /* Scalable content region (everything under the banner). Uses zoom (not
        transform: scale) because zoom actually REFLOWS and reduces the laid-out
        height, so a shrunk recipe genuinely takes less space and can't overflow the
-       card. transform:scale only shrinks visually while keeping its original height,
-       which let content spill past the frame. The fit script sets --fit when needed. */
-    .recipe__fit { zoom: var(--fit, 1); }
+       card; transform:scale only shrinks visually while keeping its original height.
+       flex:1 lets it claim the full card height; space-between then spreads the slack
+       between the top content and the serving tip so any residual gap reads as
+       intentional breathing room, not a broken empty band. The fit script (in the PDF
+       exporter) additionally zooms the whole region up/down so most recipes fill
+       naturally before this distribution even applies. */
+    .recipe__fit { zoom: var(--fit, 1); flex: 1 1 auto; min-height: 0;
+      display: flex; flex-direction: column; justify-content: space-between; }
+    /* The tip anchors to the bottom of the fit region; the block above it holds the
+       photo/ingredients/method and takes its natural height at the top. */
+    .recipe__body { display: block; }
 
     /* Banner: title (left) + category & number (right) with a rule underneath */
     .recipe__banner { display: flex; justify-content: space-between; align-items: flex-end;
@@ -193,6 +204,7 @@ function renderRecipe(r: Recipe, index: number, photo?: string): string {
     `<div class="recipe__category">${esc(category)}<b>${index + 1}</b></div>` +
     `</div>` +
     `<div class="recipe__fit">` +
+    `<div class="recipe__body">` +
     photoEl +
     (r.description ? `<p class="recipe__desc">${esc(r.description)}</p>` : '') +
     `<div class="recipe__meta">` +
@@ -204,6 +216,7 @@ function renderRecipe(r: Recipe, index: number, photo?: string): string {
     `<div class="recipe__ingredients"><ul>${ingredients}</ul></div>` +
     `<div class="recipe__section-label">Directions</div>` +
     `<div class="recipe__method">${method}</div>` +
+    `</div>` +
     tip +
     `</div>` +
     `</div></section>`
