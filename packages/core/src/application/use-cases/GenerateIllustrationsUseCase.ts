@@ -28,7 +28,19 @@ export class GenerateIllustrationsUseCase {
   // Cap concurrent 69labs jobs: the API queues jobs and shared keys have a
   // concurrent-job limit, so firing a whole book's illustrations at once made the
   // excess jobs fail. A small pool keeps throughput high without flooding.
-  private static readonly MAX_CONCURRENT_IMAGES = 4;
+  // Overridable via IMAGE_CONCURRENCY so production can tune throughput without a
+  // code change; clamped to a sane range.
+  private static readonly MAX_CONCURRENT_IMAGES = clampConcurrency(process.env.IMAGE_CONCURRENCY, 4, 1, 20);
+
+  // A cookbook generates one photo PER RECIPE (dozens), far more than a prose
+  // book's handful of illustrations, so it gets its own (higher) default cap.
+  // Overridable via RECIPE_PHOTO_CONCURRENCY.
+  private static readonly MAX_CONCURRENT_RECIPE_PHOTOS = clampConcurrency(
+    process.env.RECIPE_PHOTO_CONCURRENCY,
+    8,
+    1,
+    24,
+  );
 
   // Illustrations render at ~76% page width (≤125mm); ~1024px wide JPEG at q82 is
   // plenty for print and a fraction of the source PNG's size, so the inlined PDF
@@ -228,22 +240,28 @@ export class GenerateIllustrationsUseCase {
     if (recipes.length === 0) return Result.ok({ generated: 0, attempted: 0 });
 
     const total = recipes.length;
-    this.logger.info(`🍽️  recipe photos: generating ${total} food photo(s)`, {
+    const concurrency = GenerateIllustrationsUseCase.MAX_CONCURRENT_RECIPE_PHOTOS;
+    this.logger.info(`🍽️  recipe photos: generating ${total} food photo(s), ${concurrency} at a time`, {
       projectId: projectId.value,
       planned: total,
+      concurrency,
     });
 
     let done = 0;
     let failed = 0;
+    const stageStart = Date.now();
+    let sumImageMs = 0;
     const outcomes = await mapWithConcurrency(
       recipes,
-      GenerateIllustrationsUseCase.MAX_CONCURRENT_IMAGES,
+      GenerateIllustrationsUseCase.MAX_CONCURRENT_RECIPE_PHOTOS,
       async (slot): Promise<{ illustration?: Illustration; error?: string }> => {
         const prompt = RecipePhotoPrompt.build({
           title: slot.recipe.title,
           description: slot.recipe.description,
         });
+        const imgStart = Date.now();
         const image = await this.images.generate({ prompt, size: '1536x1024' });
+        const imgMs = Date.now() - imgStart;
         if (image.isFail()) {
           this.logger.warn(`🍽️  recipe photo failed (${++failed} failed, ${done} done / ${total})`, {
             projectId: projectId.value,
@@ -270,7 +288,12 @@ export class GenerateIllustrationsUseCase {
           });
           return { error: `store: ${put.error}` };
         }
-        this.logger.info(`🍽️  recipe photo ${++done}/${total} done`, { projectId: projectId.value, recipe: slot.recipe.title });
+        sumImageMs += imgMs;
+        this.logger.info(`🍽️  recipe photo ${++done}/${total} done in ${(imgMs / 1000).toFixed(1)}s`, {
+          projectId: projectId.value,
+          recipe: slot.recipe.title,
+          ms: imgMs,
+        });
         return {
           illustration: Illustration.create({
             id: IllustrationId.from(this.ids.uuid()),
@@ -287,15 +310,36 @@ export class GenerateIllustrationsUseCase {
     for (const ill of made) book.addIllustration(ill);
     if (made.length > 0) await this.books.save(book);
 
-    this.logger.info(`🍽️  recipe photos: finished — ${made.length}/${total} generated`, {
-      projectId: projectId.value,
-      generated: made.length,
-      attempted: total,
-    });
+    // Wall-clock vs. summed per-image time reveals the real bottleneck:
+    //   wallMs ≈ sumImageMs / concurrency  → concurrency is working; limit is per-image render time.
+    //   wallMs ≈ sumImageMs (no speedup)   → jobs are serializing (proxy/agent/69labs queue).
+    const wallMs = Date.now() - stageStart;
+    const avgImageMs = made.length ? Math.round(sumImageMs / made.length) : 0;
+    const effectiveParallelism = wallMs > 0 ? (sumImageMs / wallMs).toFixed(1) : '0';
+    this.logger.info(
+      `🍽️  recipe photos: finished — ${made.length}/${total} in ${(wallMs / 1000).toFixed(0)}s ` +
+        `(avg ${(avgImageMs / 1000).toFixed(1)}s/image, effective parallelism ×${effectiveParallelism} of ${concurrency})`,
+      {
+        projectId: projectId.value,
+        generated: made.length,
+        attempted: total,
+        wallMs,
+        avgImageMs,
+        effectiveParallelism,
+        configuredConcurrency: concurrency,
+      },
+    );
 
     const firstError = outcomes.find((o) => o.error)?.error;
     return Result.ok({ generated: made.length, attempted: total, ...(firstError ? { error: firstError } : {}) });
   }
+}
+
+/** Parse an env override for a concurrency cap, clamped to [min, max]; fall back to `fallback`. */
+function clampConcurrency(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
 }
 
 /**

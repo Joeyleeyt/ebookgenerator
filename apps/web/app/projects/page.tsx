@@ -38,6 +38,9 @@ export default function ProjectsPage() {
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
   const [bookType, setBookType] = useState<'normal' | 'cooking'>('normal');
+  // Fallback recipe count for cooking books. A number in the title (e.g. "101
+  // Recipes") wins over this — see recipeCountFromTitle on the backend.
+  const [recipeCount, setRecipeCount] = useState(60);
   const [pages, setPages] = useState(100);
   const [videos, setVideos] = useState(30);
   const [illustrations, setIllustrations] = useState(true);
@@ -85,6 +88,8 @@ export default function ProjectsPage() {
             targetPages: clampInt(pages, 10, 200, 100),
             maxVideos: clampInt(videos, 5, 50, 30),
             includeIllustrations: illustrations,
+            // Fallback only — a count in the title overrides this on the backend.
+            ...(bookType === 'cooking' ? { recipeCount: clampInt(recipeCount, 10, 120, 60) } : {}),
           },
         }),
       });
@@ -145,6 +150,23 @@ export default function ProjectsPage() {
                 <option value="normal">Normal ebook</option>
                 <option value="cooking">Cooking ebook</option>
               </select>
+              {bookType === 'cooking' && (
+                <label
+                  className="flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground"
+                  title="Fallback recipe count. A number in the title (e.g. “101 Recipes”) overrides this."
+                >
+                  Recipes
+                  <input
+                    type="number"
+                    min={10}
+                    max={120}
+                    value={Number.isFinite(recipeCount) ? recipeCount : ''}
+                    onChange={(e) => setRecipeCount(e.target.valueAsNumber)}
+                    aria-label="Recipe count"
+                    className="w-16 rounded-md border border-border bg-surface px-2 py-1 text-foreground tabular-nums outline-none focus:border-primary"
+                  />
+                </label>
+              )}
             </div>
             <div className="flex items-center gap-2 p-1.5 pl-3.5">
               <Youtube className="size-5 shrink-0 text-error" />

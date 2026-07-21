@@ -71,10 +71,13 @@ export function renderCookbookHtml(doc: AssembledDocument): string {
     .cover--art { page: cover; break-after: page; position: relative; width: 210mm; height: 297mm; margin: 0;
       color: #fff; background-color: #4a5223; background-size: cover; background-position: center; }
     .cover--full { background-size: contain !important; background-repeat: no-repeat; }
-    .cover__subtitle { position: absolute; left: 0; right: 0; bottom: 18mm; margin: 0 auto; max-width: 78%;
-      z-index: 2; text-align: center; text-transform: uppercase; letter-spacing: 0.1em;
-      font-family: 'Georgia', serif; font-weight: 700; font-size: 14pt; color: #f4ead2;
-      text-shadow: 0 1px 10px rgba(0,0,0,.9); }
+    /* Full-width opaque band so the subtitle stays readable even if the AI baked its
+       own text into the bottom of the cover art — the band masks it. */
+    .cover__subtitle { position: absolute; left: 0; right: 0; bottom: 0; margin: 0;
+      z-index: 2; padding: 10mm 11% 14mm; text-align: center; text-transform: uppercase;
+      letter-spacing: 0.1em; font-family: 'Georgia', serif; font-weight: 700; font-size: 14pt;
+      color: #f4ead2; background: rgba(40,34,20,.92);
+      box-shadow: 0 -6mm 10mm 6mm rgba(40,34,20,.92); }
 
     /* Contents */
     .toc { page-break-before: always; padding-top: 18mm; }
