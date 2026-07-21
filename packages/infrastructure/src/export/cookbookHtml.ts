@@ -100,9 +100,12 @@ export function renderCookbookHtml(doc: AssembledDocument): string {
     .recipe__card { border: 1.5px solid #4a5223; box-sizing: border-box; height: 273mm; padding: 9mm 10mm 11mm;
       position: relative; break-inside: avoid; page-break-inside: avoid; background:
         repeating-linear-gradient(0deg, rgba(74,82,35,0.015) 0, rgba(74,82,35,0.015) 1px, transparent 1px, transparent 5px); }
-    /* Scalable content region (everything under the banner). transform-origin top
-       so it shrinks toward the banner; the fit script sets --fit when needed. */
-    .recipe__fit { transform: scale(var(--fit, 1)); transform-origin: top center; }
+    /* Scalable content region (everything under the banner). Uses zoom (not
+       transform: scale) because zoom actually REFLOWS and reduces the laid-out
+       height, so a shrunk recipe genuinely takes less space and can't overflow the
+       card. transform:scale only shrinks visually while keeping its original height,
+       which let content spill past the frame. The fit script sets --fit when needed. */
+    .recipe__fit { zoom: var(--fit, 1); }
 
     /* Banner: title (left) + category & number (right) with a rule underneath */
     .recipe__banner { display: flex; justify-content: space-between; align-items: flex-end;
@@ -162,30 +165,6 @@ export function renderCookbookHtml(doc: AssembledDocument): string {
     ${toc}
     ${recipes}
     ${backMatter}
-    <script>
-    /* Auto-fit: shrink each recipe's content so it fills — but never overflows —
-       its fixed card. Runs BEFORE Paged.js paginates, so it measures the natural
-       (single-page) layout. A recipe that already fits is left at scale 1. */
-    (function () {
-      var cards = document.querySelectorAll('.recipe__card');
-      for (var i = 0; i < cards.length; i++) {
-        var card = cards[i];
-        var fit = card.querySelector('.recipe__fit');
-        if (!fit) continue;
-        var banner = card.querySelector('.recipe__banner');
-        var cs = getComputedStyle(card);
-        // Available height for the fit box = card content-box height minus the banner.
-        var avail = card.clientHeight
-          - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
-          - (banner ? banner.offsetHeight : 0) - 6; // 6px safety margin
-        var needed = fit.scrollHeight;
-        if (needed > avail) {
-          var scale = Math.max(0.72, avail / needed); // never shrink below 72%
-          fit.style.setProperty('--fit', scale.toFixed(3));
-        }
-      }
-    })();
-    </script>
   </body></html>`;
 }
 

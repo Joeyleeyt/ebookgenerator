@@ -64,6 +64,7 @@ export default function ProjectPipelinePage({ params }: { params: { id: string }
   const [errorText, setErrorText] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [busy, setBusy] = useState(false);
+  const [reexportState, setReexportState] = useState<'idle' | 'building' | 'ready' | 'error'>('idle');
   const [pending, setPending] = useState<Record<string, number>>({});
   // Each fan-in barrier counts down from its total to zero, so the largest value
   // we've ever seen for a key is its total. We keep both to render "done/total".
@@ -168,6 +169,41 @@ export default function ProjectPipelinePage({ params }: { params: { id: string }
     }
   }
 
+  // Rebuild the PDF/DOCX from the current book. Backfills any missing recipe photos
+  // and re-applies the latest layout/cover fixes, then polls until the fresh
+  // artifact appears so the Download links update in place.
+  async function reexport() {
+    setReexportState('building');
+    try {
+      const res = await fetch('/api/exports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: id, format: 'both' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setReexportState('error');
+        return;
+      }
+      const target = data.nextVersion as number;
+      const deadline = Date.now() + 180_000; // image-heavy books take a while
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2500));
+        const r = await fetch(`/api/exports?projectId=${id}`);
+        if (!r.ok) continue;
+        const list = (await r.json()).artifacts as Array<{ bookVersion?: number }>;
+        if (list.some((a) => (a.bookVersion ?? 0) >= target)) {
+          await loadArtifacts();
+          setReexportState('ready');
+          return;
+        }
+      }
+      setReexportState('error'); // timed out
+    } catch {
+      setReexportState('error');
+    }
+  }
+
   const { stages, percent } = resolvePipeline(status);
   const terminal = isTerminal(status);
 
@@ -257,7 +293,31 @@ export default function ProjectPipelinePage({ params }: { params: { id: string }
         {/* Downloads */}
         {artifacts.length > 0 && (
           <div>
-            <h2 className="mb-3 text-base font-semibold tracking-tight">Downloads</h2>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold tracking-tight">Downloads</h2>
+              <div className="flex items-center gap-2">
+                {reexportState === 'ready' && (
+                  <span className="text-xs text-success">Rebuilt — download the fresh copy below</span>
+                )}
+                {reexportState === 'error' && (
+                  <span className="text-xs text-error">Re-export failed — try again</span>
+                )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void reexport()}
+                  disabled={reexportState === 'building'}
+                  title="Rebuild the PDF/DOCX with the latest fixes and backfill any missing recipe photos"
+                >
+                  {reexportState === 'building' ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="size-4" />
+                  )}
+                  {reexportState === 'building' ? 'Rebuilding…' : 'Re-export'}
+                </Button>
+              </div>
+            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {artifacts.map((a) => (
                 <Card key={a.format} className="flex items-center gap-3 p-4">

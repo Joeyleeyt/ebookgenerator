@@ -50,6 +50,36 @@ export class PuppeteerPdfExporter implements DocumentExporter {
       await page.addScriptTag({ path: pagedPolyfillFile() });
       // Wait until Paged.js has built every page box.
       await page.waitForFunction('window.__pagedRendered === true', { timeout: 60000 });
+      // Auto-fit recipe cards AFTER pagination. A content-heavy recipe (long method,
+      // many ingredients) overflows its fixed one-page card; shrink its `.recipe__fit`
+      // region with `zoom` (which reflows and reduces real height) until it fits.
+      // Runs post-Paged.js so it measures the ACTUAL paginated card boxes, and re-checks
+      // after each step because zoom reflows the content. Idempotent on re-runs.
+      await page.evaluate(() => {
+        const doc = (globalThis as unknown as { document: any }).document;
+        const cards: any[] = Array.prototype.slice.call(doc.querySelectorAll('.recipe__card'));
+        for (const card of cards) {
+          const fit = card.querySelector('.recipe__fit');
+          if (!fit) continue;
+          const banner = card.querySelector('.recipe__banner');
+          const cs = card.ownerDocument.defaultView.getComputedStyle(card);
+          // Height the fit box may occupy = card content box minus banner, minus a
+          // small safety margin so nothing kisses the printed frame.
+          const avail =
+            card.clientHeight -
+            parseFloat(cs.paddingTop) -
+            parseFloat(cs.paddingBottom) -
+            (banner ? banner.offsetHeight : 0) -
+            8;
+          // Shrink in small steps down to 60% until the content fits; measuring
+          // between steps because zoom changes the reflowed height.
+          let z = 1;
+          for (let guard = 0; guard < 24 && fit.scrollHeight > avail && z > 0.6; guard++) {
+            z = Math.max(0.6, z - 0.02);
+            fit.style.zoom = String(z);
+          }
+        }
+      });
       // Fill the Table of Contents page numbers from the actual pagination (paged.js'
       // target-counter doesn't resolve forward refs reliably, so we read the real page
       // each chapter landed on and write it into the entry).
