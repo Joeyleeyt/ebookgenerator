@@ -50,11 +50,12 @@ export class PuppeteerPdfExporter implements DocumentExporter {
       await page.addScriptTag({ path: pagedPolyfillFile() });
       // Wait until Paged.js has built every page box.
       await page.waitForFunction('window.__pagedRendered === true', { timeout: 60000 });
-      // Auto-fit recipe cards AFTER pagination. A content-heavy recipe (long method,
-      // many ingredients) overflows its fixed one-page card; shrink its `.recipe__fit`
-      // region with `zoom` (which reflows and reduces real height) until it fits.
-      // Runs post-Paged.js so it measures the ACTUAL paginated card boxes, and re-checks
-      // after each step because zoom reflows the content. Idempotent on re-runs.
+      // Auto-fit recipe cards AFTER pagination so each recipe FILLS its fixed one-page
+      // card — neither overflowing nor leaving a big empty gap at the bottom. We scale
+      // the `.recipe__fit` region with `zoom` (which reflows and changes real height):
+      // shrink a content-heavy recipe until it fits, or grow a short recipe up until it
+      // nearly fills the card. Runs post-Paged.js so it measures the ACTUAL paginated
+      // card boxes, re-checking after each step because zoom reflows the content.
       await page.evaluate(() => {
         const doc = (globalThis as unknown as { document: any }).document;
         const cards: any[] = Array.prototype.slice.call(doc.querySelectorAll('.recipe__card'));
@@ -71,12 +72,26 @@ export class PuppeteerPdfExporter implements DocumentExporter {
             parseFloat(cs.paddingBottom) -
             (banner ? banner.offsetHeight : 0) -
             8;
-          // Shrink in small steps down to 60% until the content fits; measuring
-          // between steps because zoom changes the reflowed height.
           let z = 1;
-          for (let guard = 0; guard < 24 && fit.scrollHeight > avail && z > 0.6; guard++) {
-            z = Math.max(0.6, z - 0.02);
-            fit.style.zoom = String(z);
+          if (fit.scrollHeight > avail) {
+            // Overflowing — shrink in small steps down to 60% until it fits.
+            for (let guard = 0; guard < 24 && fit.scrollHeight > avail && z > 0.6; guard++) {
+              z = Math.max(0.6, z - 0.02);
+              fit.style.zoom = String(z);
+            }
+          } else {
+            // Short recipe with surplus room — grow up to 1.35× until it nearly fills
+            // the card, so there's no large empty band at the bottom. Stop one step
+            // BEFORE it would overflow (roll back the last step that broke the fit).
+            for (let guard = 0; guard < 24 && z < 1.35; guard++) {
+              const next = Math.min(1.35, z + 0.02);
+              fit.style.zoom = String(next);
+              if (fit.scrollHeight > avail) {
+                fit.style.zoom = String(z); // last good step
+                break;
+              }
+              z = next;
+            }
           }
         }
       });
