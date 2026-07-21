@@ -36,7 +36,7 @@ export function renderCookbookHtml(doc: AssembledDocument): string {
     .map((c, i) => {
       const recipe = parseRecipe(c.content);
       const photo = c.illustrations?.[0]?.dataUri;
-      return recipe ? renderRecipe(recipe, i, photo) : renderRecipeFallback(c.title, i);
+      return recipe ? renderRecipe(recipe, i, photo) : renderRecipeFallback(c.title, c.content, i);
     })
     .join('\n');
 
@@ -71,13 +71,13 @@ export function renderCookbookHtml(doc: AssembledDocument): string {
     .cover--art { page: cover; break-after: page; position: relative; width: 210mm; height: 297mm; margin: 0;
       color: #fff; background-color: #4a5223; background-size: cover; background-position: center; }
     .cover--full { background-size: contain !important; background-repeat: no-repeat; }
-    /* Full-width opaque band so the subtitle stays readable even if the AI baked its
-       own text into the bottom of the cover art — the band masks it. */
+    /* Soft gradient fade at the very bottom — just enough to keep the light subtitle
+       readable over the art, with NO hard-edged black block. */
     .cover__subtitle { position: absolute; left: 0; right: 0; bottom: 0; margin: 0;
-      z-index: 2; padding: 10mm 11% 14mm; text-align: center; text-transform: uppercase;
+      z-index: 2; padding: 16mm 11% 14mm; text-align: center; text-transform: uppercase;
       letter-spacing: 0.1em; font-family: 'Georgia', serif; font-weight: 700; font-size: 14pt;
-      color: #f4ead2; background: rgba(40,34,20,.92);
-      box-shadow: 0 -6mm 10mm 6mm rgba(40,34,20,.92); }
+      color: #f4ead2; text-shadow: 0 1px 8px rgba(0,0,0,.85);
+      background: linear-gradient(to top, rgba(40,34,20,.78) 0%, rgba(40,34,20,.5) 55%, rgba(40,34,20,0) 100%); }
 
     /* Contents */
     .toc { page-break-before: always; padding-top: 18mm; }
@@ -118,6 +118,11 @@ export function renderCookbookHtml(doc: AssembledDocument): string {
       outline: 1px solid #6a5636; margin-bottom: 5mm; }
     .recipe__photo--empty { width: 100%; height: 40mm; margin-bottom: 6mm; border: 1px solid #6a5636;
       background: repeating-linear-gradient(45deg,#e7d9b6,#e7d9b6 8px,#efe2c2 8px,#efe2c2 16px); }
+    /* Salvaged text when a recipe's structured content failed to parse. */
+    .recipe__fallback { color: #4a3f28; font-size: 10.5pt; line-height: 1.5; }
+    .recipe__fallback p { margin: 0 0 3mm; }
+    .recipe__fallback-list { margin: 0; padding-left: 6mm; }
+    .recipe__fallback-list li { margin-bottom: 1.5mm; }
 
     .recipe__desc { font-style: italic; color: #6a5636; text-align: center; margin-bottom: 4mm; font-size: 10pt; line-height: 1.35; }
 
@@ -238,8 +243,46 @@ function inferCategory(r: Recipe): string {
   return 'Main Dishes';
 }
 
-function renderRecipeFallback(title: string, index: number): string {
-  return `<section class="recipe" id="chap-${index}"><div class="recipe__card"><div class="recipe__banner"><h1 class="recipe__title">${esc(title)}</h1></div><div class="recipe__photo--empty"></div></div></section>`;
+/**
+ * Rendered only when a recipe chapter's content did NOT parse into a Recipe (e.g.
+ * truncated/malformed JSON). Rather than ship a blank card with just a title, we
+ * salvage whatever readable text is in the content — recovered ingredient/step
+ * strings from partial JSON, or the raw prose — so the page is never empty.
+ */
+function renderRecipeFallback(title: string, content: string | null | undefined, index: number): string {
+  const salvaged = salvageRecipeText(content);
+  const body = salvaged
+    ? `<div class="recipe__fallback">${salvaged}</div>`
+    : '<div class="recipe__photo--empty"></div>';
+  return `<section class="recipe" id="chap-${index}"><div class="recipe__card"><div class="recipe__banner"><h1 class="recipe__title">${esc(title)}</h1></div>${body}</div></section>`;
+}
+
+/**
+ * Pull human-readable lines out of an unparseable recipe content string. Handles
+ * the common case of truncated recipe JSON (grab the quoted strings that look like
+ * ingredients/steps) and plain prose (show it as paragraphs). Returns '' if there
+ * is nothing worth showing.
+ */
+function salvageRecipeText(content: string | null | undefined): string {
+  if (!content) return '';
+  const cleaned = content.replace(/<!--recipe-->/g, '').trim();
+  if (!cleaned) return '';
+  // If it looks like JSON, extract the quoted string values (ingredients, step
+  // text, description) — these carry the actual recipe words even when the JSON
+  // is truncated and won't parse.
+  if (cleaned.startsWith('{') || cleaned.startsWith('[')) {
+    const strings = [...cleaned.matchAll(/"([^"\\]{3,}?)"/g)]
+      .map((m) => (m[1] ?? '').trim())
+      // Drop the JSON KEYS (title, ingredients, …) — keep the human values.
+      .filter((s) => !/^(title|description|servings|prepTimeMinutes|cookTimeMinutes|ingredients|instructions|label|text|tips)$/.test(s));
+    const items = [...new Set(strings)];
+    if (items.length === 0) return '';
+    return `<ul class="recipe__fallback-list">${items.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>`;
+  }
+  // Plain prose — render as paragraphs.
+  const paras = cleaned.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  if (paras.length === 0) return '';
+  return paras.map((p) => `<p>${esc(p)}</p>`).join('');
 }
 
 /** Minimal paragraph splitter for back-matter prose. */

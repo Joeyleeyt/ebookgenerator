@@ -159,20 +159,29 @@ export class GenerateChapterUseCase {
     const userMsg = RecipePrompt.user({ title: chapter.title, description });
 
     let content: string | null = null;
+    let lastError = '';
     for (let attempt = 0; attempt < 2 && content === null; attempt++) {
       const completion = await this.ai.generate({
         model: 'claude-sonnet-4-6',
         system,
         messages: [{ role: 'user', content: userMsg }],
-        maxTokens: 4000,
+        // A full recipe (title + description + ~14 ingredients + 4-7 labelled steps
+        // + tips) can exceed a tight ceiling and truncate mid-JSON, which fails to
+        // parse and renders as a blank card. 8000 gives ample headroom; billed on
+        // actual output, so the extra ceiling costs nothing on normal recipes.
+        maxTokens: 8000,
         cacheControl: { systemPrefix: true },
         metadata: { projectId: cmd.projectId, stage: 'chapter-generate' },
       });
       if (completion.isFail()) return Result.fail(completion.error.type);
       const parsed = parseJsonCompletion(completion.value.text, RecipeSchema);
       if (parsed.isOk()) content = serializeRecipe(parsed.value);
+      else lastError = parsed.error;
     }
-    if (content === null) return Result.fail('Recipe JSON malformed after retry');
+    // Fail LOUD rather than shipping a DONE chapter whose content can't be parsed
+    // into a recipe (that renders as a blank card). A failed chapter blocks assembly
+    // and surfaces in retry, which is the correct, visible outcome.
+    if (content === null) return Result.fail(`Recipe JSON malformed after retry: ${lastError}`);
 
     if (cmd.mode === 'regenerate') {
       await this.books.snapshotChapterVersion(book.id, chapter.id.value);

@@ -318,6 +318,32 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     ...QUEUE_CONFIG.export,
     payloadSchema: ExportJob,
     handler: async (p) => {
+      // Best-effort backfill: recover any recipe/chapter photos that failed image-gen
+      // on the first assemble (e.g. 69labs rate limits left empty placeholder boxes).
+      // generateIllustrations only fills MISSING photos and skips existing ones, so a
+      // fully-illustrated book attempts nothing. Strictly non-fatal — a re-export must
+      // never fail because image-gen is down.
+      try {
+        const backfill = await useCases.generateIllustrations.execute({ projectId: p.projectId });
+        if (backfill.isOk() && backfill.value.generated > 0) {
+          container.logger.info('🖼️  backfilled missing photos on re-export', {
+            projectId: p.projectId,
+            generated: backfill.value.generated,
+            attempted: backfill.value.attempted,
+          });
+        } else if (backfill.isFail()) {
+          container.logger.warn('photo backfill failed on re-export; exporting as-is', {
+            projectId: p.projectId,
+            error: backfill.error,
+          });
+        }
+      } catch (err) {
+        container.logger.warn('photo backfill threw on re-export; exporting as-is', {
+          projectId: p.projectId,
+          error: String(err),
+        });
+      }
+
       const assembled = await useCases.assembleEbook.execute({ projectId: p.projectId });
       if (assembled.isFail()) throw new Error(assembled.error);
       const formats =

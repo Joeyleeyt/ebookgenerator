@@ -71,14 +71,19 @@ export class GenerateIllustrationsUseCase {
 
     const book = await this.books.findByProject(projectId);
     if (!book) return Result.fail('Book not found');
-    if (book.illustrations.length > 0) return Result.ok({ generated: 0, attempted: 0 }); // idempotent
-
-    const ctx = await this.books.loadSharedContext(projectId);
 
     // Cooking books: one photo per recipe-chapter, driven by the recipe itself.
+    // NOT gated on the "already has illustrations" guard below — a cookbook where
+    // some recipes failed image-gen (e.g. 69labs rate limits) must be able to
+    // BACKFILL the missing photos on re-run. generateRecipePhotos skips recipes
+    // that already have a photo, so it only fills the gaps.
     if (project.options.isCooking) {
       return this.generateRecipePhotos({ projectId, book });
     }
+
+    if (book.illustrations.length > 0) return Result.ok({ generated: 0, attempted: 0 }); // idempotent
+
+    const ctx = await this.books.loadSharedContext(projectId);
 
     const everyPages = Math.max(1, project.options.illustrationEveryPages);
 
@@ -231,8 +236,11 @@ export class GenerateIllustrationsUseCase {
     book: import('../../domain/book/Book.js').Book;
   }): Promise<Result<{ generated: number; attempted: number; error?: string }>> {
     const { projectId, book } = input;
+    // Chapters that already have a photo — skip them so a re-run only backfills the
+    // recipes whose image-gen failed the first time, never regenerating good ones.
+    const withPhoto = new Set(book.illustrations.map((ill) => ill.chapterId));
     const recipes = [...book.chapters]
-      .filter((c) => c.status === 'DONE')
+      .filter((c) => c.status === 'DONE' && !withPhoto.has(c.id.value))
       .sort((a, b) => a.position - b.position)
       .map((c) => ({ chapterId: c.id.value, recipe: parseRecipe(c.content) }))
       .filter((r): r is { chapterId: string; recipe: NonNullable<ReturnType<typeof parseRecipe>> } => r.recipe !== null);
