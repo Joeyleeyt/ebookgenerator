@@ -69,15 +69,9 @@ export class PuppeteerPdfExporter implements DocumentExporter {
       await page.evaluate(() => {
         const doc = (globalThis as unknown as { document: any }).document;
         const cards: any[] = Array.prototype.slice.call(doc.querySelectorAll('.recipe__card'));
-        // The fit region's REAL laid-out height. Must use getBoundingClientRect(),
-        // NOT scrollHeight: under CSS `zoom`, scrollHeight is reported in the element's
-        // own zoomed coordinate space (it divides the zoom back out and stays ~constant),
-        // so it can't be compared against the unzoomed card. getBoundingClientRect()
-        // returns the true post-zoom pixel height.
-        const heightOf = (el: any) => el.getBoundingClientRect().height;
         for (const card of cards) {
           const fit = card.querySelector('.recipe__fit');
-          if (!fit) continue;
+          if (!fit || fit.children.length === 0) continue;
           const banner = card.querySelector('.recipe__banner');
           const cs = card.ownerDocument.defaultView.getComputedStyle(card);
           // Height the fit box may occupy = card content box minus banner, minus a
@@ -88,27 +82,40 @@ export class PuppeteerPdfExporter implements DocumentExporter {
             parseFloat(cs.paddingBottom) -
             (banner ? banner.offsetHeight : 0) -
             8;
+          // The fit box is flex-stretched (flex:1) with space-between, so BOTH its own
+          // rect and its children's spread measure the ALLOCATED space — a constant —
+          // no matter the zoom. Measuring either made the loop blind: it zoomed to the
+          // cap and the content clipped. So measure the CONTENT: temporarily pack the
+          // children (flex-start), take last-child bottom minus first-child top (rects
+          // are real post-zoom pixels), then restore space-between so leftover slack
+          // still distributes as breathing room.
+          fit.style.justifyContent = 'flex-start';
+          const contentH = () => {
+            const kids = fit.children;
+            return kids[kids.length - 1].getBoundingClientRect().bottom - kids[0].getBoundingClientRect().top;
+          };
           let z = 1;
-          if (heightOf(fit) > avail) {
+          if (contentH() > avail) {
             // Overflowing — shrink in small steps down to 60% until it fits.
-            for (let guard = 0; guard < 40 && heightOf(fit) > avail && z > 0.6; guard++) {
+            for (let guard = 0; guard < 40 && contentH() > avail && z > 0.6; guard++) {
               z = Math.max(0.6, z - 0.02);
               fit.style.zoom = String(z);
             }
           } else {
-            // Short recipe with surplus room — grow up to 1.6× until it nearly fills
-            // the card, so there's no large empty band at the bottom. Stop one step
-            // BEFORE it would overflow (roll back the last step that broke the fit).
-            for (let guard = 0; guard < 40 && z < 1.6; guard++) {
-              const next = Math.min(1.6, z + 0.02);
+            // Short recipe with surplus room — grow up to 1.35× until the content
+            // nearly fills the card. Stop one step BEFORE it would overflow (roll back
+            // the last step that broke the fit).
+            for (let guard = 0; guard < 40 && z < 1.35; guard++) {
+              const next = Math.min(1.35, z + 0.02);
               fit.style.zoom = String(next);
-              if (heightOf(fit) > avail) {
+              if (contentH() > avail) {
                 fit.style.zoom = String(z); // last good step
                 break;
               }
               z = next;
             }
           }
+          fit.style.justifyContent = '';
         }
       });
       // Fill the Table of Contents page numbers from the actual pagination (paged.js'
