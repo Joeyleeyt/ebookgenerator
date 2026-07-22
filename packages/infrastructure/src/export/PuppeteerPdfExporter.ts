@@ -40,6 +40,16 @@ export class PuppeteerPdfExporter implements DocumentExporter {
       // generously rather than waiting on a network that never fires.
       const html = doc.bookType === 'cooking' ? renderCookbookHtml(doc) : renderHtml(doc);
       await page.setContent(html, { waitUntil: 'networkidle0', timeout: 120_000 });
+      // The worker runs under tsx (esbuild with keepNames), which rewrites every
+      // function — including the arrow functions we hand to page.evaluate() — to call
+      // an injected `__name(fn, "…")` helper. That helper is defined in the Node
+      // bundle, NOT in the browser page, so the serialized function throws
+      // "__name is not defined" the moment Chromium runs it. Define a no-op shim on
+      // the page's window (as a raw string, so esbuild can't instrument it) BEFORE any
+      // page.evaluate call, so those injected references resolve harmlessly.
+      await page.addScriptTag({
+        content: 'window.__name = window.__name || function (target) { return target; };',
+      });
       // Configure Paged.js to auto-run with a completion flag, THEN load the polyfill.
       // (Auto-mode is the only path that honours `@page { size }`; calling preview()
       // manually leaves the sheet at Paged.js's US-Letter default, which shrinks the
