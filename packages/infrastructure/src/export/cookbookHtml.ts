@@ -9,9 +9,7 @@ import { type AssembledDocument, parseRecipe, type Recipe } from '@yeg/core';
  */
 export function renderCookbookHtml(doc: AssembledDocument): string {
   const coverArt = doc.coverImage
-    ? `<section class="cover--art cover--full" style="background-image:url('${esc(doc.coverImage)}')">${
-        doc.subtitle ? `<p class="cover__subtitle">${esc(doc.subtitle)}</p>` : ''
-      }</section>`
+    ? `<section class="cover--art cover--full" style="background-image:url('${esc(doc.coverImage)}')"></section>`
     : '';
 
   const titlePage = `<section class="title-page">
@@ -71,13 +69,6 @@ export function renderCookbookHtml(doc: AssembledDocument): string {
     .cover--art { page: cover; break-after: page; position: relative; width: 210mm; height: 297mm; margin: 0;
       color: #fff; background-color: #4a5223; background-size: cover; background-position: center; }
     .cover--full { background-size: contain !important; background-repeat: no-repeat; }
-    /* Soft gradient fade at the very bottom — just enough to keep the light subtitle
-       readable over the art, with NO hard-edged black block. */
-    .cover__subtitle { position: absolute; left: 0; right: 0; bottom: 0; margin: 0;
-      z-index: 2; padding: 16mm 11% 14mm; text-align: center; text-transform: uppercase;
-      letter-spacing: 0.1em; font-family: 'Georgia', serif; font-weight: 700; font-size: 14pt;
-      color: #f4ead2; text-shadow: 0 1px 8px rgba(0,0,0,.85);
-      background: linear-gradient(to top, rgba(40,34,20,.78) 0%, rgba(40,34,20,.5) 55%, rgba(40,34,20,0) 100%); }
 
     /* Contents */
     .toc { page-break-before: always; padding-top: 18mm; }

@@ -8,9 +8,9 @@ interface CoverImageInput {
 
 /**
  * Builds a premium, bestseller-grade cover brief. The TITLE is rendered INTO the
- * image (the AI designs the whole cover), but the SUBTITLE is NOT baked in — it
- * is typeset over the bottom of the cover in HTML so its position/margin are
- * exact and it can never be clipped. The fixed STYLE / COLOR / COMPOSITION /
+ * image (the AI designs the whole cover) and it is the ONLY text on the cover —
+ * the subtitle appears on the title page instead, so nothing is overlaid on the
+ * artwork. The fixed STYLE / COLOR / COMPOSITION /
  * TYPOGRAPHY / QUALITY rules give every book the same high-end navy-and-gold,
  * blueprint-to-reality look, while the CORE CONCEPT and VISUAL DIRECTION adapt to
  * THIS book's subject (from the channel knowledge base).
@@ -51,8 +51,7 @@ export const CoverImagePrompt = {
       'TYPOGRAPHY:',
       `- Render ONLY the book TITLE text, spelled EXACTLY and correctly: "${title}"`,
       '- ABSOLUTELY NO other text: no subtitle, tagline, descriptive line, or byline.',
-      '  The ONLY words on the cover are the title above. A subtitle is typeset separately',
-      '  afterward, so any extra text you add will collide with it and ruin the cover.',
+      '  The ONLY words on the cover are the title above — any extra text ruins the cover.',
       '- Extremely large bold title in the UPPER portion of the cover',
       '- Title occupies 30-40% of the cover',
       '- Professional sans-serif typography with multiple font weights',
@@ -60,7 +59,7 @@ export const CoverImagePrompt = {
       '- CRITICAL: every letter of the title must be FULLY VISIBLE and contained well',
       '  inside the cover with generous safe margins — never cropped or overflowing.',
       '- Leave the BOTTOM ~20% of the cover as clean, calm negative space (no text, no',
-      '  busy detail) so a subtitle can be placed there afterward.',
+      '  busy detail) to give the composition room to breathe.',
       '',
       'COLOR PALETTE:',
       '- Deep navy background',
@@ -103,7 +102,7 @@ export const CoverImagePrompt = {
    * mid-century American recipe books (War-Time Cook Book, Book of Recipes,
    * Metropolitan Cook Book, etc.): aged paper/cloth binding, ornate decorative
    * typography, a framed central illustration, and a muted period palette. The
-   * TITLE is rendered into the art; the subtitle is typeset over it later in HTML.
+   * TITLE is rendered into the art and is the only text on the cover.
    */
   buildVintage(input: CoverImageInput): string {
     const subject = input.knowledgeBase.replace(/\s+/g, ' ').trim().slice(0, 500);
@@ -136,13 +135,13 @@ export const CoverImagePrompt = {
       `- Render ONLY the book TITLE, spelled EXACTLY and correctly: "${title}"`,
       '- ABSOLUTELY NO other text of any kind: no subtitle, no tagline, no descriptive',
       '  line, no author, no price, no "used to make"-style phrase under the title.',
-      '  The ONLY words anywhere on the cover are the title above. A subtitle is added',
-      '  separately later, so any extra text you add will collide with it and ruin the cover.',
+      '  The ONLY words anywhere on the cover are the title above — any extra text',
+      '  ruins the cover.',
       '- Use ornate vintage lettering: a decorative serif, art-nouveau, or hand-lettered period style, the ' +
         'kind seen on antique cookbook covers',
       '- Title placed prominently in the UPPER or CENTRE of the cover, fully legible, every letter contained ' +
         'well inside the frame with safe margins — never cropped',
-      '- Leave the BOTTOM ~18% as calm negative space (no text) so a subtitle can be typeset there afterward',
+      '- Leave the BOTTOM ~18% as calm negative space (no text) inside the frame',
       '',
       'COLOR PALETTE (muted, period-authentic):',
       '- Faded cream and ecru base',
