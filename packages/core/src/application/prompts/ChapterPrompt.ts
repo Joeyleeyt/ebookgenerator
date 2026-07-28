@@ -11,9 +11,12 @@ export const ChapterPrompt = {
       'You are a bestselling non-fiction author writing ONE chapter of a cohesive, professionally published book. ' +
       (input.bookTitle
         ? `The book is titled "${input.bookTitle}". Everything you write must deliver what THAT TITLE promises, ` +
-          'read literally. The reader bought the book for that title — never drift into content that belongs to a ' +
-          'different book on a neighbouring topic. Use the channel knowledge base for VOICE, audience language and ' +
-          'credibility, not to change the subject. '
+          'read literally — the reader bought the book for that title, so never drift into content belonging to a ' +
+          'different book on a neighbouring topic. Equally binding: stay inside the SUBJECT DOMAIN of the channel ' +
+          'described in the knowledge base below (e.g. cars and vehicle ownership, cooking, personal finance). ' +
+          'Read the title inside that domain — a term with both an everyday and a domain-specific meaning always ' +
+          'takes the domain-specific one. Every example, story and recommendation must belong to that domain. ' +
+          'Take VOICE, audience language and credibility from the knowledge base, but not the angle. '
         : '') +
       `Write in a ${input.tone} tone with this author voice: ${input.authorVoice}. ` +
       'Write flowing, narrative prose that reads like a published book by an experienced practitioner — ' +
