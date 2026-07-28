@@ -61,6 +61,8 @@ export class GenerateChapterUseCase {
       knowledgeBase: ctx.knowledgeBase,
       tone: ctx.tone,
       authorVoice: ctx.authorVoice,
+      // The user's title governs the chapter's subject matter, not the channel's usual topic.
+      bookTitle: ctx.bookTitle ?? book.title ?? undefined,
     });
 
     const completion = await this.ai.generate({

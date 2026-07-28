@@ -96,6 +96,9 @@ export const ExtraContentPrompt = {
     return {
       system:
         `You are an expert non-fiction author writing the "${input.kind}" element of a cohesive, sellable ebook. ` +
+        `The book is titled "${input.bookTitle}" — describe the book THAT TITLE promises, read literally, and ` +
+        'nothing else. Use the channel knowledge base for voice, audience and credibility only; never let the ' +
+        'creator\'s other topics change what this book is about. ' +
         `Maintain a ${input.tone} tone and this author voice: ${input.authorVoice}. ` +
         `${spec.instruction} Target ~${spec.words} words. Output only well-structured Markdown (no surrounding commentary). ` +
         'Do NOT begin with or include any title/heading that names this section (no "# Foreword", "# Preface", ' +

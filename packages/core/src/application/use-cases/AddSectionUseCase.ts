@@ -37,6 +37,7 @@ export class AddSectionUseCase {
         knowledgeBase: ctx.knowledgeBase,
         tone: ctx.tone,
         authorVoice: ctx.authorVoice,
+        bookTitle: ctx.bookTitle ?? book.title ?? undefined,
       }),
       messages: [
         {

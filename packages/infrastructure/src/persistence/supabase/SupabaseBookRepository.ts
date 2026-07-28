@@ -173,6 +173,9 @@ export class SupabaseBookRepository implements BookRepository {
       authorVoice: typeof s.authorVoice === 'string' ? s.authorVoice : 'authoritative and clear',
       contextVersion: `${strategy?.input_hash ?? ''}:${kb?.input_hash ?? ''}`,
       bookType: options.bookType === 'cooking' ? 'cooking' : 'normal',
+      ...(typeof options.bookTitle === 'string' && options.bookTitle.trim()
+        ? { bookTitle: options.bookTitle.trim() }
+        : {}),
     };
   }
 

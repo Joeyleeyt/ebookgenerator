@@ -68,7 +68,13 @@ export class GenerateOutlineUseCase {
     // which the model tends to return low (2–3), producing tiny books regardless of
     // the page target. ~targetPages/7 → 14 chapters for a 100-page book; clamped 2–14.
     const chapterCount = Math.max(2, Math.min(14, Math.round(project.options.targetPages / 7)));
-    const inputHash = this.hasher.hash({ strat: strategy.inputHash, kb: kb.inputHash });
+    // bookTitle is part of the hash so retitling a project rebuilds the outline
+    // instead of reusing chapters written for the previous title.
+    const inputHash = this.hasher.hash({
+      strat: strategy.inputHash,
+      kb: kb.inputHash,
+      title: project.options.bookTitle ?? '',
+    });
 
     let book = await this.books.findByProject(projectId);
     if (!book?.outline || book.outline.inputHash !== inputHash) {
@@ -82,6 +88,7 @@ export class GenerateOutlineUseCase {
             chapterCount,
             perChapterWords: budget.perChapterWords(chapterCount),
             projectId: cmd.projectId,
+            bookTitle: project.options.bookTitle,
           });
       if (entries.isFail()) return Result.fail(entries.error);
 
@@ -133,6 +140,7 @@ export class GenerateOutlineUseCase {
     chapterCount: number;
     perChapterWords: number;
     projectId: string;
+    bookTitle?: string | undefined;
   }): Promise<Result<OutlineEntry[]>> {
     const prompt = OutlinePrompt.build({
       bookStrategy: input.strategy.toText(),
@@ -140,6 +148,7 @@ export class GenerateOutlineUseCase {
       chapterCount: input.chapterCount,
       perChapterWords: input.perChapterWords,
       tone: input.strategy.tone,
+      bookTitle: input.bookTitle,
     });
     const completion = await this.ai.generate({
       model: 'claude-sonnet-4-6',

@@ -45,7 +45,13 @@ export class GenerateBookStrategyUseCase {
     const kb = await this.knowledge.getKnowledgeBase(projectId);
     if (!kb) return Result.fail('Knowledge base missing');
 
-    const inputHash = this.hasher.hash({ kb: kb.inputHash, pages: project.options.targetPages });
+    // bookTitle participates in the hash: changing the title must invalidate a cached
+    // strategy, otherwise the book keeps the old subject matter under the new title.
+    const inputHash = this.hasher.hash({
+      kb: kb.inputHash,
+      pages: project.options.targetPages,
+      title: project.options.bookTitle ?? '',
+    });
     const existing = await this.knowledge.getBookStrategy(projectId);
     if (existing?.inputHash === inputHash) return Result.ok(); // idempotent
 
@@ -55,6 +61,7 @@ export class GenerateBookStrategyUseCase {
       targetPages: project.options.targetPages,
       tone: project.options.tone,
       channelTitle: channel?.title ?? 'this channel',
+      bookTitle: project.options.bookTitle,
     });
     const completion = await this.ai.generate({
       model: 'claude-sonnet-4-6',

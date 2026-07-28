@@ -11,6 +11,8 @@ export interface SharedChapterContext {
   contextVersion: string;
   /** The kind of book being written; drives recipe vs. prose generation. */
   bookType: 'normal' | 'cooking';
+  /** User-supplied book title; when set it governs each chapter's subject matter. */
+  bookTitle?: string | undefined;
 }
 
 export interface BookRepository {

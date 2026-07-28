@@ -72,6 +72,8 @@ export class GenerateChapterResearchUseCase {
       chapterPurpose: chapter.topic,
       keyPoints: chapter.keyPoints,
       candidateMaterial: `${candidateMaterial}\n\nAudience questions:\n${audienceQuestions.join('\n')}`,
+      // Keeps retrieval from dragging in adjacent channel topics that fit the channel but not the book.
+      ...(book.title ? { bookTitle: book.title } : {}),
     });
     const completion = await this.ai.generate({
       model: 'claude-sonnet-4-6',
