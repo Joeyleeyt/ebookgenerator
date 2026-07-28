@@ -22,16 +22,73 @@ export const RECIPE_COUNT_MAX = 120;
  * If the book title names a recipe count (e.g. "101 Recipes", "50 Easy Dinners"),
  * that number wins — the book should match its title. Returns undefined when the
  * title has no leading count, so the caller can fall back to the default.
- * Only a number that immediately precedes a "recipe(s)"-style word counts, so a
- * title like "Recipes for the 4th of July" isn't misread as 4 recipes.
+ * The number must PRECEDE the "recipe(s)"-style word, so "Recipes for the 4th of July"
+ * isn't misread as 4 recipes. Up to three descriptive words may sit between them
+ * ("101 Easy Weeknight Recipes"), which is how these titles are usually written.
  */
 export function recipeCountFromTitle(title: string | undefined): number | undefined {
   if (!title) return undefined;
-  const m = title.match(/(\d{1,3})\s*(?:\+\s*)?(?:recipe|dish|meal|dinner|plate)s?\b/i);
+  const m = title.match(
+    /(\d{1,3})\s*(?:\+\s*)?(?:[a-z'-]+\s+){0,3}(?:recipe|dish|meal|dinner|plate)s?\b/i,
+  );
   if (!m?.[1]) return undefined;
   const n = parseInt(m[1], 10);
   if (!Number.isFinite(n) || n <= 0) return undefined;
   return Math.max(RECIPE_COUNT_MIN, Math.min(RECIPE_COUNT_MAX, n));
+}
+
+/**
+ * Titles are frequently pasted in filename form ("THE_DIY_REPAIR_BIBLE_101_REPAIRS").
+ * Normalize once, here, so the clean title is what gets stored, hashed, sent to every
+ * prompt and printed on the cover. Doing it at the edge (rather than asking the model
+ * to tidy it) keeps the "return the title EXACTLY" prompt rule intact — the model
+ * receives an already-clean string.
+ *
+ * Separators become spaces; an ALL-CAPS or all-lowercase title is title-cased, with
+ * short joining words kept lowercase unless they lead. A title that already has mixed
+ * case is left alone, since the author's own capitalization is deliberate.
+ */
+const MINOR_WORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'from', 'in', 'nor', 'of', 'on',
+  'or', 'the', 'to', 'v', 'via', 'vs', 'with', 'without',
+]);
+
+/**
+ * Acronyms that must stay upper-case when title-casing an ALL-CAPS input — otherwise
+ * "THE_DIY_REPAIR_BIBLE" becomes "The Diy Repair Bible" on the cover. Only genuinely
+ * unambiguous ones; a word that is also a common noun (e.g. "GAS") is left to normal
+ * casing rather than risk shouting a real word.
+ */
+const ACRONYMS = new Set([
+  'diy', 'suv', 'rv', 'atv', 'ev', 'hvac', 'abs', 'obd', 'obd2', 'tv', 'pc', 'usa',
+  'us', 'uk', 'ai', 'seo', 'ceo', 'diyer', 'mpg', 'psi', 'gps', 'led', 'ac', 'dc',
+]);
+
+export function normalizeBookTitle(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  // Underscores are the common filename separator; collapse runs of them and of
+  // whitespace alike. Hyphens are left alone — they are meaningful in real titles.
+  const spaced = raw.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!spaced) return undefined;
+
+  const letters = spaced.replace(/[^A-Za-z]/g, '');
+  const isAllCaps = letters.length > 0 && letters === letters.toUpperCase();
+  const isAllLower = letters.length > 0 && letters === letters.toLowerCase();
+  if (!isAllCaps && !isAllLower) return spaced; // deliberate mixed case — preserve it
+
+  const words = spaced.split(' ');
+  return words
+    .map((word, i) => {
+      const lower = word.toLowerCase();
+      // Strip punctuation when testing for an acronym so "DIY," / "(DIY)" still match.
+      const bare = lower.replace(/[^a-z0-9]/g, '');
+      if (ACRONYMS.has(bare)) return word.toUpperCase();
+      // Keep tokens that aren't plain words (numbers, "101", hyphenates) as-is apart
+      // from casing their first letter.
+      if (MINOR_WORDS.has(lower) && i > 0 && i < words.length - 1) return lower;
+      return lower.replace(/^([a-z])/, (c) => c.toUpperCase());
+    })
+    .join(' ');
 }
 
 interface GenerationOptionsProps {
@@ -52,7 +109,7 @@ interface GenerationOptionsProps {
 
 export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
   static create(props: Partial<GenerationOptionsProps>): GenerationOptions {
-    const bookTitle = props.bookTitle?.trim();
+    const bookTitle = normalizeBookTitle(props.bookTitle);
     const bookType: BookType = props.bookType ?? 'normal';
     const isCooking = bookType === 'cooking';
     // The recipe count should follow the title: "101 Recipes" → 101. A count named

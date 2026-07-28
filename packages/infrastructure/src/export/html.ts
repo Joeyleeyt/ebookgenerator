@@ -124,7 +124,9 @@ export function renderHtml(doc: AssembledDocument): string {
 
     /* Title page — typographic, carries the actual book title; vertically centered on its page */
     .title-page { page: title; text-align: center; height: 247mm; display: flex; flex-direction: column; justify-content: center; }
-    .title-page__title { font-size: 30pt; font-weight: 700; letter-spacing: -0.5px; margin: 0 auto; line-height: 1.15; max-width: 22em; }
+    /* overflow-wrap guarantees even an unbroken token (e.g. a pasted FILE_NAME_TITLE)
+       breaks instead of running off the page; max-width keeps normal titles centered. */
+    .title-page__title { font-size: 30pt; font-weight: 700; letter-spacing: -0.5px; margin: 0 auto; line-height: 1.15; max-width: 22em; overflow-wrap: break-word; word-wrap: break-word; hyphens: auto; }
     .title-page__subtitle { font-size: 14pt; font-style: italic; color: #555; margin: 16px auto 0; max-width: 30em; }
     .title-page__promise { font-size: 12pt; font-style: italic; color: #777; margin: 12px auto 0; max-width: 28em; }
     .title-page__ornament { text-align: center; color: #aaa; letter-spacing: 0.4em; margin: 22px 0; }
@@ -156,7 +158,7 @@ export function renderHtml(doc: AssembledDocument): string {
     .cover--back { page-break-before: always; }
     .cover--back .cover__inner { justify-content: center; align-items: center; text-align: center; }
     .cover--art .cover__back-title { font-family: 'Georgia', serif; font-size: 26pt; font-weight: 700; color: #ffffff;
-      margin: 0 0 8mm; text-shadow: 0 2px 16px rgba(0,0,0,.95); }
+      margin: 0 0 8mm; text-shadow: 0 2px 16px rgba(0,0,0,.95); overflow-wrap: break-word; word-wrap: break-word; }
     .cover--art .cover__overview-lead { font-size: 14pt; color: #ff8a3d; font-weight: 600; margin: 0 0 5mm; max-width: 28em;
       text-shadow: 0 1px 8px rgba(0,0,0,.85); }
     .cover--art .cover__overview { font-size: 12.5pt; color: #f3f3f3; line-height: 1.7; margin: 0 0 10mm; max-width: 30em;
@@ -167,7 +169,7 @@ export function renderHtml(doc: AssembledDocument): string {
     /* Chapters — centered opener (eyebrow + title + ornament), justified body */
     .chapter { page: chapter; padding-top: 22mm; }
     .chapter-eyebrow { text-align: center; text-transform: uppercase; letter-spacing: 0.25em; font-size: 11pt; font-weight: 600; color: #8a8a8a; margin: 0 0 1.2em; }
-    .chapter-title { text-align: center; font-size: 24pt; font-weight: 700; margin: 0 auto 0.4em; max-width: 18em; line-height: 1.2; page-break-after: avoid; }
+    .chapter-title { text-align: center; font-size: 24pt; font-weight: 700; margin: 0 auto 0.4em; max-width: 18em; line-height: 1.2; page-break-after: avoid; overflow-wrap: break-word; word-wrap: break-word; }
     .chapter-ornament { text-align: center; color: #bbb; letter-spacing: 0.4em; margin: 0 0 1.6em; page-break-after: avoid; }
 
     /* In-chapter illustrations — a partial-page, centered inset that flows with the
