@@ -8,11 +8,16 @@ import { CoverImagePrompt } from '../prompts/CoverImagePrompt.js';
 import { EXPORT_BUCKET } from './ExportEbookUseCase.js';
 
 /**
- * Generates one cover illustration per book from the WHOLE-CHANNEL knowledge
- * base (so the art reflects the channel's subject, not just the title) and
- * stores it in the exports bucket. Runs best-effort at the ASSEMBLING stage and
- * is idempotent — once a book has a cover path, it is left untouched, so retries
- * and re-exports neither regenerate nor double-bill.
+ * Generates one cover illustration per book and stores it in the exports bucket.
+ *
+ * The brief is built from THIS book's strategy (core promise, transformation,
+ * key principles) rather than the whole-channel knowledge base — the latter is
+ * identical for every book in a channel, which made every cover the same. The
+ * channel knowledge base remains the fallback for books with no strategy.
+ *
+ * Runs best-effort at the ASSEMBLING stage and is idempotent — once a book has a
+ * cover path, it is left untouched, so retries and re-exports neither regenerate
+ * nor double-bill.
  */
 export class GenerateCoverImageUseCase {
   constructor(
@@ -34,8 +39,13 @@ export class GenerateCoverImageUseCase {
     const coverInput = {
       title: book.title ?? strategy?.title ?? 'Untitled',
       subtitle: strategy?.subtitle ?? '',
-      knowledgeBase: ctx.knowledgeBase,
+      // Per-book brief first; the channel knowledge base is shared across every
+      // book in the channel, so it can only ever produce one cover.
+      subject: strategy?.toText() ?? ctx.knowledgeBase,
       tone: ctx.tone,
+      // Stable across retries: a re-run after a storage failure must reproduce
+      // the same art direction, not roll a new one.
+      variantKey: projectId.value,
     };
     // Cooking books get an antique vintage-cookbook cover; everything else gets the
     // premium blueprint-style nonfiction cover.
