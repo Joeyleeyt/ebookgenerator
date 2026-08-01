@@ -1,5 +1,6 @@
 interface CoverImageInput {
   title: string;
+  /** Rendered INTO the artwork as the deck under the title (reference-cover style). */
   subtitle: string;
   /**
    * THIS book's own brief — the strategy text (core promise, transformation, key
@@ -14,225 +15,181 @@ interface CoverImageInput {
    * stable so a retry after a storage failure reproduces the same cover.
    */
   variantKey: string;
+  /**
+   * Up to 5 SHORT labels (2-3 words) for the navy benefit bar across the foot of
+   * the cover. Derived from the strategy's key principles. Fewer than 2 and the
+   * bar is dropped rather than rendered half-empty.
+   */
+  featureLabels?: string[];
 }
 
 /**
- * One art direction: the parts of the brief that make two covers look different.
- * STYLE / COMPOSITION / TYPOGRAPHY / QUALITY stay fixed across all variants —
- * that is the house look and the hard-won text-rendering safety rules — while the
- * concept, scene, and palette rotate.
+ * The client's reference cover fixes the LAYOUT, TYPOGRAPHY and PALETTE — that
+ * template is the house look and does not vary. What still rotates is the
+ * PHOTOGRAPH filling the lower half, so two books from one channel remain
+ * visually distinct without breaking the template.
  */
 interface CoverVariant {
   name: string;
-  coreConcept: string;
-  visualDirection: string;
-  palette: string[];
-  designFeatures: string[];
+  /** How the lower-half photograph is shot and what it depicts. */
+  photoDirection: string;
 }
 
 /**
- * Five distinct art directions for the premium nonfiction cover. Picked
- * deterministically from the project id, so covers vary across books but never
- * across retries of the same book.
+ * Five ways to shoot the lower-half photograph. Picked deterministically from
+ * the project id, so covers vary across books but never across retries of the
+ * same book. Every one of these must still read as warm, aspirational lifestyle
+ * photography sitting under a cream typographic panel — they vary the SUBJECT of
+ * the photo, not the template around it.
  */
 const NONFICTION_VARIANTS: CoverVariant[] = [
   {
-    name: 'blueprint-to-reality',
-    coreConcept:
-      "Show the transformation of the book's subject from concept to reality — ideas and plans becoming a " +
-      'polished, fully realized result.',
-    visualDirection:
-      "A striking, photorealistic scene representing the book's subject seamlessly emerging from " +
-      'architectural-style blueprints and schematics. The lower portion contains clean blueprint drawings, ' +
-      'plans, measurements, and precise line work. The upper portion transitions into a stunning ' +
-      'photorealistic representation of the subject with elegant detail, lighting, textures, and premium ' +
-      'materials.',
-    palette: [
-      '- Deep navy background',
-      '- Warm gold accents',
-      '- White typography',
-      '- Subtle copper highlights',
-      '- Premium luxury appearance',
-    ],
-    designFeatures: [
-      '- Architectural blueprint overlays',
-      '- Subject sketches relevant to the topic',
-      '- Precision drafting lines',
-      '- Minimalist geometric details',
-      '- Elegant visual callouts',
-    ],
+    name: 'aspirational-portrait',
+    photoDirection:
+      'A warm, candid lifestyle photograph of a real person who represents the target reader, seen in a ' +
+      'calm, positive moment that embodies the book\'s promise — often from behind or in three-quarter ' +
+      'profile, looking toward the thing they want. Natural window or golden-hour light, soft shallow ' +
+      'depth of field, gentle warm tones.',
   },
   {
-    name: 'hero-object',
-    coreConcept:
-      "Elevate the single most iconic object of the book's subject into a museum-grade hero portrait — " +
-      'mastery distilled into one perfect artifact.',
-    visualDirection:
-      "One hero object central to the book's subject, rendered photorealistically and lit like a luxury " +
-      'product photograph: a single dramatic key light, deep falloff into shadow, crisp specular highlights ' +
-      'on its material. The object floats against a near-black seamless backdrop with a soft gradient halo. ' +
-      'Nothing else competes with it.',
-    palette: [
-      '- Near-black charcoal background with a soft gradient halo',
-      '- Warm amber and brass highlights on the object',
-      '- Crisp white typography',
-      '- One restrained accent colour drawn from the subject itself',
-      '- Rich, cinematic, high-contrast',
-    ],
-    designFeatures: [
-      '- Single dramatic key light with deep shadow falloff',
-      '- Subtle reflective floor or plinth beneath the object',
-      '- Fine dust or atmosphere catching the light',
-      '- Thin metallic rule lines framing the composition',
-      '- Museum-label restraint',
-    ],
+    name: 'in-the-moment',
+    photoDirection:
+      "A candid documentary photograph of the book's activity actually being done — hands at work, the " +
+      'real setting around them, caught mid-action rather than posed. Natural directional light, honest ' +
+      'textures, shallow depth of field isolating the moment.',
   },
   {
-    name: 'bold-editorial',
-    coreConcept:
-      "State the book's promise with flat, confident graphic conviction — a modern editorial statement " +
-      'rather than a photograph.',
-    visualDirection:
-      "A bold flat-graphic illustration of the book's subject: simplified geometric shapes, confident thick " +
-      'strokes, generous flat colour fields, and a strong diagonal or circular motif anchoring the ' +
-      'composition. Screen-print texture and slight ink imperfection give it warmth. No photorealism, no ' +
-      'gradients, no drop shadows.',
-    palette: [
-      '- Warm off-white or bone paper base',
-      '- Two strong flat accent colours (e.g. burnt orange and deep teal)',
-      '- Near-black ink for typography',
-      '- One small bright highlight colour used sparingly',
-      '- Confident, graphic, poster-like',
-    ],
-    designFeatures: [
-      '- Flat vector-style geometric shapes',
-      '- Screen-print grain and slight ink misregistration',
-      '- A single strong diagonal or circular anchoring motif',
-      '- Thick confident strokes, no fine detail',
-      '- Large uninterrupted colour fields',
-    ],
+    name: 'hero-still-life',
+    photoDirection:
+      "A beautifully lit still-life of the objects central to the book's subject, arranged with editorial " +
+      'care on a clean warm surface — overhead or gentle three-quarter angle, soft directional light, ' +
+      'natural shadows, premium materials and real texture.',
   },
   {
-    name: 'atmospheric-photographic',
-    coreConcept:
-      "Place the reader inside the world of the book's subject — an atmospheric moment that promises " +
-      'expertise earned in real conditions.',
-    visualDirection:
-      "A cinematic photorealistic environment where the book's subject actually lives — the workspace, " +
-      'landscape, or setting it belongs to — shot at golden hour or under moody directional light with a ' +
-      'shallow depth of field. Rich textures, real materials, atmospheric haze. Human presence implied but ' +
-      'no recognisable faces.',
-    palette: [
-      '- Warm golden-hour light against cool blue-grey shadow',
-      '- Desaturated earth tones with deep contrast',
-      '- White or pale cream typography',
-      '- Subtle film grain and gentle halation',
-      '- Cinematic, immersive, filmic',
-    ],
-    designFeatures: [
-      '- Shallow depth of field with soft background falloff',
-      '- Atmospheric haze catching directional light',
-      '- Real material texture — wood, metal, stone, fabric',
-      '- Natural framing from the environment itself',
-      '- Subtle film grain',
-    ],
+    name: 'destination-outcome',
+    photoDirection:
+      'A wide, inviting photograph of the RESULT the reader is promised — the place, state, or finished ' +
+      'outcome they are working toward, shot at golden hour with generous depth and warm inviting light. ' +
+      'Aspirational but real, never stock-generic.',
   },
   {
-    name: 'minimal-symbolic',
-    coreConcept:
-      "Reduce the book's core idea to one elegant symbol — the confidence of a definitive work that needs " +
-      'no explanation.',
-    visualDirection:
-      "A single refined symbolic mark representing the book's central idea, rendered with precise geometry " +
-      'and a subtle metallic or embossed finish, sitting in a vast field of calm negative space. Extreme ' +
-      'restraint: one idea, perfectly executed, nothing decorative.',
-    palette: [
-      '- Deep forest green, oxblood, or slate as a single saturated ground',
-      '- Soft metallic gold or silver for the symbol',
-      '- Crisp white or bone typography',
-      '- No secondary colours at all',
-      '- Austere, expensive, definitive',
-    ],
-    designFeatures: [
-      '- One precise geometric symbol, perfectly centred or optically balanced',
-      '- Subtle emboss, foil, or letterpress impression on the mark',
-      '- Vast calm negative space around it',
-      '- Optional single hairline rule for structure',
-      '- Zero decorative elements',
-    ],
+    name: 'quiet-detail',
+    photoDirection:
+      "An intimate close-up detail from the book's world — a texture, tool, surface, or small telling " +
+      'object — shot macro-close with beautiful soft light and a creamy out-of-focus background. Calm, ' +
+      'tactile, and premium.',
   },
 ];
 
 /**
- * Builds a premium, bestseller-grade cover brief. The TITLE is rendered INTO the
- * image (the AI designs the whole cover) and it is the ONLY text on the cover —
- * the subtitle appears on the title page instead, so nothing is overlaid on the
- * artwork.
+ * Builds a premium, bestseller-grade cover brief matching the CLIENT'S REFERENCE
+ * COVER: a cream typographic upper half (small-caps eyebrow, huge navy serif
+ * title with one gold italic line, gold rule, small-caps navy deck), a warm
+ * lifestyle photograph filling the lower half, an optional gold-ruled roundel
+ * badge, and a navy benefit bar with icons across the foot.
  *
- * The fixed STYLE / COMPOSITION / TYPOGRAPHY / QUALITY rules keep every book at
- * the same commercial standard, while the CORE CONCEPT / VISUAL DIRECTION /
- * COLOR PALETTE come from one of several art-direction variants chosen
- * deterministically from the project id — so books from the same channel no
- * longer share a cover, but a retry of the SAME book reproduces the same look.
+ * The whole cover — every word — is rendered INTO the image: the export shows it
+ * full-bleed with no HTML overlay, so anything not requested here simply will not
+ * appear. Unlike the previous revision the SUBTITLE is now part of the artwork.
+ *
+ * LAYOUT, TYPOGRAPHY and PALETTE are fixed (that template IS the client's house
+ * look). Only the lower-half PHOTOGRAPH rotates, chosen deterministically from
+ * the project id, so books from one channel stay visually distinct while a retry
+ * of the SAME book reproduces the same cover.
  */
 export const CoverImagePrompt = {
   build(input: CoverImageInput): string {
     const subject = compact(input.subject, 900);
     const title = compact(input.title, 200);
-    const subtitle = compact(input.subtitle, 200);
+    const subtitle = compact(input.subtitle, 180);
     const variant = pickVariant(NONFICTION_VARIANTS, input.variantKey);
+    // Half-empty bars look broken, so render the foot bar only with enough labels.
+    const labels = (input.featureLabels ?? []).map((l) => compact(l, 24).toUpperCase()).filter(Boolean).slice(0, 5);
+    const hasBar = labels.length >= 2;
+    const accentWord = pickAccentWord(title);
 
     return [
-      'Design a premium bestselling NON-FICTION book cover.',
+      'Design a premium bestselling NON-FICTION book cover in the following EXACT editorial template.',
       '',
       'STYLE:',
       'Commercial publishing quality, comparable to top-selling nonfiction books on Amazon and bookstore ' +
-        'shelves. The cover must look professionally designed by an award-winning editorial designer, not ' +
-        'AI-generated or template-based.',
+        'shelves. Warm, elegant, trustworthy, and expensive — designed by an award-winning editorial ' +
+        'designer, never AI-generated, template-based, or Canva-like.',
       '',
-      'CORE CONCEPT:',
-      variant.coreConcept,
+      'OVERALL LAYOUT (follow this structure precisely, top to bottom):',
+      '1. A small GOLD line-art ICON centred at the very top, flanked left and right by thin horizontal ' +
+        'gold rules that stop short of the margins.',
+      '2. The TITLE BLOCK in large elegant serif type on a clean CREAM background.',
+      '3. A short thin GOLD rule, centred, in the gap BETWEEN the title block and the subtitle — never ' +
+        'below the subtitle.',
+      '4. The SUBTITLE deck in small, widely-letterspaced navy capitals, centred, 2-3 lines.',
+      '5. A warm PHOTOGRAPH filling the LOWER HALF of the cover, blending softly upward into the cream ' +
+        'background with no hard seam.',
+      ...(hasBar
+        ? [
+            '6. A solid NAVY BAR across the very bottom carrying small gold line icons with tiny capital ' +
+              'labels beneath them.',
+            '   The bar must be FULL-BLEED: it touches the left edge, the right edge, and the very bottom ' +
+              'edge of the cover with NO margin or gap of any kind around it.',
+          ]
+        : ['6. A calm, uncluttered lower edge — no bar, no band, no strip, and no extra text of any kind.']),
       '',
-      'VISUAL DIRECTION:',
-      variant.visualDirection,
+      'PHOTOGRAPH (lower half):',
+      variant.photoDirection,
+      'It must sit BEHIND and BELOW the typography, never competing with it, and must fade gently into the ' +
+        'cream panel above. Real photography, never illustration or 3D render.',
       '',
       'THIS BOOK:',
-      `Title: "${title}"`,
-      ...(subtitle ? [`What it promises (context for the art only — do NOT render it): "${subtitle}"`] : []),
       `Subject and premise: """${subject}"""`,
-      'The artwork must be specific to THIS book — draw the imagery from the subject and premise above, ' +
-        'not from generic stock ideas.',
+      'The photograph and the top icon must be specific to THIS book — drawn from the subject and premise ' +
+        'above, never generic stock imagery.',
       '',
-      'COMPOSITION:',
-      '- Strong central focal point',
-      '- Symmetrical professional layout',
-      '- Clean grid structure',
-      '- Large empty breathing space',
-      '- Sophisticated visual hierarchy',
-      '- Instantly recognizable as a premium nonfiction book',
+      'TEXT ON THE COVER — render EXACTLY these words, spelled correctly, and NOTHING else:',
+      `- TITLE: "${title}"`,
+      ...(subtitle ? [`- SUBTITLE DECK: "${subtitle}"`] : []),
+      ...(hasBar ? [`- BENEFIT BAR LABELS (one per icon, in this order): ${labels.map((l) => `"${l}"`).join(', ')}`] : []),
+      '- NO author name, NO publisher, NO price, NO series line, NO invented tagline, NO extra words of any ' +
+        'kind beyond those listed above.',
       '',
       'TYPOGRAPHY:',
-      `- Render ONLY the book TITLE text, spelled EXACTLY and correctly: "${title}"`,
-      '- ABSOLUTELY NO other text: no subtitle, tagline, descriptive line, or byline.',
-      '  The ONLY words on the cover are the title above — any extra text ruins the cover.',
-      '- Extremely large bold title in the UPPER portion of the cover',
-      '- Title occupies 30-40% of the cover',
-      '- Professional sans-serif typography with multiple font weights',
-      '- Typography integrated into the design',
-      '- CRITICAL: every letter of the title must be FULLY VISIBLE and contained well',
-      '  inside the cover with generous safe margins — never cropped or overflowing.',
-      '- Leave the BOTTOM ~20% of the cover as clean, calm negative space (no text, no',
-      '  busy detail) to give the composition room to breathe.',
+      '- Title set in a refined high-contrast SERIF (Didot / Bodoni / Playfair character), centred.',
+      '- Break the title across 2-4 lines by meaning, with clear size hierarchy: a small letterspaced ' +
+        'capitals line for any leading words, then the KEY WORD very large, then the remaining lines.',
+      // Naming the exact word beats a positional rule ("one line"): the model was
+      // reliably colouring only PART of a word — "D|etailing" — when left to choose.
+      `- MANDATORY ACCENT: set the word "${accentWord}" in WARM GOLD ITALIC serif. Every other word of the ` +
+        'title stays DEEP NAVY upright. This two-colour contrast is the signature of the design.',
+      `- CRITICAL: ALL letters of "${accentWord}" are gold italic — the first letter and the last letter ` +
+        'included. Never leave a leading capital navy, never change colour or style part-way through a ' +
+        'word, never split one word across two colours. Every word is entirely one colour and one style.',
+      '- Subtitle deck in small navy SANS or serif CAPITALS with generous letterspacing and line spacing.',
+      '- Benefit-bar labels tiny, gold, letterspaced capitals, centred under their own icon, evenly spaced ' +
+        'across the bar. Keep each label on a SINGLE line, with a clear normal word space between words — ' +
+        'never run two words together, never let a label wrap or collide with its neighbour.',
+      '- The title block occupies roughly the upper 40-45% of the cover.',
+      '- CRITICAL: every letter of every word must be FULLY VISIBLE, correctly spelled, and contained well ' +
+        'inside the cover with generous safe margins — never cropped, overlapping, or overflowing.',
+      '- SPELLING IS THE HIGHEST PRIORITY. Copy every string above letter by letter exactly as written. Do ' +
+        'not substitute, drop, double, or invent a single character — a misspelled word makes the cover ' +
+        'unusable. Re-read each word against the list before finishing.',
+      '- CRITICAL: text must sit on calm background, never over a busy part of the photograph.',
       '',
       'COLOR PALETTE:',
-      ...variant.palette,
+      '- Warm cream / off-white upper background',
+      '- Deep navy for primary typography and the bottom bar',
+      '- Warm gold / soft ochre for accents, rules, icons, and the italic title line',
+      '- Naturally warm photographic tones in the lower half',
+      '- Restrained and premium — no neon, no harsh saturation, no gradients behind text',
       '',
       'DESIGN FEATURES:',
-      ...variant.designFeatures,
+      '- Thin gold rules and delicate line-art icons (outline style, never filled or 3D)',
+      '- Soft, seamless blend between photograph and cream panel',
+      '- Symmetrical, centred, generously margined editorial composition',
+      '- Clear visual hierarchy with real breathing space',
       '- High-end editorial composition',
       '',
       'MOOD:',
-      `Expertise, authority, sophistication, luxury, transformation, modern mastery. Match a ${input.tone} tone.`,
+      `Expertise, warmth, reassurance, authority, sophistication, aspiration. Match a ${input.tone} tone.`,
       '',
       'QUALITY REQUIREMENTS:',
       '- Bestseller-quality book cover',
@@ -413,6 +370,27 @@ const VINTAGE_ERAS: VintageEra[] = [
     ],
   },
 ];
+
+/** Articles and prepositions that would waste the cover's one gold accent. */
+const WEAK_TITLE_WORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'it', 'of', 'on', 'or', 'the', 'to',
+  'with', 'your', 'you', 'my', 'our', 'how', 'what', 'why', 'that', 'this',
+]);
+
+/**
+ * Choose the single title word to set in gold italic. Naming it explicitly is
+ * what stops the model colouring half a word; leaving the choice to the model
+ * reliably produced "D|etailing". Prefers the longest meaningful word, which is
+ * usually the subject noun, and falls back to the longest word of any kind so a
+ * title made entirely of small words still gets its accent.
+ */
+function pickAccentWord(title: string): string {
+  const words = title.split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
+  if (words.length === 0) return title;
+  const strong = words.filter((w) => !WEAK_TITLE_WORDS.has(w.toLowerCase()));
+  const pool = strong.length > 0 ? strong : words;
+  return pool.reduce((best, w) => (w.length > best.length ? w : best));
+}
 
 /** Collapse whitespace and clamp to a budget. */
 function compact(text: string, max: number): string {

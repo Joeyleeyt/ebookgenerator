@@ -46,6 +46,10 @@ export class GenerateCoverImageUseCase {
       // Stable across retries: a re-run after a storage failure must reproduce
       // the same art direction, not roll a new one.
       variantKey: projectId.value,
+      // Short labels for the cover's navy benefit bar, from the book's own
+      // principles. Long prose renders as unreadable mush at that size, so keep
+      // only genuinely short ones rather than truncating mid-word.
+      featureLabels: toFeatureLabels(strategy?.keyPrinciples ?? []),
     };
     // Cooking books get an antique vintage-cookbook cover; everything else gets the
     // premium blueprint-style nonfiction cover.
@@ -63,4 +67,18 @@ export class GenerateCoverImageUseCase {
     await this.books.save(book);
     return Result.ok({ generated: true });
   }
+}
+
+/**
+ * Turn strategy key principles into labels short enough to read in the cover's
+ * foot bar. Principles are written as guidance sentences ("decontaminate before
+ * you polish"), so anything past three words is dropped rather than clipped —
+ * the prompt omits the bar entirely when fewer than two survive, which looks far
+ * better than a bar of truncated fragments.
+ */
+function toFeatureLabels(principles: string[]): string[] {
+  return principles
+    .map((p) => p.replace(/[.;:,]+$/, '').trim())
+    .filter((p) => p.length > 0 && p.split(/\s+/).length <= 3)
+    .slice(0, 5);
 }
