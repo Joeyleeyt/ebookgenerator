@@ -70,7 +70,8 @@ youtube-ebook-generator/
 │                                      #    whisper-transcribe, video-summarize, analyze-comments,
 │                                      #    knowledge-base, book-strategy, outline-generate,
 │                                      #    chapter-research, chapter-generate, polish-book,
-│                                      #    extra-content, ebook-assemble, export)
+│                                      #    extra-content, ebook-assemble, export,
+│                                      #    landing-page)
 │
 ├─ packages/
 │  ├─ core/                            # ── DOMAIN + APPLICATION (no framework imports) ──
@@ -345,6 +346,15 @@ async onStageItemCompleted(projectId, stage) {
 | `extra-content` | 3 | Anthropic tier | 3× | Opus — bonus chapters (Phase 13); user-triggered |
 | `ebook-assemble` | 4 | — | 3× | deterministic (Phase 14) |
 | `export` | 3 | Puppeteer mem | 3× | pdf + docx (Phase 15) |
+| `landing-page` | 3 | Anthropic tier | 2× | Opus — sales page + Netlify deploy (optional, post-pipeline) |
+
+**`landing-page` is a side-car, not a pipeline stage.** It runs after the project
+is already `COMPLETED`, so it touches no state machine and no barrier, and it is
+excluded from `failProject` in the worker factory: a page that can't be written
+or published must never mark a finished book as `FAILED`. Failures are recorded
+on the `landing_pages` row instead. Generation and publication are separate
+actions — the page is written as a DRAFT and only reaches a public URL when the
+user explicitly publishes it, and only once a checkout URL has been set.
 
 Plus per-queue **`QueueEvents`** listeners for SSE progress, and a shared **dead-letter** convention: after `attemptsMade >= attempts`, the worker records `FAILED` in `job_runs` and emits a `pipeline.stage.failed` event.
 

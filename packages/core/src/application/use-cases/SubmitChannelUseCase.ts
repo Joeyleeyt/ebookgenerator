@@ -12,15 +12,21 @@ import type { SubmitChannelDto } from '../dto/SubmitChannel.dto.js';
 export interface SubmitChannelResult {
   projectId: string;
   status: string;
+  /** True when the book was accepted but parked in QUEUED awaiting a free slot. */
+  queued: boolean;
+  /** How many of the user's books are already waiting ahead of this one. */
+  queuePosition: number;
 }
 
 /**
- * Entry point: validates the channel URL, creates the project, kicks off ingestion.
+ * Entry point: validates the channel URL, creates the project, and either starts
+ * ingestion or parks the project in QUEUED.
  *
- * Users may run several books at once — the pipeline is project-scoped end to
- * end and the queue adapter schedules fairly across projects — but not an
- * unbounded number: `maxActiveProjects` caps how many can be in flight so one
- * account can't monopolise the workers or the AI rate limits.
+ * A user may submit any number of books. At most `maxActiveProjects` RUN at once
+ * — the rest sit in QUEUED and are started automatically by
+ * StartQueuedProjectsUseCase as running books reach a terminal state. Nothing is
+ * ever rejected for being over the limit; the limit only controls how much runs
+ * concurrently, so one account can't monopolise the workers or the AI rate limits.
  */
 export class SubmitChannelUseCase {
   constructor(
@@ -35,15 +41,12 @@ export class SubmitChannelUseCase {
     const url = ChannelUrl.create(dto.channelUrl);
     if (url.isFail()) return Result.fail(url.error);
 
-    // Soft cap: two simultaneous submits can both pass this check, which at worst
-    // lets a user exceed the limit by one. Worth avoiding a lock for.
-    const active = await this.projects.countActiveByOwner(ownerId);
-    if (active >= this.maxActiveProjects) {
-      return Result.fail(
-        `You already have ${active} book${active === 1 ? '' : 's'} in progress (limit ${this.maxActiveProjects}). ` +
-          'Wait for one to finish, or delete it, before starting another.',
-      );
-    }
+    // Soft cap: two simultaneous submits can both read the same count, which at
+    // worst starts one book more than the limit. Worth avoiding a lock for.
+    const running = await this.projects.countRunningByOwner(ownerId);
+    const startNow = running < this.maxActiveProjects;
+    // Only needed for the "you're Nth in line" message when we're not starting.
+    const waiting = startNow ? [] : await this.projects.listQueuedByOwner(ownerId);
 
     const options = GenerationOptions.create(dto.options);
     const id = ProjectId.from(this.ids.uuid());
@@ -56,16 +59,25 @@ export class SubmitChannelUseCase {
     });
     if (project.isFail()) return Result.fail(project.error);
 
-    const advance = project.value.advanceTo('INGESTING_CHANNEL', this.clock.now());
+    const advance = project.value.advanceTo(startNow ? 'INGESTING_CHANNEL' : 'QUEUED', this.clock.now());
     if (advance.isFail()) return Result.fail(advance.error);
 
+    // Persist BEFORE enqueuing: the worker loads the project by id, so the row
+    // has to exist by the time the job is picked up.
     await this.projects.save(project.value);
-    await this.queue.enqueue(
-      'channel-ingest',
-      { projectId: id.value },
-      { jobId: `channel-ingest:${id.value}` },
-    );
+    if (startNow) {
+      await this.queue.enqueue(
+        'channel-ingest',
+        { projectId: id.value },
+        { jobId: `channel-ingest:${id.value}` },
+      );
+    }
 
-    return Result.ok({ projectId: id.value, status: project.value.status.value });
+    return Result.ok({
+      projectId: id.value,
+      status: project.value.status.value,
+      queued: !startNow,
+      queuePosition: startNow ? 0 : waiting.length + 1,
+    });
   }
 }

@@ -23,6 +23,15 @@ export class SupabaseStorageAdapter implements ObjectStorage {
     return Result.ok(`data:${contentType};base64,${bytes.toString('base64')}`);
   }
 
+  async getBytes(bucket: string, path: string): Promise<Result<{ bytes: Uint8Array; contentType: string }>> {
+    const { data, error } = await this.client.storage.from(bucket).download(path);
+    if (error || !data) return Result.fail(error?.message ?? 'Failed to download object');
+    return Result.ok({
+      bytes: new Uint8Array(await data.arrayBuffer()),
+      contentType: data.type || 'application/octet-stream',
+    });
+  }
+
   async remove(bucket: string, path: string): Promise<Result<void>> {
     const { error } = await this.client.storage.from(bucket).remove([path]);
     return error ? Result.fail(error.message) : Result.ok();

@@ -16,6 +16,8 @@ export class PipelineOrchestrator {
     private readonly queue: JobQueue,
     private readonly clock: Clock,
     private readonly logger: Logger,
+    /** Optional: starts the owner's next QUEUED book when this one completes. */
+    private readonly admission?: { promoteAfter(projectId: string): Promise<number> },
   ) {}
 
   /** Called by a fan-out child when it finishes; advances when the barrier hits zero. */
@@ -81,8 +83,22 @@ export class PipelineOrchestrator {
     // `completed`. Idempotent under fan-in — concurrent completions can't
     // double-advance or clobber the status; the losers simply no-op.
     const won = await this.projects.advanceStatusAtomic(ProjectId.from(projectId), [completed], next);
-    if (won) await this.enqueueStageEntry(projectId, next);
-    else this.logger.debug('advance skipped — status already moved', { projectId, completed, next });
+    if (!won) {
+      this.logger.debug('advance skipped — status already moved', { projectId, completed, next });
+      return;
+    }
+    await this.enqueueStageEntry(projectId, next);
+    // This book just released its concurrency slot — hand it to the owner's next
+    // queued book. Only the winner of the atomic advance gets here, so a slot is
+    // never handed out twice. Best-effort: a failure here must not fail the job.
+    if (next === 'COMPLETED' && this.admission) {
+      try {
+        const started = await this.admission.promoteAfter(projectId);
+        if (started > 0) this.logger.info('started queued project(s)', { after: projectId, started });
+      } catch (err) {
+        this.logger.warn('could not start queued projects', { after: projectId, error: String(err) });
+      }
+    }
   }
 
   /** Enqueue the entrypoint job for a stage (fan-out jobs are scheduled by the use case). */
@@ -137,8 +153,13 @@ const STAGE_ENTRY_QUEUE: Partial<Record<ProjectState, QueueName>> = {
   EXPORTING: 'export',
 };
 
-/** The stage each queue belongs to — used to rewind a FAILED project on retry. */
-const QUEUE_TO_STAGE: Record<QueueName, ProjectState> = {
+/**
+ * The stage each queue belongs to — used to rewind a FAILED project on retry.
+ * Partial by design: post-pipeline side-car queues (landing-page) belong to no
+ * stage, and a failure in one must never rewind a finished book. They are
+ * filtered out where this map is read.
+ */
+const QUEUE_TO_STAGE: Partial<Record<QueueName, ProjectState>> = {
   'channel-ingest': 'INGESTING_CHANNEL',
   'video-data': 'FETCHING_VIDEO_DATA',
   'transcript-fetch': 'FETCHING_TRANSCRIPTS',

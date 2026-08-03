@@ -35,6 +35,12 @@ const EnvSchema = z.object({
   // (higher quality, same 1-credit cost, ~38s/image). "img-flux" (Flux Schnell)
   // is faster (~10s) but lower quality; "nano-banana-pro" is 2 credits.
   LABS69_IMAGE_MODEL: z.string().default('nano-banana-2'),
+
+  // Netlify — hosts the generated sales landing pages. Optional: when unset the
+  // pages can still be generated and previewed, they just can't be published.
+  NETLIFY_AUTH_TOKEN: z.string().optional(),
+  /** Team slug; only needed when the token has access to more than one team. */
+  NETLIFY_ACCOUNT_SLUG: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

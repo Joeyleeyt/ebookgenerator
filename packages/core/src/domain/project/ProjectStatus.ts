@@ -2,6 +2,8 @@ import { ValueObject } from '../shared/ValueObject.js';
 
 export type ProjectState =
   | 'CREATED'
+  /** Accepted but deliberately not started — waiting for a concurrency slot. */
+  | 'QUEUED'
   | 'INGESTING_CHANNEL'
   | 'FETCHING_VIDEO_DATA'
   | 'FETCHING_TRANSCRIPTS'
@@ -22,14 +24,23 @@ export type ProjectState =
 
 /**
  * States a project can never leave. Everything else — including PARTIAL, which
- * resumes at ANALYZING_COMMENTS — still has pipeline work ahead of it and so
- * counts as "active" for the dashboard and the per-user concurrency cap.
+ * resumes at ANALYZING_COMMENTS — still has pipeline work ahead of it.
  */
 export const TERMINAL_STATES: readonly ProjectState[] = ['COMPLETED', 'FAILED'];
 
+/**
+ * States that consume no worker capacity: finished, or accepted-but-not-started.
+ * A project counts against the per-user concurrency cap only when it is outside
+ * this set — that's what lets a user submit any number of books while at most
+ * `MAX_ACTIVE_PROJECTS_PER_USER` of them actually run.
+ */
+export const NOT_RUNNING_STATES: readonly ProjectState[] = [...TERMINAL_STATES, 'QUEUED'];
+
 /** Explicit transition table — the full 15-phase pipeline contract lives here. */
 const TRANSITIONS: Record<ProjectState, ProjectState[]> = {
-  CREATED: ['INGESTING_CHANNEL', 'FAILED'],
+  CREATED: ['INGESTING_CHANNEL', 'QUEUED', 'FAILED'],
+  // Held back at submit time; the admission controller starts it when a slot frees.
+  QUEUED: ['INGESTING_CHANNEL', 'FAILED'],
   INGESTING_CHANNEL: ['FETCHING_VIDEO_DATA', 'FAILED'],
   FETCHING_VIDEO_DATA: ['FETCHING_TRANSCRIPTS', 'FAILED'],
   FETCHING_TRANSCRIPTS: ['TRANSCRIBING_FALLBACK', 'SUMMARIZING_VIDEOS', 'FAILED'],

@@ -41,6 +41,17 @@ export const ExportJob = z.object({
   format: z.enum(['pdf', 'docx', 'both']).default('both'),
 });
 
+/**
+ * Landing-page work. `publish` deploys the existing draft; `generate` rebuilds
+ * the draft first and only deploys when the caller asked it to — that keeps
+ * automatic post-export runs from pushing unreviewed copy to a live URL.
+ */
+export const LandingPageJob = z.object({
+  projectId: z.string().uuid(),
+  mode: z.enum(['generate', 'publish']).default('generate'),
+  publish: z.boolean().default(false),
+});
+
 export type ProjectJob = z.infer<typeof ProjectJob>;
 export type VideoJob = z.infer<typeof VideoJob>;
 export type WhisperJob = z.infer<typeof WhisperJob>;
@@ -48,3 +59,4 @@ export type ChapterResearchJob = z.infer<typeof ChapterResearchJob>;
 export type ChapterJob = z.infer<typeof ChapterJob>;
 export type PolishChapterJob = z.infer<typeof PolishChapterJob>;
 export type ExportJob = z.infer<typeof ExportJob>;
+export type LandingPageJob = z.infer<typeof LandingPageJob>;

@@ -147,8 +147,37 @@ export function isActiveStatus(status: string): boolean {
   return status !== 'COMPLETED' && status !== 'FAILED';
 }
 
+/** Accepted but not started — waiting for a concurrency slot, no work happening yet. */
+export function isQueuedStatus(status: string): boolean {
+  return status === 'QUEUED';
+}
+
+/** Actually consuming worker capacity right now (active, but not merely queued). */
+export function isRunningStatus(status: string): boolean {
+  return isActiveStatus(status) && !isQueuedStatus(status);
+}
+
 /** Resolve the premium stage checklist (with sub-steps) + overall percent. */
 export function resolvePipeline(status: string): { stages: ResolvedStage[]; percent: number } {
+  // QUEUED isn't a pipeline stage — nothing has started. Without this it falls
+  // through to index -1 and renders the first stage as if it were running.
+  if (isQueuedStatus(status)) {
+    return {
+      stages: PREMIUM_STAGES.map((stage) => ({
+        label: stage.label,
+        state: 'pending' as StageState,
+        substeps: stage.substeps.map((s) => ({
+          label: s.label,
+          state: 'pending' as StageState,
+          barrier: s.barrier,
+          unit: s.unit,
+          itemsKey: s.itemsKey,
+        })),
+      })),
+      percent: 0,
+    };
+  }
+
   const completed = status === 'COMPLETED';
   const failed = status === 'FAILED' || status === 'PARTIAL';
   const idx = ORDER.indexOf(status);

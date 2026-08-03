@@ -14,7 +14,8 @@ export type QueueName =
   | 'polish-chapter'
   | 'extra-content'
   | 'ebook-assemble'
-  | 'export';
+  | 'export'
+  | 'landing-page';
 
 export interface EnqueueOptions {
   /** Deterministic id → BullMQ de-duplicates identical jobs. */

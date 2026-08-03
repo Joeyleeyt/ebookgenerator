@@ -17,6 +17,7 @@ export const QUEUE_NAMES: QueueName[] = [
   'extra-content',
   'ebook-assemble',
   'export',
+  'landing-page',
 ];
 
 /** Per-queue worker settings — concurrency, rate limits, retry attempts. */
@@ -62,4 +63,8 @@ export const QUEUE_CONFIG: Record<QueueName, QueueConfig> = {
   'extra-content': { concurrency: 3, attempts: 3, limiter: { max: 30, duration: 60_000 } },
   'ebook-assemble': { concurrency: 4, attempts: 3 },
   export: { concurrency: 3, attempts: 3 },
+  // One Opus call plus a Netlify deploy, once per book. Two attempts only: the
+  // failure modes here (bad checkout URL, missing Netlify token) are not the
+  // kind that a retry fixes, and the book itself is already finished either way.
+  'landing-page': { concurrency: 3, attempts: 2 },
 };

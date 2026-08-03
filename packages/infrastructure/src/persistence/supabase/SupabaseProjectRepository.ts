@@ -5,7 +5,7 @@ import {
   ProjectStatus,
   GenerationOptions,
   ChannelUrl,
-  TERMINAL_STATES,
+  NOT_RUNNING_STATES,
   type ProjectRepository,
   type ProjectListItem,
   type ProjectState,
@@ -28,6 +28,12 @@ interface ProjectRow {
     includeComments: boolean;
     includeIllustrations?: boolean;
     illustrationEveryPages?: number;
+    landingPage?: boolean;
+    landingCheckoutUrl?: string;
+    landingPriceCents?: number;
+    landingCompareAtCents?: number;
+    landingCurrency?: string;
+    landingGuaranteeDays?: number;
   };
   pending_counts: Record<string, number>;
   version: number;
@@ -62,6 +68,18 @@ export class SupabaseProjectRepository implements ProjectRepository {
         includeComments: project.options.includeComments,
         includeIllustrations: project.options.includeIllustrations,
         illustrationEveryPages: project.options.illustrationEveryPages,
+        landingPage: project.options.landingPage,
+        // Omitted rather than written as null when unset, matching bookTitle —
+        // GenerationOptions treats an absent key and an empty string alike.
+        ...(project.options.landingCheckoutUrl ? { landingCheckoutUrl: project.options.landingCheckoutUrl } : {}),
+        ...(project.options.landingPriceCents !== undefined
+          ? { landingPriceCents: project.options.landingPriceCents }
+          : {}),
+        ...(project.options.landingCompareAtCents !== undefined
+          ? { landingCompareAtCents: project.options.landingCompareAtCents }
+          : {}),
+        landingCurrency: project.options.landingCurrency,
+        landingGuaranteeDays: project.options.landingGuaranteeDays,
       },
       pending_counts: project.pendingCounts,
       error: project.error ?? null,
@@ -85,15 +103,33 @@ export class SupabaseProjectRepository implements ProjectRepository {
     }));
   }
 
-  async countActiveByOwner(ownerId: string): Promise<number> {
-    // Count-only query (head: true) — no rows shipped, just the number in flight.
+  async countRunningByOwner(ownerId: string): Promise<number> {
+    // Count-only query (head: true) — no rows shipped, just the number running.
+    // QUEUED is excluded: those are accepted but consume no worker capacity.
     const { count, error } = await this.db
       .from('projects')
       .select('id', { count: 'exact', head: true })
       .eq('owner_id', ownerId)
-      .not('status', 'in', `(${TERMINAL_STATES.join(',')})`);
+      .not('status', 'in', `(${NOT_RUNNING_STATES.join(',')})`);
     if (error) throw new Error(error.message);
     return count ?? 0;
+  }
+
+  async listQueuedByOwner(ownerId: string): Promise<ProjectListItem[]> {
+    // Oldest first — queued books start in submission order.
+    const { data, error } = await this.db
+      .from('projects')
+      .select('id, channel_url, status, created_at')
+      .eq('owner_id', ownerId)
+      .eq('status', 'QUEUED')
+      .order('created_at', { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r) => ({
+      id: r.id as string,
+      channelUrl: r.channel_url as string,
+      status: r.status as ProjectState,
+      createdAt: r.created_at as string,
+    }));
   }
 
   async decrementPending(id: ProjectId, stage: string): Promise<number> {

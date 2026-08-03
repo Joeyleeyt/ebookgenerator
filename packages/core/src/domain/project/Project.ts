@@ -116,6 +116,28 @@ export class Project extends AggregateRoot<ProjectProps, ProjectId> {
     return Result.ok();
   }
 
+  /**
+   * Update the landing-page settings after submission. The checkout link is the
+   * one field that genuinely cannot be known at submit time — the book has to
+   * exist before it can be uploaded to a store — so it stays editable for the
+   * life of the project. Absent keys are left untouched.
+   */
+  updateLandingSettings(
+    changes: {
+      landingPage?: boolean | undefined;
+      landingCheckoutUrl?: string | undefined;
+      landingPriceCents?: number | undefined;
+      landingCompareAtCents?: number | undefined;
+      landingCurrency?: string | undefined;
+      landingGuaranteeDays?: number | undefined;
+    },
+    now: Date,
+  ): void {
+    const defined = Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined));
+    this.props.options = GenerationOptions.create({ ...this.props.options.toJSON(), ...defined });
+    this.props.updatedAt = now;
+  }
+
   /** Set the expected number of fan-out children for a stage barrier. */
   setPending(stage: string, count: number): void {
     this.props.pendingCounts = { ...this.props.pendingCounts, [stage]: count };

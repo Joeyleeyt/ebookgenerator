@@ -1,6 +1,6 @@
 import type { Worker } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { ProjectJob, VideoJob, WhisperJob, ChapterResearchJob, ChapterJob, PolishChapterJob, ExportJob, ExtraContentJob, ExportFormat, ProjectId } from '@yeg/core';
+import { ProjectJob, VideoJob, WhisperJob, ChapterResearchJob, ChapterJob, PolishChapterJob, ExportJob, ExtraContentJob, LandingPageJob, ExportFormat, ProjectId } from '@yeg/core';
 import type { Container } from '@yeg/config';
 import { makeWorker } from '../runtime/worker-factory.js';
 import { QUEUE_CONFIG } from '@yeg/infrastructure';
@@ -356,7 +356,51 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
       if (r.isFail()) throw new Error(r.error);
       await orchestrator.advance(p.projectId, 'EXPORTING'); // → COMPLETED (no-op on a manual re-export)
       container.logger.info('📄 export complete', { projectId: p.projectId, bookVersion, formats: formats.length });
+
+      // The book now exists, so its sales page can be written. Generation only —
+      // the page is left as a draft for the user to read and publish, and a
+      // failure here must never affect the finished book.
+      const project = await container.repositories.projects.findById(ProjectId.from(p.projectId));
+      if (project?.options.landingPage) {
+        await container.queue.enqueue(
+          'landing-page',
+          { projectId: p.projectId, mode: 'generate', publish: false },
+          { jobId: `landing-page:${p.projectId}:v${bookVersion}` },
+        );
+      }
       return r.value;
+    },
+  });
+
+  /**
+   * Phase 16 (optional) — the sales landing page. Post-pipeline and entirely
+   * side-car: the project is already COMPLETED by the time this runs, so this
+   * queue never touches the pipeline state machine or its barriers.
+   */
+  const landingPage = makeWorker(connection, container, {
+    name: 'landing-page',
+    ...QUEUE_CONFIG['landing-page'],
+    payloadSchema: LandingPageJob,
+    handler: async (p) => {
+      try {
+        if (p.mode === 'generate') {
+          const generated = await useCases.generateLandingPage.execute({ projectId: p.projectId, force: true });
+          if (generated.isFail()) throw new Error(generated.error);
+          container.logger.info('🛒 landing page draft ready', { projectId: p.projectId });
+          if (!p.publish) return generated.value;
+        }
+
+        const published = await useCases.publishLandingPage.execute({ projectId: p.projectId });
+        if (published.isFail()) throw new Error(published.error);
+        container.logger.info('🚀 landing page published', { projectId: p.projectId, url: published.value.url });
+        return published.value;
+      } catch (err) {
+        // The use cases record their own failures, but an unexpected throw (a
+        // storage timeout, a bad row) would otherwise leave the page stuck
+        // showing "generating" forever. Make every failure visible in the UI.
+        await recordLandingFailure(container, p.projectId, err);
+        throw err;
+      }
     },
   });
 
@@ -377,7 +421,20 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     extraContent,
     assemble,
     exportWorker,
+    landingPage,
   ];
+}
+
+/** Surface a landing-page failure on its own row, so the UI stops showing progress. */
+async function recordLandingFailure(container: Container, projectId: string, err: unknown): Promise<void> {
+  try {
+    const page = await container.repositories.landingPages.findByProject(ProjectId.from(projectId));
+    if (!page) return;
+    page.markFailed(String(err instanceof Error ? err.message : err), container.clock.now());
+    await container.repositories.landingPages.save(page);
+  } catch {
+    /* best-effort */
+  }
 }
 
 /** Enqueue the per-video summarize step (deterministic id → idempotent). */

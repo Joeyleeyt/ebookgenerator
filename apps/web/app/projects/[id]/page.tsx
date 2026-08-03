@@ -18,6 +18,7 @@ import { Card } from '../../../components/ui/card.js';
 import { Button } from '../../../components/ui/button.js';
 import { Badge } from '../../../components/ui/badge.js';
 import { Progress } from '../../../components/ui/progress.js';
+import { LandingPageCard } from '../../../components/projects/LandingPageCard.js';
 import { PipelineSteps, type Counters } from '../../../components/dashboard/PipelineSteps.js';
 import { resolvePipeline, isTerminal } from '../../../components/dashboard/pipeline.js';
 import {
@@ -289,6 +290,9 @@ export default function ProjectPipelinePage({ params }: { params: { id: string }
             </Button>
           )}
         </div>
+
+        {/* Sales page (renders nothing unless the option was enabled) */}
+        <LandingPageCard projectId={id} projectCompleted={status === 'COMPLETED'} />
 
         {/* Downloads */}
         {artifacts.length > 0 && (

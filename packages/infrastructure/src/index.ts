@@ -13,9 +13,14 @@ export * from './ai/FallbackImageGenerator.js';
 
 // ── Image processing (sharp) ────────────────────────────────────────────────
 export * from './image/SharpImageProcessor.js';
+export * from './image/SharpColorSampler.js';
 
-// ── Networking (proxy rotation) ─────────────────────────────────────────────
+// ── Networking (proxy rotation, static hosting) ─────────────────────────────
 export * from './net/ProxyRotator.js';
+export * from './net/NetlifyDeployer.js';
+
+// ── Landing page (sales page renderer) ──────────────────────────────────────
+export * from './landing/LandingPageHtmlRenderer.js';
 
 // ── YouTube ─────────────────────────────────────────────────────────────────
 export * from './youtube/YouTubeDataApiProvider.js';
@@ -46,5 +51,6 @@ export * from './persistence/supabase/SupabaseChannelRepository.js';
 export * from './persistence/supabase/SupabaseBookRepository.js';
 export * from './persistence/supabase/SupabaseKnowledgeRepository.js';
 export * from './persistence/supabase/SupabaseExportArtifactRepository.js';
+export * from './persistence/supabase/SupabaseLandingPageRepository.js';
 export * from './persistence/supabase/SupabaseUnitOfWork.js';
 export * from './persistence/supabase/SupabaseIdempotencyStore.js';

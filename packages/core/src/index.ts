@@ -38,6 +38,8 @@ export * from './domain/book/BookSection.js';
 export * from './domain/book/Illustration.js';
 export * from './domain/book/events/ChapterGenerated.js';
 export * from './domain/export/ExportArtifact.js';
+export * from './domain/landing/LandingPage.js';
+export * from './domain/landing/Palette.js';
 
 // ── Application: ports ──────────────────────────────────────────────────────
 export * from './application/ports/Clock.js';
@@ -51,6 +53,7 @@ export * from './application/ports/repositories/BookRepository.js';
 export * from './application/ports/repositories/ChannelRepository.js';
 export * from './application/ports/repositories/KnowledgeRepository.js';
 export * from './application/ports/repositories/ExportArtifactRepository.js';
+export * from './application/ports/repositories/LandingPageRepository.js';
 export * from './application/ports/services/AiTextGenerator.js';
 export * from './application/ports/services/YouTubeMetadataProvider.js';
 export * from './application/ports/services/TranscriptProvider.js';
@@ -63,6 +66,9 @@ export * from './application/ports/services/DocumentExporter.js';
 export * from './application/ports/services/JobQueue.js';
 export * from './application/ports/services/IdempotencyStore.js';
 export * from './application/ports/services/Telemetry.js';
+export * from './application/ports/services/SitePublisher.js';
+export * from './application/ports/services/ImageColorSampler.js';
+export * from './application/ports/services/LandingPageRenderer.js';
 
 // ── Application: dto / errors / pipeline ────────────────────────────────────
 export * from './application/dto/SubmitChannel.dto.js';
@@ -72,6 +78,7 @@ export * from './application/pipeline/PipelineOrchestrator.js';
 
 // ── Application: use cases ──────────────────────────────────────────────────
 export * from './application/use-cases/SubmitChannelUseCase.js';
+export * from './application/use-cases/StartQueuedProjectsUseCase.js';
 export * from './application/use-cases/IngestChannelUseCase.js';
 export * from './application/use-cases/FetchVideoDataUseCase.js';
 export * from './application/use-cases/FetchTranscriptUseCase.js';
@@ -97,3 +104,5 @@ export * from './application/use-cases/GenerateExtraContentUseCase.js';
 export * from './application/use-cases/GenerateFrontBackMatterUseCase.js';
 export * from './application/use-cases/GenerateCoverImageUseCase.js';
 export * from './application/use-cases/GenerateIllustrationsUseCase.js';
+export * from './application/use-cases/GenerateLandingPageUseCase.js';
+export * from './application/use-cases/PublishLandingPageUseCase.js';

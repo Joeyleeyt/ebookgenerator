@@ -11,7 +11,7 @@ import { AIAnalysisPanel } from '../../components/dashboard/AIAnalysisPanel.js';
 import { RecentProjects } from '../../components/dashboard/RecentProjects.js';
 import { Card } from '../../components/ui/card.js';
 import { Skeleton } from '../../components/ui/skeleton.js';
-import { isActiveStatus } from '../../components/dashboard/pipeline.js';
+import { isQueuedStatus, isRunningStatus } from '../../components/dashboard/pipeline.js';
 import { type ProjectItem } from '../../components/dashboard/data.js';
 import { createSupabaseBrowserClient } from '../../lib/supabase-browser.js';
 
@@ -60,9 +60,12 @@ export default function DashboardPage() {
 
   // Books run concurrently, so show them all: the newest in full, the rest as
   // compact progress rows (beyond MAX_PANELS we just link out to /projects).
-  const activeProjects = projects.filter((p) => isActiveStatus(p.status));
-  const activeCount = activeProjects.length;
-  const shownProjects = activeProjects.slice(0, MAX_PANELS);
+  // Queued books are counted separately — nothing is happening on them yet, so
+  // giving them a live panel would misrepresent them as running.
+  const runningProjects = projects.filter((p) => isRunningStatus(p.status));
+  const queuedCount = projects.filter((p) => isQueuedStatus(p.status)).length;
+  const activeCount = runningProjects.length;
+  const shownProjects = runningProjects.slice(0, MAX_PANELS);
   const hiddenCount = activeCount - shownProjects.length;
 
   return (
@@ -87,7 +90,7 @@ export default function DashboardPage() {
           <div className="flex flex-col gap-6">
             {loading ? (
               <Skeleton className="h-80 rounded-card" />
-            ) : shownProjects.length > 0 ? (
+            ) : shownProjects.length > 0 || queuedCount > 0 ? (
               <>
                 {shownProjects.map((p, i) => (
                   <AIAnalysisPanel key={p.id} project={p} compact={i > 0} />
@@ -99,6 +102,12 @@ export default function DashboardPage() {
                   >
                     +{hiddenCount} more in progress
                   </Link>
+                )}
+                {queuedCount > 0 && (
+                  <p className="text-center text-sm text-muted-foreground">
+                    {queuedCount} book{queuedCount === 1 ? '' : 's'} waiting — start
+                    {queuedCount === 1 ? 's' : ''} automatically when a slot frees.
+                  </p>
                 )}
               </>
             ) : (

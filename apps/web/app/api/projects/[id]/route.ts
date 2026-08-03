@@ -41,5 +41,8 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   if (cancelled.isFail()) return error(cancelled.error, 409);
   await c.repositories.projects.save(project);
 
-  return json({ cancelled: true, drainedJobs: removed, status: project.status.value });
+  // Cancelling frees a concurrency slot — start the user's next queued book.
+  const started = await c.useCases.startQueuedProjects.promoteForOwner(userId);
+
+  return json({ cancelled: true, drainedJobs: removed, status: project.status.value, startedQueued: started });
 }

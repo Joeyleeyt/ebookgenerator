@@ -90,16 +90,28 @@ export function makeWorker<S extends z.ZodTypeAny>(
   );
 }
 
+/**
+ * Queues whose failure must NOT fail the project. These run after the book is
+ * finished and are optional extras — a landing page that can't be published is
+ * not a reason to mark a completed book as FAILED and strip the user's download
+ * links. Their own records carry the error instead.
+ */
+const SIDECAR_QUEUES: readonly QueueName[] = ['landing-page'];
+
 async function failProject(container: Container, projectId: string, queue: string, err: unknown): Promise<void> {
   if (projectId === 'unknown') return;
+  if (SIDECAR_QUEUES.includes(queue as QueueName)) return;
   try {
     const project = await container.repositories.projects.findById(
       // lazy import avoids a cycle; ProjectId is re-exported from core
       (await import('@yeg/core')).ProjectId.from(projectId),
     );
     if (!project) return;
+    if (project.status.isTerminal()) return; // already terminal — slot already released
     project.markFailed(`Stage ${queue} failed: ${String(err)}`, container.clock.now());
     await container.repositories.projects.save(project);
+    // The failure freed this owner's concurrency slot — start their next queued book.
+    await container.useCases.startQueuedProjects.promoteForOwner(project.ownerId);
   } catch {
     /* best-effort */
   }

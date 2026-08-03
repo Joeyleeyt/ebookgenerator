@@ -91,6 +91,9 @@ export function normalizeBookTitle(raw: string | undefined): string | undefined 
     .join(' ');
 }
 
+/** Default currency for the landing page price, when the user doesn't pick one. */
+export const DEFAULT_LANDING_CURRENCY = 'USD';
+
 interface GenerationOptionsProps {
   /** User-provided book title. When set, it overrides the AI-generated title. */
   bookTitle?: string | undefined;
@@ -105,6 +108,27 @@ interface GenerationOptionsProps {
   includeIllustrations: boolean;
   /** Roughly one illustration per this many finished pages. */
   illustrationEveryPages: number;
+
+  // ── Sales landing page ─────────────────────────────────────────────────────
+  // Generate a standalone sales page for the finished book and host it on
+  // Netlify. Everything below is inert while `landingPage` is false.
+  /** Generate a sales landing page once the book has exported. Off by default. */
+  landingPage: boolean;
+  /**
+   * The user's own checkout link (Payhip, Gumroad, Kajabi, Stripe — any URL).
+   * Deliberately provider-agnostic: it is written into every CTA verbatim and
+   * never composed or rewritten. Optional at submit time, because the product
+   * can't exist on the store until the book itself has been generated and
+   * uploaded — but a page cannot be PUBLISHED without it.
+   */
+  landingCheckoutUrl?: string | undefined;
+  /** Sale price in minor units (cents). The user sets this per book. */
+  landingPriceCents?: number | undefined;
+  /** Optional "was" price, rendered struck-through beside the sale price. */
+  landingCompareAtCents?: number | undefined;
+  landingCurrency: string;
+  /** Money-back guarantee window advertised on the page; 0 hides the section. */
+  landingGuaranteeDays: number;
 }
 
 export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
@@ -127,7 +151,24 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
       includeComments: props.includeComments ?? true,
       includeIllustrations: props.includeIllustrations ?? true,
       illustrationEveryPages: props.illustrationEveryPages ?? 5,
+      landingPage: props.landingPage ?? false,
+      // Blank strings arrive from empty form fields; treat them as "not set" so
+      // `hasCheckoutUrl` stays a single honest check everywhere downstream.
+      ...(props.landingCheckoutUrl?.trim() ? { landingCheckoutUrl: props.landingCheckoutUrl.trim() } : {}),
+      ...(typeof props.landingPriceCents === 'number' && Number.isFinite(props.landingPriceCents)
+        ? { landingPriceCents: Math.max(0, Math.round(props.landingPriceCents)) }
+        : {}),
+      ...(typeof props.landingCompareAtCents === 'number' && Number.isFinite(props.landingCompareAtCents)
+        ? { landingCompareAtCents: Math.max(0, Math.round(props.landingCompareAtCents)) }
+        : {}),
+      landingCurrency: (props.landingCurrency ?? DEFAULT_LANDING_CURRENCY).toUpperCase(),
+      landingGuaranteeDays: props.landingGuaranteeDays ?? 30,
     });
+  }
+
+  /** Plain props, for rebuilding a modified copy (the object itself is frozen). */
+  toJSON(): GenerationOptionsProps {
+    return { ...this.props };
   }
 
   get bookTitle() {
@@ -159,5 +200,27 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
   }
   get illustrationEveryPages() {
     return this.props.illustrationEveryPages;
+  }
+  get landingPage() {
+    return this.props.landingPage;
+  }
+  get landingCheckoutUrl() {
+    return this.props.landingCheckoutUrl;
+  }
+  get landingPriceCents() {
+    return this.props.landingPriceCents;
+  }
+  get landingCompareAtCents() {
+    return this.props.landingCompareAtCents;
+  }
+  get landingCurrency() {
+    return this.props.landingCurrency;
+  }
+  get landingGuaranteeDays() {
+    return this.props.landingGuaranteeDays;
+  }
+  /** A page can be generated without a checkout link, but never published without one. */
+  get hasCheckoutUrl(): boolean {
+    return Boolean(this.props.landingCheckoutUrl);
   }
 }

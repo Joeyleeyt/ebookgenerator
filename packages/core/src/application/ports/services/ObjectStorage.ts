@@ -9,5 +9,8 @@ export interface ObjectStorage {
    * documents (e.g. the cover art) so the renderer needs no network fetch.
    */
   getDataUri(bucket: string, path: string): Promise<Result<string>>;
+  /** Raw object contents, for callers that need the bytes themselves (e.g.
+   * sampling a cover's colours, or bundling it into a site deploy). */
+  getBytes(bucket: string, path: string): Promise<Result<{ bytes: Uint8Array; contentType: string }>>;
   remove(bucket: string, path: string): Promise<Result<void>>;
 }

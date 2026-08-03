@@ -25,8 +25,10 @@ export interface ProjectRepository {
   /** List a user's projects, newest first (read model for the dashboard). */
   listByOwner(ownerId: string): Promise<ProjectListItem[]>;
   /**
-   * How many of a user's projects are still in flight (any non-terminal state).
-   * Backs the per-user concurrency cap enforced at submit time.
+   * How many of a user's projects are actually consuming worker capacity —
+   * non-terminal and not QUEUED. Backs the per-user concurrency cap.
    */
-  countActiveByOwner(ownerId: string): Promise<number>;
+  countRunningByOwner(ownerId: string): Promise<number>;
+  /** A user's QUEUED projects, oldest first — the order they'll be started in. */
+  listQueuedByOwner(ownerId: string): Promise<ProjectListItem[]>;
 }

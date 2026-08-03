@@ -1,6 +1,7 @@
 import {
   PipelineOrchestrator,
   SubmitChannelUseCase,
+  StartQueuedProjectsUseCase,
   IngestChannelUseCase,
   FetchVideoDataUseCase,
   FetchTranscriptUseCase,
@@ -26,6 +27,8 @@ import {
   GenerateFrontBackMatterUseCase,
   GenerateCoverImageUseCase,
   GenerateIllustrationsUseCase,
+  GenerateLandingPageUseCase,
+  PublishLandingPageUseCase,
   type DocumentExporter,
 } from '@yeg/core';
 import {
@@ -39,6 +42,9 @@ import {
   Labs69ImageGenerator,
   FallbackImageGenerator,
   SharpImageProcessor,
+  SharpColorSampler,
+  NetlifyDeployer,
+  LandingPageHtmlRenderer,
   labs69ProxyRotator,
   YouTubeDataApiProvider,
   YouTubeTranscriptProvider,
@@ -56,6 +62,7 @@ import {
   SupabaseBookRepository,
   SupabaseKnowledgeRepository,
   SupabaseExportArtifactRepository,
+  SupabaseLandingPageRepository,
   SupabaseIdempotencyStore,
 } from '@yeg/infrastructure';
 import { loadEnv, type Env } from './env.js';
@@ -97,6 +104,10 @@ export function buildContainer(env: Env = loadEnv()) {
   const illustrationImages = new FallbackImageGenerator(labs69, images, logger.child({ adapter: 'image-fallback' }));
   // Downscales generated illustrations to a print-appropriate JPEG before storage.
   const imageProcessor = new SharpImageProcessor();
+  // The landing page takes its whole colour scheme from the book's cover art.
+  const colorSampler = new SharpColorSampler();
+  const landingRenderer = new LandingPageHtmlRenderer();
+  const sitePublisher = new NetlifyDeployer(env.NETLIFY_AUTH_TOKEN ?? '', env.NETLIFY_ACCOUNT_SLUG);
   const youtube = new YouTubeDataApiProvider(env.YOUTUBE_API_KEY);
   const transcripts = new YouTubeTranscriptProvider();
   const audio = new YtDlpAudioDownloader(storage);
@@ -110,14 +121,19 @@ export function buildContainer(env: Env = loadEnv()) {
   const books = new SupabaseBookRepository(supabase);
   const knowledge = new SupabaseKnowledgeRepository(supabase);
   const artifacts = new SupabaseExportArtifactRepository(supabase);
+  const landingPages = new SupabaseLandingPageRepository(supabase);
   const idempotency = new SupabaseIdempotencyStore(supabase);
 
   // ── orchestration ──
-  const orchestrator = new PipelineOrchestrator(projects, queue, clock, logger);
+  // The admission controller is built first: the orchestrator hands it a freed
+  // slot whenever a project completes.
+  const startQueuedProjects = new StartQueuedProjectsUseCase(projects, queue, env.MAX_ACTIVE_PROJECTS_PER_USER);
+  const orchestrator = new PipelineOrchestrator(projects, queue, clock, logger, startQueuedProjects);
 
   // ── use cases ──
   const useCases = {
     submitChannel: new SubmitChannelUseCase(projects, queue, ids, clock, env.MAX_ACTIVE_PROJECTS_PER_USER),
+    startQueuedProjects,
     ingestChannel: new IngestChannelUseCase(projects, videos, channels, youtube, queue, ids, clock),
     fetchVideoData: new FetchVideoDataUseCase(videos, youtube, queue),
     fetchTranscript: new FetchTranscriptUseCase(videos, transcripts, audio, queue, hasher),
@@ -143,6 +159,22 @@ export function buildContainer(env: Env = loadEnv()) {
     addSection: new AddSectionUseCase(books, ai, ids),
     addExtraContent: new AddExtraContentUseCase(books, ai, queue, ids),
     generateExtraContent: new GenerateExtraContentUseCase(books, ai),
+    generateLandingPage: new GenerateLandingPageUseCase(
+      projects,
+      books,
+      knowledge,
+      channels,
+      artifacts,
+      landingPages,
+      ai,
+      landingRenderer,
+      colorSampler,
+      storage,
+      ids,
+      clock,
+      hasher,
+    ),
+    publishLandingPage: new PublishLandingPageUseCase(projects, books, landingPages, sitePublisher, clock),
   };
 
   return {
@@ -156,7 +188,8 @@ export function buildContainer(env: Env = loadEnv()) {
     queue,
     idempotency,
     orchestrator,
-    repositories: { projects, videos, channels, books, knowledge, artifacts },
+    sitePublisher,
+    repositories: { projects, videos, channels, books, knowledge, artifacts, landingPages },
     useCases,
   };
 }
