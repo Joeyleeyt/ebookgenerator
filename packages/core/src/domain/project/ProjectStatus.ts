@@ -20,6 +20,13 @@ export type ProjectState =
   | 'PARTIAL'
   | 'FAILED';
 
+/**
+ * States a project can never leave. Everything else — including PARTIAL, which
+ * resumes at ANALYZING_COMMENTS — still has pipeline work ahead of it and so
+ * counts as "active" for the dashboard and the per-user concurrency cap.
+ */
+export const TERMINAL_STATES: readonly ProjectState[] = ['COMPLETED', 'FAILED'];
+
 /** Explicit transition table — the full 15-phase pipeline contract lives here. */
 const TRANSITIONS: Record<ProjectState, ProjectState[]> = {
   CREATED: ['INGESTING_CHANNEL', 'FAILED'],
@@ -59,6 +66,6 @@ export class ProjectStatus extends ValueObject<{ value: ProjectState }> {
   }
 
   isTerminal(): boolean {
-    return this.props.value === 'COMPLETED' || this.props.value === 'FAILED';
+    return TERMINAL_STATES.includes(this.props.value);
   }
 }

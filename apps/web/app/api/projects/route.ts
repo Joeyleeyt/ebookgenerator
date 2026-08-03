@@ -18,10 +18,13 @@ export const POST = handle(async (req: Request) => {
   return json(result.value, 202);
 });
 
-// GET /api/projects — list the caller's projects (newest first).
+// GET /api/projects — list the caller's projects (newest first) plus the
+// concurrency budget, so the UI can show "2 of 3 running" without guessing the
+// server-side cap.
 export const GET = handle(async () => {
   const userId = await getUserId();
   if (!userId) return error('Unauthorized', 401);
-  const projects = await container().repositories.projects.listByOwner(userId);
-  return json({ projects });
+  const c = container();
+  const projects = await c.repositories.projects.listByOwner(userId);
+  return json({ projects, limits: { maxActiveProjects: c.env.MAX_ACTIVE_PROJECTS_PER_USER } });
 });

@@ -14,18 +14,36 @@ export interface SubmitChannelResult {
   status: string;
 }
 
-/** Entry point: validates the channel URL, creates the project, kicks off ingestion. */
+/**
+ * Entry point: validates the channel URL, creates the project, kicks off ingestion.
+ *
+ * Users may run several books at once — the pipeline is project-scoped end to
+ * end and the queue adapter schedules fairly across projects — but not an
+ * unbounded number: `maxActiveProjects` caps how many can be in flight so one
+ * account can't monopolise the workers or the AI rate limits.
+ */
 export class SubmitChannelUseCase {
   constructor(
     private readonly projects: ProjectRepository,
     private readonly queue: JobQueue,
     private readonly ids: IdGenerator,
     private readonly clock: Clock,
+    private readonly maxActiveProjects: number = 3,
   ) {}
 
   async execute(ownerId: string, dto: SubmitChannelDto): Promise<Result<SubmitChannelResult>> {
     const url = ChannelUrl.create(dto.channelUrl);
     if (url.isFail()) return Result.fail(url.error);
+
+    // Soft cap: two simultaneous submits can both pass this check, which at worst
+    // lets a user exceed the limit by one. Worth avoiding a lock for.
+    const active = await this.projects.countActiveByOwner(ownerId);
+    if (active >= this.maxActiveProjects) {
+      return Result.fail(
+        `You already have ${active} book${active === 1 ? '' : 's'} in progress (limit ${this.maxActiveProjects}). ` +
+          'Wait for one to finish, or delete it, before starting another.',
+      );
+    }
 
     const options = GenerationOptions.create(dto.options);
     const id = ProjectId.from(this.ids.uuid());

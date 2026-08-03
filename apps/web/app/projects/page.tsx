@@ -46,12 +46,15 @@ export default function ProjectsPage() {
   const [illustrations, setIllustrations] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Books run concurrently up to a server-side cap; null until /api/projects reports it.
+  const [maxActive, setMaxActive] = useState<number | null>(null);
 
   async function load() {
     const res = await fetch('/api/projects');
     if (res.status === 401) return router.push('/login?next=/projects');
     const data = await res.json();
     setProjects(data.projects ?? []);
+    if (typeof data.limits?.maxActiveProjects === 'number') setMaxActive(data.limits.maxActiveProjects);
     setLoading(false);
   }
 
@@ -108,6 +111,10 @@ export default function ProjectsPage() {
     active: projects.filter((p) => isActiveStatus(p.status)).length,
     completed: projects.filter((p) => p.status === 'COMPLETED').length,
   };
+
+  // Server enforces the same cap in SubmitChannelUseCase — this only avoids a
+  // pointless round-trip and tells the user where they stand.
+  const atCapacity = maxActive !== null && counts.active >= maxActive;
 
   const filtered = projects.filter((p) =>
     tab === 'all' ? true : tab === 'completed' ? p.status === 'COMPLETED' : isActiveStatus(p.status),
@@ -177,7 +184,7 @@ export default function ProjectsPage() {
                 required
                 className="h-10 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
-              <Button type="submit" size="sm" disabled={submitting}>
+              <Button type="submit" size="sm" disabled={submitting || atCapacity}>
                 {submitting ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
                 {submitting ? 'Starting…' : 'Analyze'}
               </Button>
@@ -217,6 +224,12 @@ export default function ProjectsPage() {
             </label>
             <span className="text-muted-foreground/70">≈ {estimateChapters(pages)} chapters</span>
           </div>
+          {maxActive !== null && counts.active > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {counts.active} of {maxActive} book{maxActive === 1 ? '' : 's'} generating at once
+              {atCapacity ? ' — finish one before starting another.' : '. They run in parallel.'}
+            </p>
+          )}
         </form>
         {error && <p className="-mt-3 text-sm text-error">{error}</p>}
 

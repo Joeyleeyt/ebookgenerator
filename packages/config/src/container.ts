@@ -117,7 +117,7 @@ export function buildContainer(env: Env = loadEnv()) {
 
   // ── use cases ──
   const useCases = {
-    submitChannel: new SubmitChannelUseCase(projects, queue, ids, clock),
+    submitChannel: new SubmitChannelUseCase(projects, queue, ids, clock, env.MAX_ACTIVE_PROJECTS_PER_USER),
     ingestChannel: new IngestChannelUseCase(projects, videos, channels, youtube, queue, ids, clock),
     fetchVideoData: new FetchVideoDataUseCase(videos, youtube, queue),
     fetchTranscript: new FetchTranscriptUseCase(videos, transcripts, audio, queue, hasher),

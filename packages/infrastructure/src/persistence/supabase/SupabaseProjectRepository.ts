@@ -5,6 +5,7 @@ import {
   ProjectStatus,
   GenerationOptions,
   ChannelUrl,
+  TERMINAL_STATES,
   type ProjectRepository,
   type ProjectListItem,
   type ProjectState,
@@ -82,6 +83,17 @@ export class SupabaseProjectRepository implements ProjectRepository {
       status: r.status as ProjectState,
       createdAt: r.created_at as string,
     }));
+  }
+
+  async countActiveByOwner(ownerId: string): Promise<number> {
+    // Count-only query (head: true) — no rows shipped, just the number in flight.
+    const { count, error } = await this.db
+      .from('projects')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_id', ownerId)
+      .not('status', 'in', `(${TERMINAL_STATES.join(',')})`);
+    if (error) throw new Error(error.message);
+    return count ?? 0;
   }
 
   async decrementPending(id: ProjectId, stage: string): Promise<number> {

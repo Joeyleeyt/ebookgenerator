@@ -48,6 +48,9 @@ class FakeProjectRepo implements ProjectRepository {
   async listByOwner(): Promise<ProjectListItem[]> {
     return [];
   }
+  async countActiveByOwner(): Promise<number> {
+    return 0;
+  }
 }
 
 class FakeQueue implements JobQueue {

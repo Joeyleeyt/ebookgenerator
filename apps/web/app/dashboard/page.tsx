@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { AppShell } from '../../components/app/AppShell.js';
 import { WelcomeBanner } from '../../components/dashboard/WelcomeBanner.js';
@@ -13,6 +14,9 @@ import { Skeleton } from '../../components/ui/skeleton.js';
 import { isActiveStatus } from '../../components/dashboard/pipeline.js';
 import { type ProjectItem } from '../../components/dashboard/data.js';
 import { createSupabaseBrowserClient } from '../../lib/supabase-browser.js';
+
+/** Live panels shown at once before the column collapses into a "+N more" link. */
+const MAX_PANELS = 3;
 
 function nameFromEmail(email: string | null): string {
   if (!email) return 'creator';
@@ -54,8 +58,12 @@ export default function DashboardPage() {
       .catch(() => {});
   }, [router]);
 
-  const activeProject = projects.find((p) => isActiveStatus(p.status) && p.status !== 'COMPLETED');
-  const activeCount = projects.filter((p) => isActiveStatus(p.status)).length;
+  // Books run concurrently, so show them all: the newest in full, the rest as
+  // compact progress rows (beyond MAX_PANELS we just link out to /projects).
+  const activeProjects = projects.filter((p) => isActiveStatus(p.status));
+  const activeCount = activeProjects.length;
+  const shownProjects = activeProjects.slice(0, MAX_PANELS);
+  const hiddenCount = activeCount - shownProjects.length;
 
   return (
     <AppShell>
@@ -79,8 +87,20 @@ export default function DashboardPage() {
           <div className="flex flex-col gap-6">
             {loading ? (
               <Skeleton className="h-80 rounded-card" />
-            ) : activeProject ? (
-              <AIAnalysisPanel project={activeProject} />
+            ) : shownProjects.length > 0 ? (
+              <>
+                {shownProjects.map((p, i) => (
+                  <AIAnalysisPanel key={p.id} project={p} compact={i > 0} />
+                ))}
+                {hiddenCount > 0 && (
+                  <Link
+                    href="/projects"
+                    className="text-center text-sm font-medium text-primary hover:underline"
+                  >
+                    +{hiddenCount} more in progress
+                  </Link>
+                )}
+              </>
             ) : (
               <ActivityChart projects={projects} />
             )}

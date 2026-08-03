@@ -15,6 +15,11 @@ const EnvSchema = z.object({
 
   REDIS_URL: z.string().min(1),
 
+  // How many books one user may have in flight at once. Several projects run in
+  // parallel and the queue schedules fairly between them, but each one still
+  // consumes worker slots and Anthropic tokens — this bounds that.
+  MAX_ACTIVE_PROJECTS_PER_USER: z.coerce.number().int().positive().default(3),
+
   ANTHROPIC_API_KEY: z.string().min(1),
   ANTHROPIC_MAX_TPM: z.coerce.number().int().positive().default(80_000),
 

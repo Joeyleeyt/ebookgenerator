@@ -24,4 +24,9 @@ export interface ProjectRepository {
   advanceStatusAtomic(id: ProjectId, from: ProjectState[], to: ProjectState): Promise<boolean>;
   /** List a user's projects, newest first (read model for the dashboard). */
   listByOwner(ownerId: string): Promise<ProjectListItem[]>;
+  /**
+   * How many of a user's projects are still in flight (any non-terminal state).
+   * Backs the per-user concurrency cap enforced at submit time.
+   */
+  countActiveByOwner(ownerId: string): Promise<number>;
 }
