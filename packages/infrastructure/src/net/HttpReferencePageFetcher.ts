@@ -53,9 +53,42 @@ export class HttpReferencePageFetcher implements ReferencePageFetcher {
 
       const html = await readCapped(res);
       if (html.isFail()) return Result.fail(html.error);
-      return Result.ok(digest(current, html.value));
+      // Modern site builders (Lovable, Next, Vite) ship their entire palette in
+      // linked stylesheets — the first real fetch of a reference read a page
+      // whose <style> tags held nothing and misdetected every colour. Pull the
+      // linked CSS in too, best-effort, so accent detection sees the real brand.
+      const externalCss = await this.fetchLinkedStylesheets(current, html.value);
+      return Result.ok(digest(current, html.value, externalCss));
     }
     return Result.fail(`Too many redirects from ${url}`);
+  }
+
+  /** Up to three linked stylesheets, size-capped, each SSRF-checked like the page. */
+  private async fetchLinkedStylesheets(pageUrl: string, html: string): Promise<string> {
+    const hrefs = [...html.matchAll(/<link\b[^>]*rel=["']stylesheet["'][^>]*>/gi)]
+      .map((m) => m[0].match(/href=["']([^"']+)["']/i)?.[1])
+      .filter((h): h is string => Boolean(h))
+      .slice(0, 3);
+
+    const sheets: string[] = [];
+    for (const href of hrefs) {
+      try {
+        const absolute = new URL(href, pageUrl).toString();
+        const safe = await assertPublicUrl(absolute);
+        if (safe.isFail()) continue;
+        const res = await this.fetchImpl(absolute, {
+          redirect: 'follow',
+          signal: AbortSignal.timeout(8000),
+          headers: { 'User-Agent': 'EbookGenerator/1.0 (+landing-page reference reader)', Accept: 'text/css' },
+        });
+        if (!res.ok) continue;
+        const body = await readCapped(res);
+        if (body.isOk()) sheets.push(body.value);
+      } catch {
+        // Best-effort: a missing stylesheet degrades style detection, nothing else.
+      }
+    }
+    return sheets.join('\n');
   }
 }
 
@@ -152,7 +185,7 @@ async function readCapped(res: Response): Promise<Result<string>> {
  * full HTML parser to read someone else's marketing page isn't worth the
  * dependency.
  */
-export function digest(url: string, html: string): ReferencePage {
+export function digest(url: string, html: string, externalCss = ''): ReferencePage {
   const stripped = html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -164,7 +197,8 @@ export function digest(url: string, html: string): ReferencePage {
     if (text) headings.push({ level: Number(m[1]), text });
   }
 
-  const css = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1] ?? '').join('\n');
+  const css =
+    [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1] ?? '').join('\n') + '\n' + externalCss;
   const text = textOf(stripped).slice(0, 12_000);
   const words = text.split(/\s+/).length || 1;
   const images = (stripped.match(/<img\b/gi) ?? []).length;

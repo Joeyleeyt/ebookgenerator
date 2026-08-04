@@ -93,6 +93,14 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   if (occurrences(bodyHtml, PLACEHOLDERS.cover) > 2) {
     errors.push(`${PLACEHOLDERS.cover} may appear at most twice.`);
   }
+  // There is one product. A page spraying the buy button and price everywhere is
+  // how the model fakes a multi-tier offer grid out of a single book.
+  if (occurrences(bodyHtml, PLACEHOLDERS.cta) > 4) {
+    errors.push(`${PLACEHOLDERS.cta} may appear at most 4 times — there is only one product.`);
+  }
+  if (occurrences(bodyHtml, PLACEHOLDERS.price) > 2) {
+    errors.push(`${PLACEHOLDERS.price} may appear at most twice; the button's label already ends with the price.`);
+  }
   // An unknown {{TOKEN}} would ship to a buyer as literal braces.
   const known = new Set<string>(Object.values(PLACEHOLDERS));
   for (const m of bodyHtml.matchAll(/\{\{[A-Z_]+\}\}/g)) {
@@ -145,6 +153,14 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
       errors.push(`Unknown CSS variable ${name}. Use the palette variables, or your own prefixed --x-.`);
       break;
     }
+  }
+
+  // Single-axis `overflow-x: hidden` forces overflow-y to auto, turning the
+  // element into its own scroll container — on body that is a second vertical
+  // scrollbar beside the viewport's. Two-axis `overflow: hidden` is fine (it
+  // has no auto side-effect and is the normal way to clip rounded corners).
+  if (/overflow-[xy]\s*:\s*hidden/i.test(css)) {
+    errors.push('Do not use single-axis "overflow-x/y: hidden" — it creates a nested scrollbar; use "clip" instead.');
   }
 
   // ── well-formedness ──

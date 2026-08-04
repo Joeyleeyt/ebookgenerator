@@ -51,9 +51,18 @@ interface PaletteProps {
  * merely unlikely.
  */
 export class Palette extends ValueObject<PaletteProps> {
-  static fromSeed(seed: Rgb): Palette {
-    const { h, s } = rgbToHsl(seed);
-    // Greyscale covers (s≈0) would produce a colourless page with an invisible
+  /**
+   * `seed` is the book cover's dominant colour and decides everything by
+   * default. `opts.accentSeed` — when the reference page the client nominated
+   * has a readable brand colour — takes over the HUE and SATURATION of the
+   * whole scheme, so a warm orange reference produces a warm orange page even
+   * over a navy cover. The cover still decides light-vs-dark: that follows the
+   * artwork the page actually displays.
+   */
+  static fromSeed(seed: Rgb, opts?: { accentSeed?: Rgb | undefined }): Palette {
+    const base = opts?.accentSeed ?? seed;
+    const { h, s } = rgbToHsl(base);
+    // Greyscale sources (s≈0) would produce a colourless page with an invisible
     // accent, so give them a restrained neutral-blue accent instead of grey.
     const hue = s < 0.06 ? 214 : h;
     const sat = s < 0.06 ? 0.5 : clamp(s, 0.35, 0.8);
@@ -62,13 +71,24 @@ export class Palette extends ValueObject<PaletteProps> {
     // Light grounds carry their tint at a much lower perceived strength than
     // dark ones, so they need noticeably more saturation and a little less
     // lightness to read as the cover's colour rather than as plain white.
-    const background = dark ? hsl(hue, sat * 0.28, 0.07) : hsl(hue, sat * 0.34, 0.962);
-    const surface = dark ? hsl(hue, sat * 0.26, 0.12) : hsl(hue, sat * 0.32, 0.925);
-    const border = dark ? hsl(hue, sat * 0.24, 0.22) : hsl(hue, sat * 0.3, 0.84);
+    // Dark grounds need a WIDER value spread than light ones, not a narrower
+    // one: at 5-10% lightness the eye can barely tell two greys apart, and the
+    // first real run rendered as one undifferentiated black mass. Deep sits at
+    // ~4%, the page at ~8.5%, tint at ~12.5%, cards at ~13.5% — close enough to
+    // feel like one family, far enough apart to read as separate bands.
+    const background = dark ? hsl(hue, sat * 0.28, 0.085) : hsl(hue, sat * 0.34, 0.962);
+    const surface = dark ? hsl(hue, sat * 0.26, 0.135) : hsl(hue, sat * 0.32, 0.925);
+    const border = dark ? hsl(hue, sat * 0.24, 0.26) : hsl(hue, sat * 0.3, 0.84);
 
     // Accent lightness is pinned to the side of the wheel that can actually
-    // carry a readable button label against this background.
-    const accent = hsl(hue, sat, dark ? 0.62 : 0.44);
+    // carry a readable button label against this background. On a dark ground
+    // the saturation floor is raised well above the cover's own: the dominant
+    // colour of a dark cover is usually a desaturated field tone, and an accent
+    // inheriting it produces the washed-grey buy button the first real run
+    // shipped with. Sales pages need the accent to be the loudest thing on the
+    // page, not the politest.
+    const accentSat = dark ? clamp(sat * 1.4, 0.62, 0.9) : sat;
+    const accent = hsl(hue, accentSat, dark ? 0.6 : 0.44);
     const heading = ensureContrast(dark ? hsl(hue, sat * 0.2, 0.97) : hsl(hue, sat * 0.35, 0.13), background, 4.5);
     const text = ensureContrast(dark ? hsl(hue, sat * 0.12, 0.9) : hsl(hue, sat * 0.15, 0.2), background, 4.5);
     // Muted text is still body copy, so it gets the full 4.5:1 treatment too —
@@ -78,7 +98,7 @@ export class Palette extends ValueObject<PaletteProps> {
     // The deep band is dark on every cover, light or not — it is what gives the
     // page its anchor points. Kept on the cover's hue so it reads as the book's
     // own colour rather than as generic black.
-    const deep = hsl(hue, sat * 0.5, dark ? 0.05 : 0.11);
+    const deep = hsl(hue, sat * 0.5, dark ? 0.04 : 0.11);
     const onDeep = ensureContrast(hsl(hue, sat * 0.1, 0.95), deep, 4.5);
     const onDeepMuted = ensureContrast(hsl(hue, sat * 0.14, 0.74), deep, 4.5);
 
@@ -95,7 +115,7 @@ export class Palette extends ValueObject<PaletteProps> {
       deep,
       onDeep,
       onDeepMuted,
-      deepBorder: hsl(hue, sat * 0.3, dark ? 0.16 : 0.22),
+      deepBorder: hsl(hue, sat * 0.3, dark ? 0.2 : 0.22),
       // The page accent is tuned against the PAGE ground; on the deep band it
       // often falls under 4.5:1, so it gets its own corrected variant.
       accentOnDeep: ensureContrast(accent, deep, 4.5),
@@ -197,6 +217,14 @@ function parseHex(hex: string): Rgb {
     g: parseInt(v.slice(2, 4), 16),
     b: parseInt(v.slice(4, 6), 16),
   };
+}
+
+/** Lenient public parser for e.g. a reference page's detected accent. */
+export function parseHexColor(value: string | null | undefined): Rgb | null {
+  if (!value) return null;
+  const m = value.trim().match(/^#?([0-9a-f]{6})$/i);
+  if (!m?.[1]) return null;
+  return parseHex(`#${m[1]}`);
 }
 
 /** WCAG 2.1 relative luminance (0 = black, 1 = white). */

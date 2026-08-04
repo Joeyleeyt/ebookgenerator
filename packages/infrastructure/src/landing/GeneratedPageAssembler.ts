@@ -54,10 +54,20 @@ ${primary?.coverDataUri ? `<meta property="og:image" content="${esc(primary.cove
   html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
   body { margin: 0; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
   img { max-width: 100%; height: auto; }
-  /* A generated layout must never scroll the page sideways. */
-  body, main { overflow-x: hidden; }
+  /* A generated layout must never scroll the page sideways. This must be
+     \`clip\`, not \`hidden\`: an element with overflow-x hidden gets overflow-y
+     computed to auto, turning body into its own scroll container — which is a
+     second vertical scrollbar next to the viewport's. clip clips the axis
+     without creating a scroll container at all. */
+  body, main { overflow-x: clip; }
   table { max-width: 100%; }
 
+/* ── system components ────────────────────────────────────────────────────
+   Baseline styling for the markup substituted into the placeholders. The
+   model's layout CSS comes AFTER this block, so it can restyle any of these
+   selectors and win — but a layout that never mentions them still renders
+   buttons as buttons rather than as bare inline text. */
+${COMPONENT_CSS}
 /* ── generated layout ─────────────────────────────────────────────────── */
 ${page.css}
 /* ── system behaviour ─────────────────────────────────────────────────── */
@@ -73,6 +83,67 @@ ${body}
   }
 }
 
+/**
+ * Default look of every substituted component, on the palette variables. This
+ * is what was missing when the first real generation shipped buy buttons as
+ * bare inline text: the injected markup carries classes the model has never
+ * heard of, so unless WE style them, nobody does.
+ */
+const COMPONENT_CSS = `
+  .cta {
+    display: inline-block; background: var(--accent); color: var(--accent-contrast);
+    font-weight: 700; font-size: 1.02rem; text-decoration: none; text-align: center;
+    padding: 15px 34px; border-radius: 8px; cursor: pointer; max-width: 100%;
+    white-space: nowrap; transition: filter .12s ease;
+  }
+  .cta:hover { filter: brightness(1.08); }
+  .cta:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  /* Not-yet-active reads as a deliberate ghost button, never as a broken one —
+     dimming the accent to 45% opacity just muddies it into the background. */
+  .cta[aria-disabled="true"] {
+    background: transparent; color: var(--muted);
+    border: 1px dashed var(--border); cursor: not-allowed; pointer-events: none;
+  }
+  /* Keeps the explanatory note UNDER its button wherever the button lands —
+     in a sticky bar it otherwise wraps beside it as loose text. */
+  .cta-wrap { display: inline-flex; flex-direction: column; align-items: center; gap: 6px; max-width: 100%; }
+  .cta-note { display: block; font-size: .74rem; color: var(--muted); margin: 0; }
+
+  .price-row { display: inline-flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
+  .price { font-size: 2.2rem; font-weight: 700; color: var(--heading); line-height: 1; }
+  .price-was { font-size: 1.1rem; color: var(--muted); text-decoration: line-through; }
+  .save {
+    background: var(--accent); color: var(--accent-contrast); font-size: .68rem; font-weight: 700;
+    letter-spacing: .07em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px;
+  }
+
+  .pay { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .pay span { font-size: .72rem; color: var(--muted); border: 1px solid var(--border);
+              border-radius: 4px; padding: 4px 9px; }
+
+  .guarantee { border: 2px solid var(--accent); border-radius: 12px; padding: 22px 24px; margin: 10px 0; }
+
+  .contents { display: grid; gap: 20px; }
+  .contents-item h3 { margin: 0 0 .2em; color: var(--heading); }
+  .contents-count { font-size: .74rem; letter-spacing: .1em; text-transform: uppercase;
+                    color: var(--accent); margin: 0 0 6px; }
+  .contents-item ul { list-style: none; padding: 0; margin: 0; }
+  .contents-item li { padding: 5px 0 5px 18px; position: relative; color: var(--muted); font-size: .94rem; }
+  .contents-item li::before { content: "·"; position: absolute; left: 4px; color: var(--accent); }
+
+  .testimonials { display: grid; gap: 16px; }
+  .testimonials blockquote { margin: 0; padding: 18px 20px; border-left: 3px solid var(--accent);
+                             background: var(--surface); border-radius: 0 10px 10px 0; }
+  .testimonials cite { font-style: normal; font-size: .84rem; color: var(--muted); }
+
+  .cover-fallback { display: grid; place-items: center; aspect-ratio: 2/3; width: min(230px, 60vw);
+                    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+                    padding: 22px; text-align: center; font-weight: 700; color: var(--heading); }
+
+  .legal p { font-size: .76rem; color: var(--muted); margin: 0 0 .6em; }
+  .legal .edition { letter-spacing: .2em; text-transform: uppercase; font-size: .72rem; }
+`;
+
 // ── placeholder markup ───────────────────────────────────────────────────────
 
 /**
@@ -85,7 +156,7 @@ function ctaMarkup(p: LandingProduct | undefined, model: LandingPageModel): stri
   const price = p && p.priceCents !== null ? ` — ${money(p.priceCents, model.currency)}` : '';
   const text = esc(model.copy.ctaLabel) + price;
   if (!p?.checkoutUrl) {
-    return `<span class="cta" aria-disabled="true">${text}</span><span class="cta-note">Checkout link not set yet.</span>`;
+    return `<span class="cta-wrap"><span class="cta" aria-disabled="true">${text}</span><span class="cta-note">Checkout link not set yet</span></span>`;
   }
   return `<a class="cta" href="${esc(p.checkoutUrl)}" rel="noopener nofollow">${text}</a>`;
 }

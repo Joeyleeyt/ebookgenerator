@@ -151,6 +151,48 @@ describe('digest', () => {
     expect(d.text).not.toContain('font-family');
   });
 
+  // Site builders ship the palette in linked CSS; the inline <style> scan alone
+  // misread mechanicbible.com's orange as an unrelated indigo.
+  it('reads style signals from linked stylesheets too', async () => {
+    const pageHtml = `<html><head>
+        <link rel="stylesheet" href="/assets/site.css">
+      </head><body><h1>Hello</h1><p>world</p></body></html>`;
+    const impl = (async (url: string) => {
+      if (String(url).endsWith('site.css')) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'text/css' }),
+          body: {
+            getReader() {
+              let sent = false;
+              return {
+                async read() {
+                  if (sent) return { done: true, value: undefined };
+                  sent = true;
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode(
+                      'h1{font-family:Georgia,serif}.btn{background:#f97316}.b2{color:#f97316}',
+                    ),
+                  };
+                },
+                async cancel() {},
+              };
+            },
+          },
+        } as unknown as Response;
+      }
+      return htmlResponse(pageHtml);
+    }) as unknown as typeof fetch;
+
+    const result = await new HttpReferencePageFetcher(impl).fetch('https://example.com/');
+    expect(result.isOk()).toBe(true);
+    const style = (result as { value: { style: { accent: string | null; serifHeadings: boolean } } }).value.style;
+    expect(style.accent).toBe('#f97316'); // the real brand orange, from the linked file
+    expect(style.serifHeadings).toBe(true);
+  });
+
   it('reports an unnumbered, sans-serif page as such', () => {
     const d = digest(
       'https://example.com/',

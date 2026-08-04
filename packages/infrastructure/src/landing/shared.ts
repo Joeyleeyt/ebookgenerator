@@ -126,4 +126,11 @@ export const REVEAL_CSS = `
     transition: opacity .55s ease, transform .55s cubic-bezier(.22,.61,.36,1);
   }
   .anim section.in, .anim .reveal.in, .anim .stagger > *.in { opacity: 1; transform: none; }
+  /* Grid/list children marked .stagger arrive in sequence, not as one slab. */
+  .anim .stagger > *:nth-child(2) { transition-delay: .07s; }
+  .anim .stagger > *:nth-child(3) { transition-delay: .14s; }
+  .anim .stagger > *:nth-child(4) { transition-delay: .21s; }
+  .anim .stagger > *:nth-child(5) { transition-delay: .28s; }
+  .anim .stagger > *:nth-child(6) { transition-delay: .35s; }
+  .anim .stagger > *:nth-child(n+7) { transition-delay: .42s; }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }`;

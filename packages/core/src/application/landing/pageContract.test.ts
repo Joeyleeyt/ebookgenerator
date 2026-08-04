@@ -58,6 +58,17 @@ describe('validateGeneratedPage', () => {
       expect(errorsOf(p).some((e) => e.includes('exactly once'))).toBe(true);
     });
 
+    // How the model fakes a three-tier offer grid out of one book: repeat the
+    // buy button and price into invented "editions".
+    it('caps the buy button and price so one product cannot become a tier grid', () => {
+      const spam = page({
+        bodyHtml: page().bodyHtml + '{{CTA_BUTTON}}{{CTA_BUTTON}}{{CTA_BUTTON}}{{PRICE}}',
+      });
+      const errors = errorsOf(spam);
+      expect(errors.some((e) => e.includes('only one product'))).toBe(true);
+      expect(errors.some((e) => e.includes('at most twice'))).toBe(true);
+    });
+
     // An unrecognised token would reach a buyer as literal braces on the page.
     it('rejects invented placeholders', () => {
       const p = page({ bodyHtml: page().bodyHtml.replace('{{CONTENTS}}', '{{BONUS_STACK}}') });

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Result } from '../../domain/shared/Result.js';
 import { ProjectId } from '../../domain/project/ProjectId.js';
 import { LandingPage, LandingPageId, type LandingCopy } from '../../domain/landing/LandingPage.js';
-import { Palette } from '../../domain/landing/Palette.js';
+import { Palette, parseHexColor } from '../../domain/landing/Palette.js';
 import type { ProjectRepository } from '../ports/repositories/ProjectRepository.js';
 import type { BookRepository } from '../ports/repositories/BookRepository.js';
 import type { KnowledgeRepository } from '../ports/repositories/KnowledgeRepository.js';
@@ -193,7 +193,15 @@ export class GenerateLandingPageUseCase {
 
     // ── palette, from the book's own cover ──
     const cover = await this.loadCover(book.coverImagePath);
-    const palette = cover.seed ? Palette.fromSeed(cover.seed) : Palette.neutral();
+    // The reference page's brand colour, when it was detectable, takes over the
+    // scheme's hue — "match the template" includes looking like it. The cover
+    // still decides light-vs-dark, since the cover is the artwork on the page.
+    const accentSeed = parseHexColor(reference?.style.accent) ?? undefined;
+    const palette = cover.seed
+      ? Palette.fromSeed(cover.seed, { accentSeed })
+      : accentSeed
+        ? Palette.fromSeed(accentSeed)
+        : Palette.neutral();
 
     // ── copy, from Claude ──
     const channel = await this.channels.getChannel(projectId);
