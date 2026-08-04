@@ -45,6 +45,8 @@ import {
   SharpColorSampler,
   NetlifyDeployer,
   LandingPageHtmlRenderer,
+  GeneratedPageAssembler,
+  HttpReferencePageFetcher,
   labs69ProxyRotator,
   YouTubeDataApiProvider,
   YouTubeTranscriptProvider,
@@ -107,6 +109,10 @@ export function buildContainer(env: Env = loadEnv()) {
   // The landing page takes its whole colour scheme from the book's cover art.
   const colorSampler = new SharpColorSampler();
   const landingRenderer = new LandingPageHtmlRenderer();
+  // Assembles a model-generated layout into the finished document.
+  const landingAssembler = new GeneratedPageAssembler();
+  // Reads the reference sales page a book's layout should follow.
+  const referencePages = new HttpReferencePageFetcher();
   const sitePublisher = new NetlifyDeployer(env.NETLIFY_AUTH_TOKEN ?? '', env.NETLIFY_ACCOUNT_SLUG);
   const youtube = new YouTubeDataApiProvider(env.YOUTUBE_API_KEY);
   const transcripts = new YouTubeTranscriptProvider();
@@ -168,6 +174,8 @@ export function buildContainer(env: Env = loadEnv()) {
       landingPages,
       ai,
       landingRenderer,
+      landingAssembler,
+      referencePages,
       colorSampler,
       storage,
       ids,

@@ -69,12 +69,15 @@ export * from './application/ports/services/Telemetry.js';
 export * from './application/ports/services/SitePublisher.js';
 export * from './application/ports/services/ImageColorSampler.js';
 export * from './application/ports/services/LandingPageRenderer.js';
+export * from './application/ports/services/ReferencePageFetcher.js';
+export * from './application/ports/services/LandingPageAssembler.js';
 
 // ── Application: dto / errors / pipeline ────────────────────────────────────
 export * from './application/dto/SubmitChannel.dto.js';
 export * from './application/dto/jobs.dto.js';
 export * from './application/errors.js';
 export * from './application/pipeline/PipelineOrchestrator.js';
+export * from './application/landing/pageContract.js';
 
 // ── Application: use cases ──────────────────────────────────────────────────
 export * from './application/use-cases/SubmitChannelUseCase.js';

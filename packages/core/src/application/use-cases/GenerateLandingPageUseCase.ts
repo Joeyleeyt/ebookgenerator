@@ -17,7 +17,13 @@ import type { IdGenerator } from '../ports/IdGenerator.js';
 import type { Clock } from '../ports/Clock.js';
 import type { Hasher } from '../ports/Hasher.js';
 import { LandingPagePrompt } from '../prompts/LandingPagePrompt.js';
+import { LandingLayoutPrompt } from '../prompts/LandingLayoutPrompt.js';
 import { parseJsonCompletion } from '../prompts/parse.js';
+import { validateGeneratedPage, type GeneratedPage } from '../landing/pageContract.js';
+import type { LandingPageAssembler } from '../ports/services/LandingPageAssembler.js';
+import type { ReferencePage, ReferencePageFetcher } from '../ports/services/ReferencePageFetcher.js';
+
+const LayoutSchema = z.object({ css: z.string(), bodyHtml: z.string() });
 
 /** The bucket the cover art and exports already live in. */
 const EXPORTS_BUCKET = 'exports';
@@ -51,6 +57,23 @@ function buildStats(input: {
 function compactCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}M`;
   return `${Math.round(n / 1000)}K`;
+}
+
+/** Roman numeral year for the footer's edition line, e.g. 2026 → "MMXXVI". */
+function romanYear(year: number): string {
+  const table: Array<[number, string]> = [
+    [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'],
+    [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I'],
+  ];
+  let n = year;
+  let out = '';
+  for (const [value, sym] of table) {
+    while (n >= value) {
+      out += sym;
+      n -= value;
+    }
+  }
+  return out;
 }
 
 /** "Adrian · Car Care Garage" — both halves are real, so both are optional. */
@@ -107,6 +130,8 @@ export class GenerateLandingPageUseCase {
     private readonly pages: LandingPageRepository,
     private readonly ai: AiTextGenerator,
     private readonly renderer: LandingPageRenderer,
+    private readonly assembler: LandingPageAssembler,
+    private readonly references: ReferencePageFetcher,
     private readonly colors: ImageColorSampler,
     private readonly storage: ObjectStorage,
     private readonly ids: IdGenerator,
@@ -114,7 +139,9 @@ export class GenerateLandingPageUseCase {
     private readonly hasher: Hasher,
   ) {}
 
-  async execute(input: GenerateLandingPageInput): Promise<Result<{ regenerated: boolean }>> {
+  async execute(
+    input: GenerateLandingPageInput,
+  ): Promise<Result<{ regenerated: boolean; layout?: 'generated' | 'builtin' }>> {
     const projectId = ProjectId.from(input.projectId);
     const project = await this.projects.findById(projectId);
     if (!project) return Result.fail('Project not found');
@@ -145,6 +172,8 @@ export class GenerateLandingPageUseCase {
       currency: project.options.landingCurrency,
       checkout: project.options.landingCheckoutUrl ?? '',
       guarantee: project.options.landingGuaranteeDays,
+      // Pointing the book at a different reference must rebuild the layout.
+      template: project.options.landingTemplateUrl ?? '',
     });
     if (!input.force && existing?.inputHash === inputHash && existing.html) {
       return Result.ok({ regenerated: false }); // idempotent — nothing has changed
@@ -152,6 +181,15 @@ export class GenerateLandingPageUseCase {
 
     page.markGenerating(now);
     await this.pages.save(page);
+
+    // ── the reference page this book's layout should follow ──
+    // Strictly best-effort: the reference is someone else's live site and may
+    // be down, slow or blocking us. A book still gets a landing page.
+    let reference: ReferencePage | null = null;
+    if (project.options.landingTemplateUrl) {
+      const fetched = await this.references.fetch(project.options.landingTemplateUrl);
+      if (fetched.isOk()) reference = fetched.value;
+    }
 
     // ── palette, from the book's own cover ──
     const cover = await this.loadCover(book.coverImagePath);
@@ -209,12 +247,19 @@ export class GenerateLandingPageUseCase {
       // A long chapter list buries the CTA; the first eight make the point.
       // Only used when the model gave no card features.
       contents: chapterTitles.slice(0, 8),
+      // The "what's inside" breakdown comes from the book's own outline — each
+      // chapter with its key points beneath — rather than from the model
+      // re-imagining the contents it was only told the titles of.
+      sections: (book.outline?.entries ?? []).map((e) => ({
+        title: e.title,
+        items: e.keyPoints.slice(0, 6),
+      })),
       priceCents: project.options.landingPriceCents ?? null,
       compareAtCents: project.options.landingCompareAtCents ?? null,
       checkoutUrl: project.options.landingCheckoutUrl ?? null,
     };
 
-    const html = this.renderer.render({
+    const pageModel = {
       copy,
       palette,
       currency: project.options.landingCurrency,
@@ -239,11 +284,100 @@ export class GenerateLandingPageUseCase {
       heroImageDataUri: null,
       authorPhotoDataUri: null,
       authorCredential: buildCredential(strategy?.author, channel?.title ?? null),
+      // The commercial furniture the reference page carries. Every one of these
+      // is a factual claim — a real deadline, real reviewers, products that
+      // exist, money a reader will actually save — so none is model-generated
+      // and each stays absent until the seller supplies it.
+      promoEndsAt: null,
+      rating: null,
+      valueStack: [],
+      costComparison: null,
+      paymentMethods: ['Visa', 'Mastercard', 'PayPal', 'Apple Pay'],
+      edition: `${romanYear(this.clock.now().getFullYear())} · No. I`,
+    };
+
+    // ── layout ──
+    // With a reference page the layout is generated to match it; without one
+    // (or when generation can't be made to pass the contract) the built-in
+    // template renders the same model. Either way the page gets built.
+    const layout = await this.buildLayout({
+      projectId: input.projectId,
+      reference,
+      copy,
+      bookTitle: title,
+      pageCount,
+      pageModel,
     });
 
-    page.setDraft({ copy, palette, html, inputHash }, this.clock.now());
+    page.setDraft({ copy, palette, html: layout.html, inputHash }, this.clock.now());
     await this.pages.save(page);
-    return Result.ok({ regenerated: true });
+    return Result.ok({ regenerated: true, layout: layout.source });
+  }
+
+  /**
+   * Produces the page body. With a reference page the model generates a layout
+   * shaped after it; that layout must clear the contract before it is used.
+   *
+   * One repair round, then the built-in template. Model-authored markup is
+   * unreliable in exactly the ways the validator checks for, and a sales page
+   * that fails to build is worse than one that looks generic — so the fallback
+   * is a guarantee, not an error path.
+   */
+  private async buildLayout(input: {
+    projectId: string;
+    reference: ReferencePage | null;
+    copy: LandingCopy;
+    bookTitle: string;
+    pageCount: number | null;
+    pageModel: Parameters<LandingPageRenderer['render']>[0];
+  }): Promise<{ html: string; source: 'generated' | 'builtin' }> {
+    if (!input.reference) {
+      return { html: this.renderer.render(input.pageModel), source: 'builtin' };
+    }
+
+    // The copy was already written and validated; the layout call may place it
+    // but not rewrite it, and this is what proves it didn't.
+    const requiredText = [input.copy.headline, input.copy.subheadline, ...input.copy.faqs.map((f) => f.question)];
+
+    let repairErrors: string[] | undefined;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const prompt = LandingLayoutPrompt.build({
+        reference: input.reference,
+        copy: input.copy,
+        bookTitle: input.bookTitle,
+        pageCount: input.pageCount,
+        ...(repairErrors ? { repairErrors } : {}),
+      });
+
+      const completion = await this.ai.generate({
+        model: 'claude-opus-4-8',
+        system: prompt.system,
+        messages: [{ role: 'user', content: prompt.user }],
+        // A full page of markup and CSS; well above the copy call's ceiling.
+        maxTokens: 16_000,
+        cacheControl: { systemPrefix: true },
+        metadata: { projectId: input.projectId, stage: 'landing-layout' },
+      });
+      if (completion.isFail()) break;
+
+      const parsed = parseJsonCompletion(completion.value.text, LayoutSchema);
+      if (parsed.isFail()) {
+        repairErrors = [`Your response was not valid JSON with keys "css" and "bodyHtml": ${parsed.error}`];
+        continue;
+      }
+
+      const generated: GeneratedPage = parsed.value;
+      const check = validateGeneratedPage(generated, { requiredText });
+      if (check.isOk()) {
+        return {
+          html: this.assembler.assemble({ page: generated, model: input.pageModel }),
+          source: 'generated',
+        };
+      }
+      repairErrors = check.error;
+    }
+
+    return { html: this.renderer.render(input.pageModel), source: 'builtin' };
   }
 
   /**

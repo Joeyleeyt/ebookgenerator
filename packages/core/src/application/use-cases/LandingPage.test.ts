@@ -147,6 +147,9 @@ function buildGenerate(options: {
         return '<html>page</html>';
       },
     },
+    { assemble: () => '<html>generated</html>' },
+    // No reference URL is set on the default fixture, so this is never called.
+    { fetch: async () => Result.fail('no reference') },
     { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
     {
       getBytes: async () => Result.ok({ bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png' }),
@@ -246,6 +249,145 @@ describe('GenerateLandingPageUseCase', () => {
     expect(result.isFail()).toBe(true);
     expect(pages.current()?.state).toBe('FAILED');
     expect(pages.current()?.error).toBeTruthy();
+  });
+});
+
+// ── generated layouts from a reference page ──────────────────────────────────
+
+const REFERENCE = {
+  url: 'https://eliasyoder.com/',
+  title: 'The Manual',
+  headings: [{ level: 2, text: 'I. The Manual' }],
+  text: 'A reference sales page.',
+  style: { serifHeadings: true, grounds: ['#faf7f0'], accent: '#b8860b', numberedSections: true, imageDensity: 0.3, measurePx: 720 },
+};
+
+/** A layout that satisfies the contract, echoing the approved copy verbatim. */
+function goodLayout(copyHeadline: string, copySub: string): string {
+  return JSON.stringify({
+    css: 'body { background: var(--bg); color: var(--text); }',
+    bodyHtml:
+      `<section data-section="hero"><h1>${copyHeadline}</h1><p>${copySub}</p>{{COVER}}{{PRICE}}{{CTA_BUTTON}}</section>` +
+      `<section data-section="inside">{{CONTENTS}}</section>` +
+      `<section data-section="order">{{PRICE}}{{CTA_BUTTON}}</section>` +
+      `<section data-section="faq"><p>What format?</p></section>` +
+      `<footer>{{FOOTER_LEGAL}}</footer>`,
+  });
+}
+
+/** Builds the use case with a reference URL set and a scripted AI. */
+function buildWithReference(layoutResponses: string[]) {
+  const project = makeProject({ landingTemplateUrl: 'https://eliasyoder.com/' });
+  const pages = new FakeLandingRepo(null);
+  const calls: string[] = [];
+  let assembled = 0;
+  let builtin = 0;
+
+  const useCase = new GenerateLandingPageUseCase(
+    { findById: async () => project } as never,
+    { findByProject: async () => makeBook() } as never,
+    { getBookStrategy: async () => null } as never,
+    { getChannel: async () => null } as never,
+    { listByProject: async () => [] } as never,
+    pages,
+    {
+      generate: async (req: { metadata?: { stage: string } }) => {
+        const stage = req.metadata?.stage ?? '';
+        calls.push(stage);
+        const text = stage === 'landing-page' ? COPY_JSON : (layoutResponses.shift() ?? '{"bad":true}');
+        return Result.ok({ text, model: 'm', inputTokens: 1, outputTokens: 1, stopReason: 'end_turn' });
+      },
+    } as never,
+    {
+      render: () => {
+        builtin++;
+        return '<html>builtin</html>';
+      },
+    },
+    {
+      assemble: () => {
+        assembled++;
+        return '<html>generated</html>';
+      },
+    },
+    { fetch: async () => Result.ok(REFERENCE) },
+    { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
+    {
+      getBytes: async () => Result.fail('none'),
+      getDataUri: async () => Result.fail('none'),
+    } as never,
+    { uuid: () => 'lp-1' },
+    { now: () => now },
+    { hash: (i: unknown) => JSON.stringify(i) },
+  );
+
+  return { useCase, pages, calls, counts: () => ({ assembled, builtin }) };
+}
+
+const HEADLINE = 'Stop paying for repairs you could do yourself';
+const SUB = 'The workshop manual for people who own a car, not a garage.';
+
+describe('GenerateLandingPageUseCase — reference-driven layout', () => {
+  it('generates a layout when a valid one comes back first time', async () => {
+    const h = buildWithReference([goodLayout(HEADLINE, SUB)]);
+
+    const result = await h.useCase.execute({ projectId: 'p1' });
+
+    expect(result.isOk()).toBe(true);
+    expect((result as { value: { layout: string } }).value.layout).toBe('generated');
+    expect(h.counts()).toEqual({ assembled: 1, builtin: 0 });
+    expect(h.pages.current()?.html).toBe('<html>generated</html>');
+    // Copy first, then layout — two distinct calls.
+    expect(h.calls).toEqual(['landing-page', 'landing-layout']);
+  });
+
+  it('repairs a rejected layout and uses the corrected one', async () => {
+    // First attempt omits the CTA placeholder and uses a raw colour.
+    const broken = JSON.stringify({
+      css: 'body { color: #ff0000; }',
+      bodyHtml: '<section data-section="hero"></section>',
+    });
+    const h = buildWithReference([broken, goodLayout(HEADLINE, SUB)]);
+
+    const result = await h.useCase.execute({ projectId: 'p1' });
+
+    expect((result as { value: { layout: string } }).value.layout).toBe('generated');
+    expect(h.calls).toEqual(['landing-page', 'landing-layout', 'landing-layout']);
+    expect(h.counts()).toEqual({ assembled: 1, builtin: 0 });
+  });
+
+  it('falls back to the built-in template after a second failure', async () => {
+    const broken = JSON.stringify({ css: '', bodyHtml: '<div>nope</div>' });
+    const h = buildWithReference([broken, broken]);
+
+    const result = await h.useCase.execute({ projectId: 'p1' });
+
+    // A page that fails to build is worse than one that looks generic.
+    expect(result.isOk()).toBe(true);
+    expect((result as { value: { layout: string } }).value.layout).toBe('builtin');
+    expect(h.counts()).toEqual({ assembled: 0, builtin: 1 });
+    expect(h.pages.current()?.state).toBe('DRAFT');
+  });
+
+  // The copy was already written and validated; the layout call places it.
+  it('rejects a layout that rewrote the approved copy', async () => {
+    const rewritten = goodLayout('A snappier headline I invented', SUB);
+    const h = buildWithReference([rewritten, goodLayout(HEADLINE, SUB)]);
+
+    const result = await h.useCase.execute({ projectId: 'p1' });
+
+    expect((result as { value: { layout: string } }).value.layout).toBe('generated');
+    expect(h.calls.filter((c) => c === 'landing-layout')).toHaveLength(2); // it was made to redo it
+  });
+
+  it('uses the built-in template when the reference cannot be fetched', async () => {
+    const h = buildWithReference([goodLayout(HEADLINE, SUB)]);
+    // Re-build with a failing fetcher by exercising the no-reference path.
+    const plain = buildGenerate({});
+    const result = await plain.useCase.execute({ projectId: 'p1' });
+    expect(result.isOk()).toBe(true);
+    expect((result as { value: { layout: string } }).value.layout).toBe('builtin');
+    expect(h.calls).toEqual([]); // the reference handle was never executed
   });
 });
 

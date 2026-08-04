@@ -112,7 +112,7 @@ interface GenerationOptionsProps {
   // ── Sales landing page ─────────────────────────────────────────────────────
   // Generate a standalone sales page for the finished book and host it on
   // Netlify. Everything below is inert while `landingPage` is false.
-  /** Generate a sales landing page once the book has exported. Off by default. */
+  /** Set when the user asks for a sales page on a finished book. */
   landingPage: boolean;
   /**
    * The user's own checkout link (Payhip, Gumroad, Kajabi, Stripe — any URL).
@@ -129,6 +129,13 @@ interface GenerationOptionsProps {
   landingCurrency: string;
   /** Money-back guarantee window advertised on the page; 0 hides the section. */
   landingGuaranteeDays: number;
+  /**
+   * A reference sales page for this book's landing page to follow — the client
+   * supplies a different one per book. Its structure and visual treatment are
+   * read at generation time and used to steer the layout. Unset falls back to
+   * the built-in structure.
+   */
+  landingTemplateUrl?: string | undefined;
 }
 
 export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
@@ -163,6 +170,7 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
         : {}),
       landingCurrency: (props.landingCurrency ?? DEFAULT_LANDING_CURRENCY).toUpperCase(),
       landingGuaranteeDays: props.landingGuaranteeDays ?? 30,
+      ...(props.landingTemplateUrl?.trim() ? { landingTemplateUrl: props.landingTemplateUrl.trim() } : {}),
     });
   }
 
@@ -218,6 +226,9 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
   }
   get landingGuaranteeDays() {
     return this.props.landingGuaranteeDays;
+  }
+  get landingTemplateUrl() {
+    return this.props.landingTemplateUrl;
   }
   /** A page can be generated without a checkout link, but never published without one. */
   get hasCheckoutUrl(): boolean {

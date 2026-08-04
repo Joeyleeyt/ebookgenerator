@@ -357,17 +357,9 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
       await orchestrator.advance(p.projectId, 'EXPORTING'); // → COMPLETED (no-op on a manual re-export)
       container.logger.info('📄 export complete', { projectId: p.projectId, bookVersion, formats: formats.length });
 
-      // The book now exists, so its sales page can be written. Generation only —
-      // the page is left as a draft for the user to read and publish, and a
-      // failure here must never affect the finished book.
-      const project = await container.repositories.projects.findById(ProjectId.from(p.projectId));
-      if (project?.options.landingPage) {
-        await container.queue.enqueue(
-          'landing-page',
-          { projectId: p.projectId, mode: 'generate', publish: false },
-          { jobId: `landing-page:${p.projectId}:v${bookVersion}` },
-        );
-      }
+      // The sales page is NOT generated here. It is asked for from the project
+      // page once the book exists, because that is the first moment the user
+      // can have uploaded it to their store and have a checkout link to give.
       return r.value;
     },
   });
@@ -386,7 +378,13 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
         if (p.mode === 'generate') {
           const generated = await useCases.generateLandingPage.execute({ projectId: p.projectId, force: true });
           if (generated.isFail()) throw new Error(generated.error);
-          container.logger.info('🛒 landing page draft ready', { projectId: p.projectId });
+          // Which layout was used is the number worth watching on early runs:
+          // 'builtin' means the reference-driven generation failed the contract
+          // twice and fell back, which is invisible from the page itself.
+          container.logger.info('🛒 landing page draft ready', {
+            projectId: p.projectId,
+            layout: generated.value.layout ?? 'builtin',
+          });
           if (!p.publish) return generated.value;
         }
 

@@ -18,9 +18,11 @@ export * from './image/SharpColorSampler.js';
 // ── Networking (proxy rotation, static hosting) ─────────────────────────────
 export * from './net/ProxyRotator.js';
 export * from './net/NetlifyDeployer.js';
+export * from './net/HttpReferencePageFetcher.js';
 
 // ── Landing page (sales page renderer) ──────────────────────────────────────
 export * from './landing/LandingPageHtmlRenderer.js';
+export * from './landing/GeneratedPageAssembler.js';
 
 // ── YouTube ─────────────────────────────────────────────────────────────────
 export * from './youtube/YouTubeDataApiProvider.js';

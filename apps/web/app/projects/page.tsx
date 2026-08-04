@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowRight, BookOpen, Loader2, Store, Youtube } from 'lucide-react';
+import { ArrowRight, BookOpen, Loader2, Youtube } from 'lucide-react';
 import { AppShell } from '../../components/app/AppShell.js';
 import { ProjectCard, type ProjectCardData } from '../../components/projects/ProjectCard.js';
 import { Button } from '../../components/ui/button.js';
@@ -23,23 +23,6 @@ const TABS: { key: Tab; label: string }[] = [
 function clampInt(n: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, Math.round(n)));
-}
-
-/** "47" / "47.50" → cents. Returns null for anything that isn't a clean price. */
-function parsePrice(value: string): number | null {
-  const trimmed = value.trim().replace(/^[$€£]/, '');
-  if (!trimmed) return null;
-  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null;
-  return Math.round(Number(trimmed) * 100);
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const u = new URL(value);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 /** Mirror of the backend chapter-count formula (round(pages/7), clamped 2–14). */
@@ -62,12 +45,6 @@ export default function ProjectsPage() {
   const [pages, setPages] = useState(100);
   const [videos, setVideos] = useState(30);
   const [illustrations, setIllustrations] = useState(true);
-  // Sales page. The checkout link is optional here on purpose: the product
-  // can't exist on the store until the book has been generated and uploaded,
-  // so it stays editable on the project page right up until publishing.
-  const [landingPage, setLandingPage] = useState(false);
-  const [checkoutUrl, setCheckoutUrl] = useState('');
-  const [price, setPrice] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Books run concurrently up to a server-side cap; null until /api/projects reports it.
@@ -109,16 +86,6 @@ export default function ProjectsPage() {
       );
       return;
     }
-    // Prices are entered in whole currency units but stored in cents.
-    const priceCents = parsePrice(price);
-    if (landingPage && price.trim() && priceCents === null) {
-      setError('Enter the price as a number, e.g. 47 or 47.00.');
-      return;
-    }
-    if (landingPage && checkoutUrl.trim() && !isHttpUrl(checkoutUrl.trim())) {
-      setError('The checkout link must be a full URL, e.g. https://payhip.com/b/AbCd.');
-      return;
-    }
     setSubmitting(true);
     setError(null);
     setStarted(null);
@@ -134,9 +101,6 @@ export default function ProjectsPage() {
             targetPages: clampInt(pages, 10, 200, 100),
             maxVideos: clampInt(videos, 5, 50, 30),
             includeIllustrations: illustrations,
-            landingPage,
-            ...(landingPage && checkoutUrl.trim() ? { landingCheckoutUrl: checkoutUrl.trim() } : {}),
-            ...(landingPage && priceCents !== null ? { landingPriceCents: priceCents } : {}),
             // Fallback only — a count in the title overrides this on the backend.
             ...(bookType === 'cooking' ? { recipeCount: clampInt(recipeCount, 10, 120, 60) } : {}),
           },
@@ -247,47 +211,6 @@ export default function ProjectsPage() {
                 {submitting ? 'Starting…' : 'Analyze'}
               </Button>
             </div>
-          </div>
-
-          {/* Sales page */}
-          <div className="flex flex-col gap-2.5 rounded-input border border-border bg-surface px-3.5 py-3">
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={landingPage}
-                onChange={(e) => setLandingPage(e.target.checked)}
-                className="size-4 accent-primary"
-              />
-              <Store className="size-4 text-muted-foreground" />
-              <span className="font-medium">Generate a sales landing page</span>
-              <span className="text-muted-foreground">— written and hosted automatically</span>
-            </label>
-
-            {landingPage && (
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  value={checkoutUrl}
-                  onChange={(e) => setCheckoutUrl(e.target.value)}
-                  placeholder="Checkout link (Payhip, Gumroad…) — you can add this later"
-                  inputMode="url"
-                  className="h-9 flex-1 rounded-md border border-border bg-bg px-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary"
-                />
-                <input
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  placeholder="Price, e.g. 47"
-                  inputMode="decimal"
-                  aria-label="Price in USD"
-                  className="h-9 w-full rounded-md border border-border bg-bg px-3 text-sm tabular-nums outline-none placeholder:text-muted-foreground focus:border-primary sm:w-36"
-                />
-              </div>
-            )}
-            {landingPage && (
-              <p className="text-xs text-muted-foreground">
-                The page is written once the book is finished, styled from its cover art, and saved as a draft
-                for you to review. Nothing goes live until you publish it.
-              </p>
-            )}
           </div>
 
           <div className="hidden">

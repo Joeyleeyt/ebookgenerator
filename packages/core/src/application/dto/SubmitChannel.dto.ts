@@ -16,6 +16,8 @@ const LandingOptionFields = {
   landingCompareAtCents: z.number().int().min(0).max(10_000_00).optional(),
   landingCurrency: z.string().trim().length(3).default('USD'),
   landingGuaranteeDays: z.number().int().min(0).max(365).default(30),
+  /** Reference sales page this book's layout should follow. */
+  landingTemplateUrl: z.string().url().max(2000).optional().or(z.literal('')),
 };
 
 export const SubmitChannelDto = z.object({

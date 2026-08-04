@@ -1,0 +1,40 @@
+import type { Result } from '../../../domain/shared/Result.js';
+
+/** A readable digest of a reference sales page, for the model to learn from. */
+export interface ReferencePage {
+  url: string;
+  title: string;
+  /** Section headings in document order — the page's skeleton. */
+  headings: Array<{ level: number; text: string }>;
+  /** Visible text, collapsed and truncated; enough to read the structure. */
+  text: string;
+  /** Observed visual treatment, read off the page's own stylesheet/markup. */
+  style: {
+    /** Whether headings use a serif face. */
+    serifHeadings: boolean;
+    /** Distinct background colours used as section grounds, most-used first. */
+    grounds: string[];
+    /** The most prominent non-neutral colour — usually the CTA. */
+    accent: string | null;
+    /** True when sections carry numbering (I. / 01 / Step 1). */
+    numberedSections: boolean;
+    /** Roughly how image-led the page is: images per thousand words. */
+    imageDensity: number;
+    /** Content column width in px, when it can be determined. */
+    measurePx: number | null;
+  };
+}
+
+/**
+ * Fetches the reference page the client nominated for a given book.
+ *
+ * SECURITY: the URL comes from a user, and this runs server-side inside the
+ * worker's network. That is a textbook SSRF sink — a URL pointing at
+ * 127.0.0.1, a private range, or a cloud metadata endpoint would make this
+ * service fetch internal resources on the caller's behalf. Implementations MUST
+ * resolve the host and refuse anything that is not a public address, on every
+ * redirect hop as well as the initial request.
+ */
+export interface ReferencePageFetcher {
+  fetch(url: string): Promise<Result<ReferencePage>>;
+}

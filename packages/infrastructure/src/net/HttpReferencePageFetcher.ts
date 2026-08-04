@@ -1,0 +1,248 @@
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+import { Result, type ReferencePage, type ReferencePageFetcher } from '@yeg/core';
+
+/** Refuse anything larger — a reference page is text, not a download. */
+const MAX_BYTES = 3_000_000;
+const TIMEOUT_MS = 15_000;
+const MAX_REDIRECTS = 3;
+
+/**
+ * Fetches and digests the reference sales page a book is meant to follow.
+ *
+ * The URL is user-supplied and this runs inside the worker's network, so every
+ * hop is validated against the private address ranges before a request is made.
+ * Without that, pasting `http://169.254.169.254/latest/meta-data/` into the
+ * template field would have the worker read its own cloud credentials and hand
+ * them to a model prompt.
+ */
+export class HttpReferencePageFetcher implements ReferencePageFetcher {
+  constructor(private readonly fetchImpl: typeof fetch = fetch) {}
+
+  async fetch(url: string): Promise<Result<ReferencePage>> {
+    let current = url;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const safe = await assertPublicUrl(current);
+      if (safe.isFail()) return Result.fail(safe.error);
+
+      let res: Response;
+      try {
+        res = await this.fetchImpl(current, {
+          redirect: 'manual', // each hop is re-validated rather than followed blindly
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+          headers: {
+            // Identify honestly rather than impersonating a browser.
+            'User-Agent': 'EbookGenerator/1.0 (+landing-page reference reader)',
+            Accept: 'text/html,application/xhtml+xml',
+          },
+        });
+      } catch (e) {
+        return Result.fail(`Could not reach ${current}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get('location');
+        if (!location) return Result.fail(`Redirect from ${current} had no destination`);
+        current = new URL(location, current).toString();
+        continue;
+      }
+      if (!res.ok) return Result.fail(`${current} returned ${res.status}`);
+
+      const type = res.headers.get('content-type') ?? '';
+      if (!type.includes('html')) return Result.fail(`${current} is ${type || 'not HTML'}, not a web page`);
+
+      const html = await readCapped(res);
+      if (html.isFail()) return Result.fail(html.error);
+      return Result.ok(digest(current, html.value));
+    }
+    return Result.fail(`Too many redirects from ${url}`);
+  }
+}
+
+// ── safety ───────────────────────────────────────────────────────────────────
+
+/** Blocks loopback, link-local, private and CGNAT ranges in v4 and v6. */
+function isPrivateAddress(ip: string): boolean {
+  if (isIP(ip) === 6) {
+    const v6 = ip.toLowerCase();
+    if (v6 === '::1' || v6 === '::') return true;
+    if (v6.startsWith('fc') || v6.startsWith('fd')) return true; // unique local
+    if (v6.startsWith('fe80')) return true; // link local
+    // IPv4-mapped (::ffff:127.0.0.1) must be judged on the embedded v4 address.
+    const mapped = v6.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped?.[1]) return isPrivateAddress(mapped[1]);
+    return false;
+  }
+  const p = ip.split('.').map(Number);
+  const [a, b] = [p[0] ?? 0, p[1] ?? 0];
+  if (a === 10 || a === 127 || a === 0) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 169 && b === 254) return true; // link-local, incl. cloud metadata
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  if (a >= 224) return true; // multicast / reserved
+  return false;
+}
+
+async function assertPublicUrl(raw: string): Promise<Result<void>> {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return Result.fail(`"${raw}" is not a valid URL`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return Result.fail('Only http and https reference pages are supported');
+  }
+  const host = parsed.hostname;
+  // A literal IP needs no lookup; a name does, and we judge every address it
+  // resolves to, since one public and one private answer is a known bypass.
+  const addresses = isIP(host) ? [host] : await resolveAll(host);
+  if (addresses.length === 0) return Result.fail(`Could not resolve ${host}`);
+  if (addresses.some(isPrivateAddress)) {
+    return Result.fail(`${host} resolves to a private address and will not be fetched`);
+  }
+  return Result.ok();
+}
+
+async function resolveAll(host: string): Promise<string[]> {
+  try {
+    const records = await lookup(host, { all: true });
+    return records.map((r) => r.address);
+  } catch {
+    return [];
+  }
+}
+
+/** Reads the body but stops at the cap, so a huge page can't exhaust memory. */
+async function readCapped(res: Response): Promise<Result<string>> {
+  const declared = Number(res.headers.get('content-length') ?? '0');
+  if (declared > MAX_BYTES) return Result.fail('Reference page is too large to read');
+  const reader = res.body?.getReader();
+  if (!reader) return Result.fail('Reference page had no body');
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      total += value.length;
+      if (total > MAX_BYTES) {
+        await reader.cancel();
+        return Result.fail('Reference page is too large to read');
+      }
+      chunks.push(value);
+    }
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    merged.set(c, offset);
+    offset += c.length;
+  }
+  return Result.ok(new TextDecoder('utf-8').decode(merged));
+}
+
+// ── digest ───────────────────────────────────────────────────────────────────
+
+/**
+ * Reduces a page to the parts that describe its template: the heading skeleton,
+ * the visible prose, and a handful of measurable style signals. Deliberately
+ * regex-based rather than a DOM parse — this only needs the shape, and adding a
+ * full HTML parser to read someone else's marketing page isn't worth the
+ * dependency.
+ */
+export function digest(url: string, html: string): ReferencePage {
+  const stripped = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ');
+
+  const headings: Array<{ level: number; text: string }> = [];
+  for (const m of stripped.matchAll(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi)) {
+    const text = textOf(m[2] ?? '');
+    if (text) headings.push({ level: Number(m[1]), text });
+  }
+
+  const css = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1] ?? '').join('\n');
+  const text = textOf(stripped).slice(0, 12_000);
+  const words = text.split(/\s+/).length || 1;
+  const images = (stripped.match(/<img\b/gi) ?? []).length;
+
+  return {
+    url,
+    title: textOf(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '') || url,
+    headings: headings.slice(0, 60),
+    text,
+    style: {
+      serifHeadings: hasSerifFont(css),
+      grounds: uniqueColors(css).slice(0, 5),
+      accent: pickAccent(css),
+      // "I." / "01" / "Step 1" leading a heading is the numbering signal.
+      numberedSections: headings.filter((h) => /^([IVXLC]+[.·—]|\d{1,2}[.·—]|step\s+\d)/i.test(h.text)).length >= 2,
+      imageDensity: Number(((images * 1000) / words).toFixed(2)),
+      measurePx: readMeasure(css),
+    },
+  };
+}
+
+function textOf(fragment: string): string {
+  return fragment
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * "sans-serif" contains "serif", so a naive substring test reads every
+ * sans-serif page as serif — and then every generated page comes out in
+ * Georgia. Drop the sans- declarations before looking for a serif family.
+ */
+function hasSerifFont(css: string): boolean {
+  return (css.match(/font-family:[^;}]*/gi) ?? []).some((decl) => {
+    const cleaned = decl.toLowerCase().replace(/sans-serif/g, '');
+    return /\bserif\b|georgia|times|garamond|playfair|iowan|baskerville|caslon/.test(cleaned);
+  });
+}
+
+function uniqueColors(css: string): string[] {
+  const counts = new Map<string, number>();
+  for (const m of css.matchAll(/background(?:-color)?:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\))/gi)) {
+    const key = (m[1] ?? '').toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c);
+}
+
+/** The most-repeated saturated colour — on a sales page that is the CTA. */
+function pickAccent(css: string): string | null {
+  const counts = new Map<string, number>();
+  for (const m of css.matchAll(/#([0-9a-f]{6})\b/gi)) {
+    const hex = `#${(m[1] ?? '').toLowerCase()}`;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    const spread = Math.max(r, g, b) - Math.min(r, g, b);
+    if (spread < 40) continue; // neutral — a ground or a text colour, not an accent
+    counts.set(hex, (counts.get(hex) ?? 0) + 1);
+  }
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return top?.[0] ?? null;
+}
+
+function readMeasure(css: string): number | null {
+  const widths = [...css.matchAll(/max-width:\s*(\d{3,4})px/gi)]
+    .map((m) => Number(m[1]))
+    .filter((n) => n >= 480 && n <= 1400);
+  if (widths.length === 0) return null;
+  // The most common qualifying max-width is the content column.
+  const counts = new Map<number, number>();
+  for (const w of widths) counts.set(w, (counts.get(w) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}

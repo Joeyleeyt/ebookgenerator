@@ -56,3 +56,23 @@ describe('GenerationOptions', () => {
     expect(options.recipeCount).toBe(COOKING_RECIPE_COUNT);
   });
 });
+
+describe('landing page options', () => {
+  // Empty form fields arrive as blank strings, not undefined.
+  it('treats a blank checkout link or template URL as unset', () => {
+    const opts = GenerationOptions.create({ landingCheckoutUrl: '   ', landingTemplateUrl: '' });
+    expect(opts.hasCheckoutUrl).toBe(false);
+    expect(opts.landingTemplateUrl).toBeUndefined();
+  });
+
+  it('keeps the landing settings through a round trip', () => {
+    const original = GenerationOptions.create({
+      landingPage: true,
+      landingTemplateUrl: 'https://eliasyoder.com',
+      landingPriceCents: 2700,
+    });
+    const restored = GenerationOptions.create(original.toJSON());
+    expect(restored.landingTemplateUrl).toBe('https://eliasyoder.com');
+    expect(restored.landingPriceCents).toBe(2700);
+  });
+});

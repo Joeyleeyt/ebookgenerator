@@ -10,6 +10,12 @@ export interface LandingProduct {
   pageCount: number | null;
   /** Chapter titles, listed under the cover. */
   contents: string[];
+  /**
+   * The "what's inside" breakdown: one entry per chapter, with its key points
+   * as the items beneath. The reference page lists 13 categories with a method
+   * count against each, which is exactly the shape of the book's own outline.
+   */
+  sections: Array<{ title: string; items: string[] }>;
   /** Eyebrow above the card title, e.g. "Buying guide" / "Best value". */
   categoryLabel: string | null;
   /** Terse selling points listed on the card itself. */
@@ -58,6 +64,33 @@ export interface LandingPageModel {
   authorPhotoDataUri: string | null;
   /** Author credential line, e.g. "Founder · Car Care Garage". */
   authorCredential: string | null;
+
+  // ── user-supplied commercial furniture ────────────────────────────────────
+  // Every field below renders only when its data exists. They are grouped here
+  // because they share one property: NONE of them can be model-generated. A
+  // countdown, a star rating, an itemised value stack and a savings table are
+  // all factual claims — about a deadline, about real reviewers, about products
+  // that exist, about money a reader will actually save. Inventing any of them
+  // would put a false statement on a page that takes payment.
+
+  /** Real deadline for the launch price. Omitted → no countdown at all. */
+  promoEndsAt: string | null;
+  /** Aggregate rating, only if the seller genuinely has one. */
+  rating: { score: number; count: number | null } | null;
+  /** Itemised components adding to a "total value", struck through vs the price. */
+  valueStack: Array<{ label: string; valueCents: number }>;
+  /** The before/after cost table. `source` is required — an unsourced savings
+   * claim is the single riskiest thing that can appear on this page. */
+  costComparison: {
+    beforeLabel: string;
+    afterLabel: string;
+    rows: Array<{ label: string; beforeCents: number; afterCents: number }>;
+    source: string;
+  } | null;
+  /** Payment marks shown by the order button. */
+  paymentMethods: string[];
+  /** Edition line for the footer, e.g. "MMXXVI · No. I". */
+  edition: string | null;
 }
 
 /** Renders the model into one self-contained HTML document (no external requests). */

@@ -27,6 +27,7 @@ export const GET = handle(async (_req: Request, { params }: { params: { id: stri
     settings: {
       enabled: project.options.landingPage,
       checkoutUrl: project.options.landingCheckoutUrl ?? '',
+      templateUrl: project.options.landingTemplateUrl ?? '',
       priceCents: project.options.landingPriceCents ?? null,
       compareAtCents: project.options.landingCompareAtCents ?? null,
       currency: project.options.landingCurrency,
@@ -68,7 +69,6 @@ export const POST = handle(async (req: Request, { params }: { params: { id: stri
   if ('res' in auth) return auth.res;
   const { c, project } = auth;
 
-  if (!project.options.landingPage) return error('Landing page is not enabled for this project', 409);
   if (project.status.value !== 'COMPLETED') {
     return error('The book must finish generating before its landing page can be written', 409);
   }

@@ -130,6 +130,7 @@ export class Project extends AggregateRoot<ProjectProps, ProjectId> {
       landingCompareAtCents?: number | undefined;
       landingCurrency?: string | undefined;
       landingGuaranteeDays?: number | undefined;
+      landingTemplateUrl?: string | undefined;
     },
     now: Date,
   ): void {

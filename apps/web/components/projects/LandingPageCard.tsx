@@ -12,10 +12,11 @@ interface Payload {
   settings: {
     enabled: boolean;
     checkoutUrl: string;
+    templateUrl: string;
     priceCents: number | null;
     currency: string;
   };
-  page: { state: State; url: string | null; error: string | null; hasDraft: boolean } | null;
+  page: { state: State; url: string | null; error: string | null; hasDraft: boolean; updatedAt: string } | null;
   canPublish: boolean;
   publisherConfigured: boolean;
 }
@@ -34,18 +35,40 @@ function parsePrice(value: string): number | null {
   return /^\d+(\.\d{1,2})?$/.test(trimmed) ? Math.round(Number(trimmed) * 100) : null;
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+const INPUT =
+  'h-9 w-full rounded-md border border-border bg-canvas px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary';
+
 /**
- * The sales page panel on a finished project: edit the price and checkout link,
- * preview the draft, then publish. Generation and publishing are deliberately
- * two actions — nothing reaches a public URL that the user hasn't looked at.
+ * The sales page panel, shown on every finished book.
+ *
+ * Everything happens here, after the book exists — which is the first moment the
+ * user can have uploaded it to their store and have a checkout link to give.
+ * Asking at project-creation time was the wrong moment: the product could not
+ * exist yet, so the link never could either.
  */
 export function LandingPageCard({ projectId, projectCompleted }: { projectId: string; projectCompleted: boolean }) {
   const [data, setData] = useState<Payload | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState('');
+  const [templateUrl, setTemplateUrl] = useState('');
   const [price, setPrice] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  // The row this card was showing when an action was fired. Work runs on a
+  // queue, so for the first few seconds the row still reads DRAFT — polling on
+  // the state alone would never start, and the card would sit on "Publishing…"
+  // until the user reloaded. Watching for the row to CHANGE is what actually
+  // tracks the job.
+  const [watchFrom, setWatchFrom] = useState<string | null>(null);
 
   const load = useCallback(
     async (opts?: { keepEdits?: boolean }) => {
@@ -56,6 +79,7 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
       // Don't clobber what the user is mid-way through typing.
       if (!opts?.keepEdits) {
         setCheckoutUrl(payload.settings.checkoutUrl);
+        setTemplateUrl(payload.settings.templateUrl);
         setPrice(centsToInput(payload.settings.priceCents));
       }
     },
@@ -66,30 +90,59 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
     void load();
   }, [load]);
 
-  // The work runs on a queue, so poll while it's in flight.
   const state = data?.page?.state ?? null;
+  const updatedAt = data?.page?.updatedAt ?? null;
+
+  // Poll while a job is in flight, and while one is expected but has not been
+  // picked up yet. Stops once the row has moved on from what it was when the
+  // action fired and is no longer working — or after a deadline, so a job that
+  // dies without writing a row can't leave this polling forever.
+  const inFlight = state !== null && BUSY_STATES.includes(state);
+  const awaiting = watchFrom !== null && updatedAt === watchFrom;
   useEffect(() => {
-    if (!state || !BUSY_STATES.includes(state)) return;
-    const t = setInterval(() => void load({ keepEdits: true }), 3000);
+    if (!inFlight && !awaiting) {
+      if (watchFrom !== null) setWatchFrom(null);
+      return;
+    }
+    const deadline = Date.now() + 240_000;
+    const t = setInterval(() => {
+      if (Date.now() > deadline) {
+        setWatchFrom(null);
+        return;
+      }
+      void load({ keepEdits: true });
+    }, 3000);
     return () => clearInterval(t);
-  }, [state, load]);
+  }, [inFlight, awaiting, watchFrom, load]);
 
-  if (!data?.settings.enabled) return null;
+  // The panel only makes sense once there is a book to sell.
+  if (!projectCompleted) return null;
 
-  const page = data.page;
+  const page = data?.page ?? null;
   const working = busy || (state !== null && BUSY_STATES.includes(state));
 
+  /** Persists the settings, and turns the feature on for this project. */
   async function save(): Promise<boolean> {
     const cents = parsePrice(price);
     if (price.trim() && cents === null) {
-      setProblem('Enter the price as a number, e.g. 47 or 47.00.');
+      setProblem('Enter the price as a number, e.g. 27 or 27.00.');
+      return false;
+    }
+    if (checkoutUrl.trim() && !isHttpUrl(checkoutUrl.trim())) {
+      setProblem('The checkout link must be a full URL, e.g. https://payhip.com/b/AbCd.');
+      return false;
+    }
+    if (templateUrl.trim() && !isHttpUrl(templateUrl.trim())) {
+      setProblem('The reference page must be a full URL, e.g. https://eliasyoder.com.');
       return false;
     }
     const res = await fetch(`/api/projects/${projectId}/landing-page`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        landingPage: true,
         landingCheckoutUrl: checkoutUrl.trim(),
+        landingTemplateUrl: templateUrl.trim(),
         ...(cents !== null ? { landingPriceCents: cents } : {}),
       }),
     });
@@ -108,16 +161,17 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
     setProblem(null);
     try {
       if (!(await save())) return;
-      const res =
-        action === 'generate'
-          ? await fetch(`/api/projects/${projectId}/landing-page`, { method: 'POST' })
-          : await fetch(`/api/projects/${projectId}/landing-page`, { method: 'PUT' });
+      const res = await fetch(`/api/projects/${projectId}/landing-page`, {
+        method: action === 'generate' ? 'POST' : 'PUT',
+      });
       const body = await res.json();
       if (!res.ok) {
         setProblem(body.error ?? 'Something went wrong');
         return;
       }
       setNote(action === 'generate' ? 'Writing the page — this takes a minute.' : 'Publishing…');
+      // Remember the row as it stands, so polling can watch for it to change.
+      setWatchFrom(data?.page?.updatedAt ?? 'none');
       await load({ keepEdits: true });
     } finally {
       setBusy(false);
@@ -150,11 +204,26 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
       </div>
 
       <div className="flex flex-col gap-4 px-6 py-5">
-        {!projectCompleted && (
+        {!page && (
           <p className="text-sm text-muted-foreground">
-            The sales page is written once the book has finished generating.
+            Turn this book into a sales page — written from its own contents, styled from its cover, and hosted
+            on Netlify.
           </p>
         )}
+
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">
+            Reference page to copy the layout from
+          </span>
+          <input
+            value={templateUrl}
+            onChange={(e) => setTemplateUrl(e.target.value)}
+            onBlur={() => void save()}
+            placeholder="https://eliasyoder.com"
+            inputMode="url"
+            className={INPUT}
+          />
+        </label>
 
         <div className="flex flex-col gap-2 sm:flex-row">
           <label className="flex-1">
@@ -165,42 +234,42 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
               onBlur={() => void save()}
               placeholder="https://payhip.com/b/…"
               inputMode="url"
-              className="h-9 w-full rounded-md border border-border bg-bg px-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary"
+              className={INPUT}
             />
           </label>
           <label className="sm:w-32">
             <span className="mb-1 block text-xs font-medium text-muted-foreground">
-              Price ({data.settings.currency})
+              Price ({data?.settings.currency ?? 'USD'})
             </span>
             <input
               value={price}
               onChange={(e) => setPrice(e.target.value)}
               onBlur={() => void save()}
-              placeholder="47"
+              placeholder="27"
               inputMode="decimal"
-              className="h-9 w-full rounded-md border border-border bg-bg px-3 text-sm tabular-nums outline-none placeholder:text-muted-foreground focus:border-primary"
+              className={INPUT}
             />
           </label>
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Upload the book to your store, then paste its checkout link here — it goes on every buy button
-          exactly as you enter it.
+          Download the book below, upload it to Payhip, then paste its checkout link here — it goes on every buy
+          button exactly as you enter it. You can write the page first and add the link before publishing.
         </p>
 
         {page?.error && <p className="text-sm text-error">{page.error}</p>}
         {problem && <p className="text-sm text-error">{problem}</p>}
         {note && !problem && <p className="text-sm text-muted-foreground">{note}</p>}
-        {!data.publisherConfigured && (
+        {data && !data.publisherConfigured && (
           <p className="text-sm text-warning">
             Publishing is unavailable until a Netlify token is configured on the server.
           </p>
         )}
 
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => void run('generate')} disabled={working || !projectCompleted} size="sm">
+          <Button onClick={() => void run('generate')} disabled={working} size="sm">
             {working ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
-            {page?.hasDraft ? 'Rewrite page' : 'Write page'}
+            {page?.hasDraft ? 'Rewrite page' : 'Generate landing page'}
           </Button>
 
           {page?.hasDraft && (
@@ -215,11 +284,11 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
           {page?.hasDraft && (
             <Button
               onClick={() => void run('publish')}
-              disabled={working || !data.canPublish}
+              disabled={working || !checkoutUrl.trim() || !data?.publisherConfigured}
               variant="secondary"
               size="sm"
               title={
-                !data.publisherConfigured
+                !data?.publisherConfigured
                   ? 'Netlify is not configured on the server'
                   : !checkoutUrl.trim()
                     ? 'Add your checkout link first'
@@ -227,7 +296,7 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
               }
             >
               <Rocket className="size-4" />
-              {page.url ? 'Republish' : 'Publish'}
+              {page.url ? 'Republish' : 'Publish to Netlify'}
             </Button>
           )}
 

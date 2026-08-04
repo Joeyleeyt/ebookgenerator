@@ -34,6 +34,7 @@ interface ProjectRow {
     landingCompareAtCents?: number;
     landingCurrency?: string;
     landingGuaranteeDays?: number;
+    landingTemplateUrl?: string;
   };
   pending_counts: Record<string, number>;
   version: number;
@@ -80,6 +81,7 @@ export class SupabaseProjectRepository implements ProjectRepository {
           : {}),
         landingCurrency: project.options.landingCurrency,
         landingGuaranteeDays: project.options.landingGuaranteeDays,
+        ...(project.options.landingTemplateUrl ? { landingTemplateUrl: project.options.landingTemplateUrl } : {}),
       },
       pending_counts: project.pendingCounts,
       error: project.error ?? null,
