@@ -22,10 +22,19 @@ export class GeneratedPageAssembler implements LandingPageAssembler {
     const primary = model.products.find((p) => p.featured) ?? model.products[0];
     const title = primary?.title ?? model.siteName;
 
-    const body = fillPlaceholders(page.bodyHtml, {
+    // The cover is a base64 data URI; embedding it once per {{COVER}} would
+    // multiply page weight by the occurrence count. The first slot carries the
+    // real image; later slots are lightweight copies the page's own script
+    // fills from the first (see OBSERVER_SCRIPT).
+    const bodyWithCovers = page.bodyHtml
+      .split(PLACEHOLDERS.cover)
+      .map((part, i) => (i === 0 ? part : `${i === 1 ? coverMarkup(primary) : coverCopyMarkup(primary)}${part}`))
+      .join('');
+
+    const body = fillPlaceholders(bodyWithCovers, {
       cta: ctaMarkup(primary, model),
       price: priceMarkup(primary, model),
-      cover: coverMarkup(primary),
+      cover: '',
       contents: contentsMarkup(primary),
       guarantee: guaranteeMarkup(model),
       paymentMarks: paymentMarkup(model),
@@ -173,6 +182,13 @@ function priceMarkup(p: LandingProduct | undefined, model: LandingPageModel): st
       : '') +
     '</span>'
   );
+}
+
+/** A later cover slot: no data URI of its own; the page script fills it. */
+function coverCopyMarkup(p: LandingProduct | undefined): string {
+  if (!p) return '';
+  if (p.coverDataUri) return `<img class="cover" data-cover-copy alt="${esc(p.title)} cover">`;
+  return `<span class="cover cover-fallback">${esc(p.title)}</span>`;
 }
 
 function coverMarkup(p: LandingProduct | undefined): string {

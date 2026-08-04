@@ -60,13 +60,40 @@ describe('validateGeneratedPage', () => {
 
     // How the model fakes a three-tier offer grid out of one book: repeat the
     // buy button and price into invented "editions".
-    it('caps the buy button and price so one product cannot become a tier grid', () => {
+    it('caps runaway repetition while allowing template-faithful repeats', () => {
+      // A template legitimately repeats its buy button and cover several times —
+      // production run 1489a338 was rejected for exactly that. Only true spam trips.
+      const faithful = page({
+        bodyHtml: page().bodyHtml + '{{CTA_BUTTON}}{{CTA_BUTTON}}{{CTA_BUTTON}}{{COVER}}{{COVER}}{{PRICE}}',
+      });
+      expect(validateGeneratedPage(faithful).isOk()).toBe(true);
+
       const spam = page({
-        bodyHtml: page().bodyHtml + '{{CTA_BUTTON}}{{CTA_BUTTON}}{{CTA_BUTTON}}{{PRICE}}',
+        bodyHtml: page().bodyHtml + '{{CTA_BUTTON}}'.repeat(5) + '{{COVER}}'.repeat(6) + '{{PRICE}}'.repeat(2),
       });
       const errors = errorsOf(spam);
-      expect(errors.some((e) => e.includes('only one product'))).toBe(true);
-      expect(errors.some((e) => e.includes('at most twice'))).toBe(true);
+      expect(errors.some((e) => e.includes('{{CTA_BUTTON}} may appear at most 6'))).toBe(true);
+      expect(errors.some((e) => e.includes('{{COVER}} may appear at most 6'))).toBe(true);
+      expect(errors.some((e) => e.includes('{{PRICE}} may appear at most 3'))).toBe(true);
+    });
+
+    // Copying a template's accent-highlight inside a headline wraps approved
+    // words in a span. Production run 1489a338 was rejected for this; the check
+    // must see words, not markup.
+    it('accepts approved copy wrapped in styling tags', () => {
+      const p = page({
+        bodyHtml: page().bodyHtml.replace(
+          '<h1>A headline</h1>',
+          '<h1>A <span class="hl">headline</span></h1>',
+        ),
+      });
+      expect(validateGeneratedPage(p, { requiredText: ['A headline'] }).isOk()).toBe(true);
+    });
+
+    it('still rejects changed words', () => {
+      const p = page();
+      const result = validateGeneratedPage(p, { requiredText: ['A better headline'] });
+      expect(result.isFail()).toBe(true);
     });
 
     // An unrecognised token would reach a buyer as literal braces on the page.

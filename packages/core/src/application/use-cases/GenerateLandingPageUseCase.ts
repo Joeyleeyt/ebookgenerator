@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Result } from '../../domain/shared/Result.js';
 import { ProjectId } from '../../domain/project/ProjectId.js';
 import { LandingPage, LandingPageId, type LandingCopy } from '../../domain/landing/LandingPage.js';
+import { normalizeBookTitle } from '../../domain/project/GenerationOptions.js';
 import { Palette, parseHexColor } from '../../domain/landing/Palette.js';
 import type { ProjectRepository } from '../ports/repositories/ProjectRepository.js';
 import type { BookRepository } from '../ports/repositories/BookRepository.js';
@@ -150,7 +151,10 @@ export class GenerateLandingPageUseCase {
     const book = await this.books.findByProject(projectId);
     if (!book) return Result.fail('Book not found');
     const strategy = await this.knowledge.getBookStrategy(projectId);
-    const title = book.title ?? project.options.bookTitle ?? strategy?.title ?? 'Untitled';
+    // Older projects stored the title in raw filename form; normalize on the
+    // way out so the page never shows THE_DIY_REPAIR_BIBLE_… in its masthead.
+    const title =
+      normalizeBookTitle(book.title ?? project.options.bookTitle ?? strategy?.title ?? undefined) ?? 'Untitled';
     const chapterTitles = book.chapters.map((c) => c.title);
     if (chapterTitles.length === 0) return Result.fail('Book has no chapters yet');
 
@@ -368,7 +372,7 @@ export class GenerateLandingPageUseCase {
         messages: [{ role: 'user', content: prompt.user }],
         // A full page of markup and CSS. Generous on purpose: a ceiling that
         // truncates the completion mid-JSON burns the attempt AND the repair.
-        maxTokens: 24_000,
+        maxTokens: 30_000,
         cacheControl: { systemPrefix: true },
         metadata: { projectId: input.projectId, stage: 'landing-layout' },
       });

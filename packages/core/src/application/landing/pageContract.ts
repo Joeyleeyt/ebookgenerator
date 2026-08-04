@@ -90,16 +90,16 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   if (occurrences(bodyHtml, PLACEHOLDERS.legal) > 1) {
     errors.push(`${PLACEHOLDERS.legal} must appear exactly once, in the footer.`);
   }
-  if (occurrences(bodyHtml, PLACEHOLDERS.cover) > 2) {
-    errors.push(`${PLACEHOLDERS.cover} may appear at most twice.`);
+  // Caps sized for template copying — a reference page legitimately repeats its
+  // cover and buy button many times. The caps only stop true runaway repetition.
+  if (occurrences(bodyHtml, PLACEHOLDERS.cover) > 6) {
+    errors.push(`${PLACEHOLDERS.cover} may appear at most 6 times.`);
   }
-  // There is one product. A page spraying the buy button and price everywhere is
-  // how the model fakes a multi-tier offer grid out of a single book.
-  if (occurrences(bodyHtml, PLACEHOLDERS.cta) > 4) {
-    errors.push(`${PLACEHOLDERS.cta} may appear at most 4 times — there is only one product.`);
+  if (occurrences(bodyHtml, PLACEHOLDERS.cta) > 6) {
+    errors.push(`${PLACEHOLDERS.cta} may appear at most 6 times.`);
   }
-  if (occurrences(bodyHtml, PLACEHOLDERS.price) > 2) {
-    errors.push(`${PLACEHOLDERS.price} may appear at most twice; the button's label already ends with the price.`);
+  if (occurrences(bodyHtml, PLACEHOLDERS.price) > 3) {
+    errors.push(`${PLACEHOLDERS.price} may appear at most 3 times; the button's label already ends with the price.`);
   }
   // An unknown {{TOKEN}} would ship to a buyer as literal braces.
   const known = new Set<string>(Object.values(PLACEHOLDERS));
@@ -180,11 +180,19 @@ function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
-/** Whitespace-insensitive comparison, and tolerant of typographic quotes. */
+/**
+ * Comparison that sees only the WORDS: tags are stripped and basic entities
+ * decoded before comparing. Copying a template's inline styling — an accent
+ * span around a phrase inside the headline — is legitimate; changing the words
+ * is not, and this is what tells those apart.
+ */
 function collapse(value: string): string {
   return value
-    .replace(/[‘’]/g, "'")
-    .replace(/[“”]/g, '"')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&#39;|&apos;|[‘’]/g, "'")
+    .replace(/&quot;|[“”]/g, '"')
+    .replace(/&nbsp;/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }

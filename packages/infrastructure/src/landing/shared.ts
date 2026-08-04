@@ -96,6 +96,14 @@ export const OBSERVER_SCRIPT = `(function () {
     }
   }
 
+  /* Later cover slots reuse the first cover's bytes instead of embedding the
+     data URI once per slot — six embedded copies would be a multi-MB page. */
+  var coverSrc = (document.querySelector('img.cover[src^="data:"]') || {}).src;
+  if (coverSrc) {
+    var copies = document.querySelectorAll('img[data-cover-copy]');
+    for (var c = 0; c < copies.length; c++) copies[c].src = coverSrc;
+  }
+
   /* The deadline is a real stored date, never "now + 24h" — a timer that resets
      on every visit is a false urgency claim, and an actionable one. */
   var promo = document.querySelector('[data-ends]');
