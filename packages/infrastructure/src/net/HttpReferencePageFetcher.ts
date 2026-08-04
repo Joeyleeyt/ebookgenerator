@@ -208,6 +208,7 @@ export function digest(url: string, html: string, externalCss = ''): ReferencePa
     title: textOf(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '') || url,
     headings: headings.slice(0, 60),
     text,
+    markup: pruneMarkup(html),
     style: {
       serifHeadings: hasSerifFont(css),
       headingFont: pickHeadingFont(css),
@@ -219,6 +220,38 @@ export function digest(url: string, html: string, externalCss = ''): ReferencePa
       measurePx: readMeasure(css),
     },
   };
+}
+
+/** The template markup budget: ~9k tokens — enough for a full landing page DOM. */
+const MAX_MARKUP_CHARS = 36_000;
+
+/**
+ * The reference's body markup with everything that isn't TEMPLATE removed:
+ * scripts, styles, svg path data, embedded data-URIs, framework attributes.
+ * What survives — the element tree, class names (on utility-CSS sites the
+ * classes ARE the design), structural attributes — is what "copy the template"
+ * actually needs.
+ */
+export function pruneMarkup(html: string): string {
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  let m = bodyMatch?.[1] ?? html;
+  m = m
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(script|style|noscript|template|iframe)\b[\s\S]*?<\/\1>/gi, '')
+    .replace(/<link\b[^>]*>/gi, '')
+    // Icon innards are noise at template scale; keep the slot, drop the paths.
+    .replace(/(<svg\b[^>]*>)[\s\S]*?(<\/svg>)/gi, '$1$2')
+    // Embedded images can be megabytes of base64.
+    .replace(/(src|href|srcset)="data:[^"]*"/gi, '$1="#"')
+    .replace(/(<img\b[^>]*?)\bsrc="[^"]*"/gi, '$1src="#"')
+    .replace(/\s(?:data-[\w-]+|aria-hidden|xmlns|viewBox|fill|stroke[\w-]*|d)="[^"]*"/gi, '')
+    .replace(/>\s+</g, '><')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (m.length > MAX_MARKUP_CHARS) {
+    m = `${m.slice(0, MAX_MARKUP_CHARS)}\n<!-- TRUNCATED: the tail of the page was cut for size -->`;
+  }
+  return m;
 }
 
 function textOf(fragment: string): string {

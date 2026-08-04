@@ -204,3 +204,46 @@ describe('digest', () => {
     expect(d.style.accent).toBeNull();
   });
 });
+
+describe('pruneMarkup', () => {
+  const page = `<html><head><script src="a.js"></script></head><body>
+    <!-- built with X -->
+    <div class="hero bg-dark px-6" data-framework-id="abc123">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M3 3l18 18"/><circle cx="4" cy="4" r="2"/></svg>
+      <h1 class="font-serif text-5xl">Big claim</h1>
+      <img src="data:image/png;base64,AAAA" class="cover">
+      <a href="https://checkout.example/x" class="btn">Buy</a>
+    </div>
+    <style>.junk{color:red}</style>
+    <script>track()</script>
+  </body></html>`;
+
+  it('keeps the template skeleton — elements and class names', async () => {
+    const { pruneMarkup } = await import('./HttpReferencePageFetcher.js');
+    const m = pruneMarkup(page);
+    expect(m).toContain('class="hero bg-dark px-6"'); // utility classes ARE the design
+    expect(m).toContain('class="font-serif text-5xl"');
+    expect(m).toContain('Big claim');
+    expect(m).toContain('class="btn"');
+  });
+
+  it('strips everything that is not template', async () => {
+    const { pruneMarkup } = await import('./HttpReferencePageFetcher.js');
+    const m = pruneMarkup(page);
+    expect(m).not.toContain('track()');
+    expect(m).not.toContain('.junk');
+    expect(m).not.toContain('built with');
+    expect(m).not.toContain('base64');
+    expect(m).not.toContain('data-framework-id');
+    expect(m).not.toContain('<path'); // icon innards dropped, slot kept
+    expect(m).toContain('<svg');
+  });
+
+  it('caps runaway pages instead of blowing the prompt budget', async () => {
+    const { pruneMarkup } = await import('./HttpReferencePageFetcher.js');
+    const huge = `<body>${'<div class="x">block</div>'.repeat(5000)}</body>`;
+    const m = pruneMarkup(huge);
+    expect(m.length).toBeLessThan(37_000);
+    expect(m).toContain('TRUNCATED');
+  });
+});

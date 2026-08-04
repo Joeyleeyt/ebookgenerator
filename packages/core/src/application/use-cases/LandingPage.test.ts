@@ -259,6 +259,7 @@ const REFERENCE = {
   title: 'The Manual',
   headings: [{ level: 2, text: 'I. The Manual' }],
   text: 'A reference sales page.',
+  markup: '<section class="hero"><h1>x</h1></section>',
   style: { serifHeadings: true, headingFont: 'Playfair Display', grounds: ['#faf7f0'], accent: '#b8860b', numberedSections: true, imageDensity: 0.3, measurePx: 720 },
 };
 

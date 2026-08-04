@@ -8,6 +8,13 @@ export interface ReferencePage {
   headings: Array<{ level: number; text: string }>;
   /** Visible text, collapsed and truncated; enough to read the structure. */
   text: string;
+  /**
+   * The page's actual body markup, pruned (no scripts, styles, svg innards or
+   * embedded data) and size-capped. This is what lets generation COPY the
+   * template rather than reinvent something in its spirit — the client's ask
+   * is "same template, our branding and colours".
+   */
+  markup: string;
   /** Observed visual treatment, read off the page's own stylesheet/markup. */
   style: {
     /** Whether headings use a serif face. */

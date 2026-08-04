@@ -193,14 +193,15 @@ export class GenerateLandingPageUseCase {
 
     // ── palette, from the book's own cover ──
     const cover = await this.loadCover(book.coverImagePath);
-    // The reference page's brand colour, when it was detectable, takes over the
-    // scheme's hue — "match the template" includes looking like it. The cover
-    // still decides light-vs-dark, since the cover is the artwork on the page.
-    const accentSeed = parseHexColor(reference?.style.accent) ?? undefined;
+    // The client's spec is "copy the template, change the branding/colours to
+    // the ebook": the reference contributes the LAYOUT, the book's own cover
+    // contributes the COLOURS. The reference's detected accent is used only
+    // when the book has no readable cover to derive a scheme from.
+    const referenceAccent = parseHexColor(reference?.style.accent) ?? undefined;
     const palette = cover.seed
-      ? Palette.fromSeed(cover.seed, { accentSeed })
-      : accentSeed
-        ? Palette.fromSeed(accentSeed)
+      ? Palette.fromSeed(cover.seed)
+      : referenceAccent
+        ? Palette.fromSeed(referenceAccent)
         : Palette.neutral();
 
     // ── copy, from Claude ──
