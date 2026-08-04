@@ -141,7 +141,7 @@ export class GenerateLandingPageUseCase {
 
   async execute(
     input: GenerateLandingPageInput,
-  ): Promise<Result<{ regenerated: boolean; layout?: 'generated' | 'builtin' }>> {
+  ): Promise<Result<{ regenerated: boolean; layout?: 'generated' | 'builtin'; layoutFailure?: string[] }>> {
     const projectId = ProjectId.from(input.projectId);
     const project = await this.projects.findById(projectId);
     if (!project) return Result.fail('Project not found');
@@ -319,7 +319,11 @@ export class GenerateLandingPageUseCase {
 
     page.setDraft({ copy, palette, html: layout.html, inputHash }, this.clock.now());
     await this.pages.save(page);
-    return Result.ok({ regenerated: true, layout: layout.source });
+    return Result.ok({
+      regenerated: true,
+      layout: layout.source,
+      ...(layout.failure ? { layoutFailure: layout.failure } : {}),
+    });
   }
 
   /**
@@ -338,7 +342,7 @@ export class GenerateLandingPageUseCase {
     bookTitle: string;
     pageCount: number | null;
     pageModel: Parameters<LandingPageRenderer['render']>[0];
-  }): Promise<{ html: string; source: 'generated' | 'builtin' }> {
+  }): Promise<{ html: string; source: 'generated' | 'builtin'; failure?: string[] }> {
     if (!input.reference) {
       return { html: this.renderer.render(input.pageModel), source: 'builtin' };
     }
@@ -348,7 +352,7 @@ export class GenerateLandingPageUseCase {
     const requiredText = [input.copy.headline, input.copy.subheadline, ...input.copy.faqs.map((f) => f.question)];
 
     let repairErrors: string[] | undefined;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       const prompt = LandingLayoutPrompt.build({
         reference: input.reference,
         copy: input.copy,
@@ -361,12 +365,27 @@ export class GenerateLandingPageUseCase {
         model: 'claude-opus-4-8',
         system: prompt.system,
         messages: [{ role: 'user', content: prompt.user }],
-        // A full page of markup and CSS; well above the copy call's ceiling.
-        maxTokens: 16_000,
+        // A full page of markup and CSS. Generous on purpose: a ceiling that
+        // truncates the completion mid-JSON burns the attempt AND the repair.
+        maxTokens: 24_000,
         cacheControl: { systemPrefix: true },
         metadata: { projectId: input.projectId, stage: 'landing-layout' },
       });
-      if (completion.isFail()) break;
+      if (completion.isFail()) {
+        repairErrors = [`AI call failed: ${completion.error.type}`];
+        break;
+      }
+
+      // Truncation is the single most likely failure for a call this large, and
+      // it is invisible downstream — it just looks like broken JSON or an
+      // unbalanced tag. Name it, so the repair round fixes the actual problem.
+      if (completion.value.stopReason === 'max_tokens') {
+        repairErrors = [
+          'Your response was cut off at the output limit. Make it smaller and return the COMPLETE JSON: ' +
+            'keep the stylesheet under 10,000 characters, remove repeated rule blocks, and keep the markup lean.',
+        ];
+        continue;
+      }
 
       const parsed = parseJsonCompletion(completion.value.text, LayoutSchema);
       if (parsed.isFail()) {
@@ -385,7 +404,13 @@ export class GenerateLandingPageUseCase {
       repairErrors = check.error;
     }
 
-    return { html: this.renderer.render(input.pageModel), source: 'builtin' };
+    // The rejection reasons ride along so the worker can log them — a silent
+    // fallback is indistinguishable from success until someone compares pages.
+    return {
+      html: this.renderer.render(input.pageModel),
+      source: 'builtin',
+      ...(repairErrors ? { failure: repairErrors } : {}),
+    };
   }
 
   /**

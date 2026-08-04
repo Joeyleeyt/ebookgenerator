@@ -385,6 +385,15 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
             projectId: p.projectId,
             layout: generated.value.layout ?? 'builtin',
           });
+          // A fallback is invisible on the page itself — it just looks plainer
+          // than the reference. Put the exact rejections in the log so a
+          // 'builtin' result is diagnosable instead of a mystery.
+          if (generated.value.layoutFailure) {
+            container.logger.warn('reference layout rejected — used the built-in template', {
+              projectId: p.projectId,
+              errors: generated.value.layoutFailure,
+            });
+          }
           if (!p.publish) return generated.value;
         }
 
