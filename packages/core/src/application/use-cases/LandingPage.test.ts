@@ -259,7 +259,7 @@ const REFERENCE = {
   title: 'The Manual',
   headings: [{ level: 2, text: 'I. The Manual' }],
   text: 'A reference sales page.',
-  style: { serifHeadings: true, grounds: ['#faf7f0'], accent: '#b8860b', numberedSections: true, imageDensity: 0.3, measurePx: 720 },
+  style: { serifHeadings: true, headingFont: 'Playfair Display', grounds: ['#faf7f0'], accent: '#b8860b', numberedSections: true, imageDensity: 0.3, measurePx: 720 },
 };
 
 /** A layout that satisfies the contract, echoing the approved copy verbatim. */

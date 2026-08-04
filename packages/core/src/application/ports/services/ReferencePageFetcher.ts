@@ -12,6 +12,8 @@ export interface ReferencePage {
   style: {
     /** Whether headings use a serif face. */
     serifHeadings: boolean;
+    /** The named display/heading typeface, e.g. "Playfair Display", when found. */
+    headingFont: string | null;
     /** Distinct background colours used as section grounds, most-used first. */
     grounds: string[];
     /** The most prominent non-neutral colour — usually the CTA. */

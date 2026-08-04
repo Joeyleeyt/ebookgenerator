@@ -98,11 +98,12 @@ const COMPONENT_CSS = `
   }
   .cta:hover { filter: brightness(1.08); }
   .cta:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-  /* Not-yet-active reads as a deliberate ghost button, never as a broken one —
-     dimming the accent to 45% opacity just muddies it into the background. */
+  /* Not-yet-active keeps the REAL button's look, slightly dimmed — the preview
+     should show the page as it will publish, and a dashed ghost reads as a
+     different design rather than a pending link. The note below explains why
+     it is inert. */
   .cta[aria-disabled="true"] {
-    background: transparent; color: var(--muted);
-    border: 1px dashed var(--border); cursor: not-allowed; pointer-events: none;
+    filter: saturate(.7) brightness(.82); cursor: not-allowed; pointer-events: none;
   }
   /* Keeps the explanatory note UNDER its button wherever the button lands —
      in a sticky bar it otherwise wraps beside it as loose text. */

@@ -112,6 +112,12 @@ export const LandingLayoutPrompt = {
           '',
           'Observed treatment:',
           `  headings: ${input.reference.style.serifHeadings ? 'serif' : 'sans-serif'}`,
+          input.reference.style.headingFont
+            ? `  display typeface: "${input.reference.style.headingFont}" — you cannot load fonts, so pick the` +
+              ' SYSTEM stack closest in character (a high-contrast serif → Georgia/"Iowan Old Style"; a geometric' +
+              ' sans → "Avenir Next"/"Century Gothic"/"Helvetica Neue"; a grotesque → "Helvetica Neue"/Arial)' +
+              ' and echo its feel with weight, letter-spacing and case'
+            : '',
           `  section numbering: ${input.reference.style.numberedSections ? 'yes — number the sections the same way' : 'no'}`,
           `  content column: ${input.reference.style.measurePx ? `${input.reference.style.measurePx}px` : 'unspecified'}`,
           `  imagery: ${input.reference.style.imageDensity < 1 ? 'text-led, very few images' : input.reference.style.imageDensity < 4 ? 'balanced' : 'image-led'}`,
@@ -127,6 +133,16 @@ export const LandingLayoutPrompt = {
           'Reproduce this page\'s STRUCTURE, section order, typographic feel and density',
           'for our book. Do not reproduce its words, its prices, its claims, its',
           'testimonials or its statistics.',
+          '',
+          'COMPONENT FIDELITY — copy the reference at the component level, not just the',
+          'section level. Where its text suggests card grids, give cards the same feel:',
+          'radius, borders, an icon at the top. You may draw SMALL inline SVG icons',
+          '(viewBox="0 0 24 24", stroke="currentColor", fill="none", 2-4 simple shapes,',
+          'sized ~28px, coloured via the accent variable) — receipts, carts, wrenches,',
+          'planes, shields. Statistics quoted in the copy belong in a bordered callout',
+          'with the key figure emphasised. FAQ entries are individual rounded cards, not',
+          'bare rules, when the reference styles them that way. Eyebrow labels, big',
+          'display headings, generous card padding — match the reference\'s scale.',
         ].join('\n')
       : [
           '=== NO REFERENCE PAGE ===',

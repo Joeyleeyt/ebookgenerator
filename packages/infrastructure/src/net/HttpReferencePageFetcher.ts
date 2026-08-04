@@ -210,6 +210,7 @@ export function digest(url: string, html: string, externalCss = ''): ReferencePa
     text,
     style: {
       serifHeadings: hasSerifFont(css),
+      headingFont: pickHeadingFont(css),
       grounds: uniqueColors(css).slice(0, 5),
       accent: pickAccent(css),
       // "I." / "01" / "Step 1" leading a heading is the numbering signal.
@@ -243,6 +244,31 @@ function hasSerifFont(css: string): boolean {
     const cleaned = decl.toLowerCase().replace(/sans-serif/g, '');
     return /\bserif\b|georgia|times|garamond|playfair|iowan|baskerville|caslon/.test(cleaned);
   });
+}
+
+const GENERIC_FONTS = new Set([
+  'serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif',
+  'ui-sans-serif', 'ui-monospace', 'inherit', 'initial', 'unset', '-apple-system',
+  'blinkmacsystemfont', 'segoe ui', 'roboto', 'helvetica', 'helvetica neue', 'arial',
+]);
+
+/**
+ * The most-used NAMED typeface — the reference's actual display face, which is
+ * most of what makes its typography recognisable. Generic stacks and the
+ * ubiquitous system faces are skipped: "Playfair Display" is a signal,
+ * "Helvetica" is noise.
+ */
+function pickHeadingFont(css: string): string | null {
+  const counts = new Map<string, number>();
+  for (const decl of css.matchAll(/font-family:\s*([^;}]+)/gi)) {
+    for (const raw of (decl[1] ?? '').split(',')) {
+      const name = raw.trim().replace(/^["']|["']$/g, '');
+      if (!name || name.startsWith('var(')) continue;
+      if (GENERIC_FONTS.has(name.toLowerCase())) continue;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 }
 
 function uniqueColors(css: string): string[] {
