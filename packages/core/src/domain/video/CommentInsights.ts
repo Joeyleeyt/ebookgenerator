@@ -40,6 +40,14 @@ export class CommentInsights extends ValueObject<CommentInsightsProps> {
   get recurringProblems() {
     return this.props.recurringProblems;
   }
+  /**
+   * What stops this audience buying. Exposed for the landing copy, which is the
+   * one place a page can answer an objection before it costs a sale — and which
+   * has never seen this data despite the pipeline producing it since phase 6.
+   */
+  get objections() {
+    return this.props.objections;
+  }
   get inputHash() {
     return this.props.inputHash;
   }

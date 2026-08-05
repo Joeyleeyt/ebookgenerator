@@ -18,6 +18,7 @@ export const QUEUE_NAMES: QueueName[] = [
   'ebook-assemble',
   'export',
   'landing-page',
+  'landing-template',
 ];
 
 /** Per-queue worker settings — concurrency, rate limits, retry attempts. */
@@ -67,4 +68,8 @@ export const QUEUE_CONFIG: Record<QueueName, QueueConfig> = {
   // failure modes here (bad checkout URL, missing Netlify token) are not the
   // kind that a retry fixes, and the book itself is already finished either way.
   'landing-page': { concurrency: 3, attempts: 2 },
+  // One at a time: each run holds a Chromium instance with a full page and six
+  // full-height screenshots in memory. Two attempts, because the common failure
+  // is a slow template rather than an unusable one.
+  'landing-template': { concurrency: 1, attempts: 2 },
 };

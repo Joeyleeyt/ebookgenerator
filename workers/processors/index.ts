@@ -1,6 +1,6 @@
 import type { Worker } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { ProjectJob, VideoJob, WhisperJob, ChapterResearchJob, ChapterJob, PolishChapterJob, ExportJob, ExtraContentJob, LandingPageJob, ExportFormat, ProjectId } from '@yeg/core';
+import { ProjectJob, VideoJob, WhisperJob, ChapterResearchJob, ChapterJob, PolishChapterJob, ExportJob, ExtraContentJob, LandingPageJob, LandingTemplateJob, ExportFormat, ProjectId } from '@yeg/core';
 import type { Container } from '@yeg/config';
 import { makeWorker } from '../runtime/worker-factory.js';
 import { QUEUE_CONFIG } from '@yeg/infrastructure';
@@ -376,6 +376,43 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     handler: async (p) => {
       try {
         if (p.mode === 'generate') {
+          // Which engine runs is decided by whether the project has a cloned
+          // template, and it is reported rather than inferred. v1 chose between
+          // two structurally unrelated renderers based on whether a layout
+          // derivation happened to succeed, and said so only in this log.
+          const project = await container.repositories.projects.findById(ProjectId.from(p.projectId));
+          if (project?.options.landingEngine === 'clone') {
+            const cloned = await useCases.generateClonedLandingPage.execute({
+              projectId: p.projectId,
+              force: true,
+            });
+            if (cloned.isFail()) throw new Error(cloned.error);
+            const blockers = cloned.value.fidelity.findings.filter((f) => f.severity === 'BLOCKER');
+            container.logger.info('🛒 cloned landing page ready', {
+              projectId: p.projectId,
+              engine: 'clone',
+              template: project.options.landingTemplateId,
+              // The number worth watching: how much of the page moved outside
+              // the regions where content was replaced on purpose.
+              drift: cloned.value.fidelity.visual.find((v) => v.width === 1280)?.mismatchRatio ?? null,
+              blockers: blockers.length,
+            });
+            if (blockers.length > 0) {
+              container.logger.warn('cloned page failed verification — it will not publish', {
+                projectId: p.projectId,
+                blockers: blockers.map((f) => `${f.code}: ${f.message}`),
+              });
+            }
+            if (!p.publish) return cloned.value;
+            const publishedClone = await useCases.publishLandingPage.execute({ projectId: p.projectId });
+            if (publishedClone.isFail()) throw new Error(publishedClone.error);
+            container.logger.info('🚀 landing page published', {
+              projectId: p.projectId,
+              url: publishedClone.value.url,
+            });
+            return publishedClone.value;
+          }
+
           const generated = await useCases.generateLandingPage.execute({
             projectId: p.projectId,
             force: true,
@@ -429,6 +466,44 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     },
   });
 
+  /**
+   * Cloning a template site. Once per template, not once per book — and
+   * deliberately its own queue, so a template that cannot be captured fails
+   * visibly on its own row instead of taking a book's page down with it.
+   */
+  const landingTemplate = makeWorker(connection, container, {
+    name: 'landing-template',
+    ...QUEUE_CONFIG['landing-template'],
+    payloadSchema: LandingTemplateJob,
+    handler: async (p) => {
+      const extracted = await useCases.extractTemplate.execute({
+        ownerId: p.ownerId,
+        sourceUrl: p.sourceUrl,
+        attestOwnership: true, // asserted at the API boundary and recorded there
+        force: p.force,
+      });
+      if (extracted.isFail()) throw new Error(extracted.error);
+
+      const report = extracted.value.report;
+      container.logger.info('🧬 template extracted', {
+        templateId: extracted.value.templateId,
+        sourceUrl: p.sourceUrl,
+        sections: report.sectionCount,
+        // How much the page changed when its scripts were removed. This is the
+        // honest cost of cloning, and the first number to look at when a page
+        // comes back looking wrong.
+        cleaningLoss: report.cleaningLoss.find((c) => c.width === 1280)?.mismatchRatio ?? null,
+        fonts: report.fontFidelity,
+        droppedImages: report.droppedImages.length,
+        warnings: report.findings.filter((f) => f.severity === 'WARN').length,
+      });
+      for (const note of report.notes) {
+        container.logger.warn('template extraction note', { templateId: extracted.value.templateId, note });
+      }
+      return extracted.value;
+    },
+  });
+
   return [
     channelIngest,
     videoData,
@@ -447,6 +522,7 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     assemble,
     exportWorker,
     landingPage,
+    landingTemplate,
   ];
 }
 

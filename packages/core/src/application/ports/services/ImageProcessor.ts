@@ -28,4 +28,14 @@ export interface ImageProcessor {
    * this side of the port so the application layer stays free of Node's Buffer.
    */
   downscaleToDataUri(input: { bytes: Uint8Array; maxWidth: number; quality: number }): Promise<Result<string>>;
+
+  /**
+   * The same alpha-safe downscale as `downscaleToDataUri`, returned as bytes.
+   *
+   * For pages that deploy as several files rather than one. A cloned template
+   * ships `index.html` plus `assets/*`, so its cover and logo are files beside
+   * the page rather than base64 inside it — which is also what keeps the page
+   * row small enough to write in one request.
+   */
+  downscaleToBytes(input: { bytes: Uint8Array; maxWidth: number; quality: number }): Promise<Result<ProcessedImage>>;
 }

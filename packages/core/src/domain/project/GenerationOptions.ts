@@ -175,6 +175,16 @@ interface GenerationOptionsProps {
    * the built-in structure.
    */
   landingTemplateUrl?: string | undefined;
+  /**
+   * The CLONED template this page is built from — a `landing_templates` row.
+   *
+   * Distinct from `landingTemplateUrl`, which named a page for a model to
+   * imitate. This names a template that has already been captured, cleaned and
+   * parameterised, so the page is that template with the content swapped rather
+   * than a fresh interpretation of it. Set → the clone engine runs; unset →
+   * the built-in renderer, as before.
+   */
+  landingTemplateId?: string | undefined;
 }
 
 export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
@@ -230,6 +240,7 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
         ? { landingAuthorPhotoPath: props.landingAuthorPhotoPath.trim() }
         : {}),
       ...(props.landingTemplateUrl?.trim() ? { landingTemplateUrl: props.landingTemplateUrl.trim() } : {}),
+      ...(props.landingTemplateId?.trim() ? { landingTemplateId: props.landingTemplateId.trim() } : {}),
     });
   }
 
@@ -288,6 +299,13 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
   }
   get landingTemplateUrl() {
     return this.props.landingTemplateUrl;
+  }
+  get landingTemplateId() {
+    return this.props.landingTemplateId;
+  }
+  /** Which renderer this project's page uses. */
+  get landingEngine(): 'clone' | 'builtin' {
+    return this.props.landingTemplateId ? 'clone' : 'builtin';
   }
   get landingSiblings() {
     return this.props.landingSiblings;

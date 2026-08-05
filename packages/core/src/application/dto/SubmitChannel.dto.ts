@@ -36,6 +36,14 @@ const LandingOptionFields = {
   landingAuthorPhotoPath: z.string().max(400).optional().or(z.literal('')),
   /** Reference sales page this book's layout should follow. */
   landingTemplateUrl: z.string().url().max(2000).optional().or(z.literal('')),
+  /**
+   * A cloned template (`landing_templates.id`) to build this page from.
+   *
+   * Set → the clone engine runs and the page IS that template with its content
+   * swapped. Unset → the built-in renderer, as before. Ownership is checked at
+   * generation time, because this id arrives from the client.
+   */
+  landingTemplateId: z.string().uuid().optional().or(z.literal('')),
 };
 
 export const SubmitChannelDto = z.object({

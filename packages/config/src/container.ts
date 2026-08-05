@@ -28,6 +28,8 @@ import {
   GenerateCoverImageUseCase,
   GenerateIllustrationsUseCase,
   GenerateLandingPageUseCase,
+  GenerateClonedLandingPageUseCase,
+  ExtractTemplateUseCase,
   PublishLandingPageUseCase,
   type DocumentExporter,
 } from '@yeg/core';
@@ -69,6 +71,11 @@ import {
   SupabaseExportArtifactRepository,
   SupabaseLandingPageRepository,
   SupabaseLandingLayoutRepository,
+  SupabaseLandingTemplateRepository,
+  SupabaseTemplateArtifactStore,
+  PuppeteerTemplateCapturer,
+  SharpPageDiffer,
+  TemplateBinder,
   SupabaseIdempotencyStore,
 } from '@yeg/infrastructure';
 import { loadEnv, type Env } from './env.js';
@@ -124,6 +131,17 @@ export function buildContainer(env: Env = loadEnv()) {
   const referenceShots = new PuppeteerReferenceScreenshotter();
   // Inlines the reference's real typefaces when their licence allows it.
   const webFonts = new HttpWebFontFetcher();
+  // ── the clone engine ──
+  // Renders a template site in a real browser and returns its DOM, its CSS, its
+  // assets and its measurements — all describing the SAME page, which is what
+  // the fetcher/screenshotter pair above could never promise.
+  const templateCapturer = new PuppeteerTemplateCapturer();
+  // Stores a cloned template's bytes and makes the page self-contained.
+  const templateArtifacts = new SupabaseTemplateArtifactStore(storage, webFonts);
+  // Fills a parameterised template. Replaces GeneratedPageAssembler on this path.
+  const templateBinder = new TemplateBinder();
+  // Proves nothing but the replaced content moved.
+  const pageDiffer = new SharpPageDiffer();
   const sitePublisher = new NetlifyDeployer(env.NETLIFY_AUTH_TOKEN ?? '', env.NETLIFY_ACCOUNT_SLUG);
   const youtube = new YouTubeDataApiProvider(env.YOUTUBE_API_KEY);
   const transcripts = new YouTubeTranscriptProvider();
@@ -142,6 +160,9 @@ export function buildContainer(env: Env = loadEnv()) {
   // Layouts are captured once per reference template and reused by every book
   // that follows it — see SupabaseLandingLayoutRepository.
   const landingLayouts = new SupabaseLandingLayoutRepository(supabase);
+  // Cloned templates, scoped to the account that extracted them — unlike the
+  // layouts above, a template row is a complete copy of a website.
+  const landingTemplates = new SupabaseLandingTemplateRepository(supabase);
   const idempotency = new SupabaseIdempotencyStore(supabase);
 
   // ── orchestration ──
@@ -201,7 +222,51 @@ export function buildContainer(env: Env = loadEnv()) {
       clock,
       hasher,
     ),
-    publishLandingPage: new PublishLandingPageUseCase(projects, books, landingPages, sitePublisher, clock),
+    /**
+     * The clone engine. Runs instead of `generateLandingPage` whenever the
+     * project has a template selected; the older path stays for projects that
+     * have none, which is still the default for single-book pages.
+     */
+    generateClonedLandingPage: new GenerateClonedLandingPageUseCase(
+      projects,
+      books,
+      knowledge,
+      channels,
+      artifacts,
+      landingPages,
+      landingTemplates,
+      templateArtifacts,
+      templateBinder,
+      templateCapturer,
+      pageDiffer,
+      ai,
+      colorSampler,
+      imageFetcher,
+      imageProcessor,
+      storage,
+      ids,
+      clock,
+      hasher,
+    ),
+    extractTemplate: new ExtractTemplateUseCase(
+      landingTemplates,
+      templateCapturer,
+      templateArtifacts,
+      pageDiffer,
+      ai,
+      ids,
+      clock,
+    ),
+    publishLandingPage: new PublishLandingPageUseCase(
+      projects,
+      books,
+      landingPages,
+      sitePublisher,
+      clock,
+      landingTemplates,
+      templateArtifacts,
+      storage,
+    ),
   };
 
   return {
@@ -216,7 +281,17 @@ export function buildContainer(env: Env = loadEnv()) {
     idempotency,
     orchestrator,
     sitePublisher,
-    repositories: { projects, videos, channels, books, knowledge, artifacts, landingPages, landingLayouts },
+    repositories: {
+      projects,
+      videos,
+      channels,
+      books,
+      knowledge,
+      artifacts,
+      landingPages,
+      landingLayouts,
+      landingTemplates,
+    },
     useCases,
   };
 }

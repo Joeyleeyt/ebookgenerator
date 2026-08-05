@@ -1,0 +1,251 @@
+import { Result } from '../../domain/shared/Result.js';
+import {
+  CORE_PLACEHOLDERS,
+  TOKEN_RE,
+  kindFor,
+  splitRepeaterField,
+  type PlaceholderKind,
+} from '../../domain/landing/PlaceholderVocabulary.js';
+
+/**
+ * Substitutes one book's content into a parameterised template.
+ *
+ * Escaping is a property of the token's KIND, not of the call site. That is the
+ * whole point of this module: the previous pipeline made escaping a call-site
+ * decision and grew the hole you would expect — `fillCopySlots` wrote model
+ * prose into markup raw while every other string in the codebase went through
+ * `esc()`, so an `&` or a `<` in a headline corrupted the page.
+ *
+ * Nothing here parses HTML. It does not need to: the tokens were placed by a
+ * DOM operation that already knows each one's context, so the kind carries the
+ * context with it.
+ */
+
+export interface BindValues {
+  /** Single-value tokens, by key. */
+  scalars: Record<string, string>;
+  /** Repeating regions: one record per item, keyed by field name. */
+  repeats: Record<string, Array<Record<string, string>>>;
+  /**
+   * Values for `html`-kind tokens.
+   *
+   * Separate from `scalars` on purpose. An `html` token writes unescaped markup,
+   * so it must be impossible to route model output into one by accident —
+   * putting them in their own map means doing so takes a deliberate act rather
+   * than a typo in a key name.
+   */
+  trustedHtml?: Record<string, string> | undefined;
+}
+
+export interface BindOptions {
+  /**
+   * Tokens whose absence is fatal rather than merely empty. Normally the
+   * required core vocabulary; passed in so a preview can bind without a
+   * checkout URL.
+   */
+  required?: readonly string[] | undefined;
+}
+
+export interface BindOutcome {
+  html: string;
+  /** Keys the template asked for that had no value. */
+  unresolved: string[];
+  /** Optional image nodes removed because no value was supplied. */
+  removedOptional: string[];
+}
+
+/** Escapes for a text node. Quotes are harmless here and left readable. */
+export function escapeText(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Escapes for a quoted attribute value. */
+export function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * A `src` must resolve to something the deploy actually ships. A remote URL
+ * would make the published page depend on someone else's server — and on the
+ * template owner's server in particular, which is how a cloned page ends up
+ * hotlinking the site it was copied from.
+ */
+function safeSrc(value: string): string | null {
+  const v = value.trim();
+  if (v.startsWith('assets/') || v.startsWith('./assets/')) return v;
+  if (v.startsWith('data:image/')) return v;
+  return null;
+}
+
+/**
+ * An `href` must be https. The checkout URL is the one link on the page that
+ * moves money, and it is written in verbatim — never composed, never rewritten.
+ */
+function safeHref(value: string): string | null {
+  const v = value.trim();
+  if (!v) return null;
+  if (!/^https:\/\//i.test(v)) return null;
+  return v;
+}
+
+function renderScalar(key: string, kind: PlaceholderKind, raw: string): Result<string, string> {
+  switch (kind) {
+    case 'text':
+      return Result.ok(escapeText(raw));
+    case 'alt':
+      return Result.ok(escapeAttr(raw));
+    case 'src': {
+      const safe = safeSrc(raw);
+      return safe
+        ? Result.ok(escapeAttr(safe))
+        : Result.fail(`{{${key}}} must be a local asset path or a data: image, not "${raw.slice(0, 60)}".`);
+    }
+    case 'href': {
+      const safe = safeHref(raw);
+      return safe
+        ? Result.ok(escapeAttr(safe))
+        : Result.fail(`{{${key}}} must be an https URL, not "${raw.slice(0, 60)}".`);
+    }
+    case 'html':
+      // Reached only for a key resolved from `trustedHtml`; see bind().
+      return Result.ok(raw);
+  }
+}
+
+/**
+ * Matches one repeater's markup. Deliberately refuses to match across a nested
+ * `<template>`, so a repeater inside a repeater is expanded innermost-first by
+ * the loop in `expandRepeaters` rather than swallowed whole by a greedy match.
+ */
+const REPEAT_RE = /<template\s+data-repeat="([^"]+)"\s*>((?:(?!<\/?template\b)[\s\S])*)<\/template>/;
+
+function expandRepeaters(html: string, values: BindValues, errors: string[], unresolved: string[]): string {
+  let out = html;
+  // Bounded: each pass removes at least one <template>, and a template that
+  // somehow survived would otherwise spin here forever.
+  for (let guard = 0; guard < 200; guard++) {
+    const match = REPEAT_RE.exec(out);
+    if (!match) break;
+    const [whole, key = '', inner = ''] = match;
+    const items = values.repeats[key];
+
+    if (!items || items.length === 0) {
+      // No content for this region: the region disappears rather than rendering
+      // an empty card. Recorded so the fidelity report can say a section came
+      // back thinner than the template's.
+      unresolved.push(key);
+      out = out.replace(whole, '');
+      continue;
+    }
+
+    const rendered = items
+      .map((item) =>
+        inner.replace(TOKEN_RE, (token: string, tokenKey = '') => {
+          const field = splitRepeaterField(tokenKey);
+          // A token from a different region inside this one is a mapping bug,
+          // not something to paper over — leave it for the residual-token check.
+          if (!field || field.key !== key) return token;
+          const raw = item[field.field];
+          if (raw === undefined) {
+            unresolved.push(tokenKey);
+            return '';
+          }
+          const kind = kindFor(tokenKey) ?? 'text';
+          const value = renderScalar(tokenKey, kind, raw);
+          if (value.isFail()) {
+            errors.push(value.error);
+            return '';
+          }
+          return value.value;
+        }),
+      )
+      .join('');
+
+    out = out.replace(whole, rendered);
+  }
+  return out;
+}
+
+/**
+ * Drops void elements marked optional when no value was supplied.
+ *
+ * Only void elements (`<img>`, `<source>`) are handled, and that is all the
+ * real cases need: the optional slots are the author portrait and the brand
+ * mark, both `<img>`. A non-void optional node blanks its text instead — noted
+ * here because it is a real limitation rather than an oversight.
+ */
+function dropOptional(html: string, key: string): { html: string; removed: boolean } {
+  const re = new RegExp(`<(img|source)\\b[^>]*\\bdata-optional="${key}"[^>]*>`, 'gi');
+  const next = html.replace(re, '');
+  return { html: next, removed: next !== html };
+}
+
+export function bindTemplate(html: string, values: BindValues, options: BindOptions = {}): Result<BindOutcome, string[]> {
+  const errors: string[] = [];
+  const unresolved: string[] = [];
+  const removedOptional: string[] = [];
+  const required = new Set(options.required ?? []);
+
+  let out = expandRepeaters(html, values, errors, unresolved);
+
+  // Optional images with no value are removed BEFORE substitution, so their
+  // src token never has to resolve to a placeholder image.
+  for (const [key, spec] of Object.entries(CORE_PLACEHOLDERS)) {
+    if (spec.kind !== 'src' || spec.required) continue;
+    if (values.scalars[key]) continue;
+    const dropped = dropOptional(out, key);
+    if (dropped.removed) removedOptional.push(key);
+    out = dropped.html;
+  }
+
+  out = out.replace(TOKEN_RE, (token: string, key = '') => {
+    const kind = kindFor(key);
+    if (!kind) {
+      errors.push(`Unknown token ${token} in the template.`);
+      return '';
+    }
+
+    // An `html` token reads ONLY from the trusted map. A key that appears in
+    // `scalars` instead is ignored rather than promoted — that asymmetry is
+    // what makes routing model prose into unescaped markup impossible.
+    if (kind === 'html') {
+      const trusted = values.trustedHtml?.[key];
+      if (trusted === undefined) {
+        if (required.has(key)) errors.push(`{{${key}}} is required and is system-rendered, but no value was supplied.`);
+        unresolved.push(key);
+        return '';
+      }
+      return trusted;
+    }
+
+    const raw = values.scalars[key];
+    if (raw === undefined || raw === '') {
+      if (required.has(key)) errors.push(`{{${key}}} is required but no value was supplied.`);
+      unresolved.push(key);
+      // An unresolved href would otherwise leave `href=""`, which reloads the
+      // page when clicked. `#` is inert.
+      return kind === 'href' ? '#' : '';
+    }
+
+    const rendered = renderScalar(key, kind, raw);
+    if (rendered.isFail()) {
+      errors.push(rendered.error);
+      return '';
+    }
+    return rendered.value;
+  });
+
+  // Extraction-time scaffolding never reaches a buyer.
+  out = out.replace(/\s+data-tpl="[^"]*"/g, '').replace(/\s+data-optional="[^"]*"/g, '');
+
+  const residual = out.match(/\{\{[^}]{0,60}\}\}/);
+  if (residual) errors.push(`A token survived binding and would ship to a buyer: ${residual[0]}`);
+
+  if (errors.length > 0) return Result.fail(errors);
+  return Result.ok({ html: out, unresolved: [...new Set(unresolved)], removedOptional });
+}

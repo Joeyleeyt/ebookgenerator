@@ -41,6 +41,9 @@ export * from './domain/export/ExportArtifact.js';
 export * from './domain/landing/LandingPage.js';
 export * from './domain/landing/Palette.js';
 export * from './domain/landing/LandingTemplate.js';
+export * from './domain/landing/PlaceholderVocabulary.js';
+export * from './domain/landing/TemplateManifest.js';
+export * from './domain/landing/ThemeAdaptation.js';
 export * from './domain/landing/fontStacks.js';
 
 // ── Application: ports ──────────────────────────────────────────────────────
@@ -57,6 +60,7 @@ export * from './application/ports/repositories/KnowledgeRepository.js';
 export * from './application/ports/repositories/ExportArtifactRepository.js';
 export * from './application/ports/repositories/LandingPageRepository.js';
 export * from './application/ports/repositories/LandingLayoutRepository.js';
+export * from './application/ports/repositories/LandingTemplateRepository.js';
 export * from './application/ports/services/AiTextGenerator.js';
 export * from './application/ports/services/YouTubeMetadataProvider.js';
 export * from './application/ports/services/TranscriptProvider.js';
@@ -77,6 +81,10 @@ export * from './application/ports/services/ReferenceScreenshotter.js';
 export * from './application/ports/services/WebFontFetcher.js';
 export * from './application/ports/services/RemoteImageFetcher.js';
 export * from './application/ports/services/LandingPageAssembler.js';
+export * from './application/ports/services/LandingPageBinder.js';
+export * from './application/ports/services/TemplateCapturer.js';
+export * from './application/ports/services/TemplateArtifactStore.js';
+export * from './application/ports/services/PageDiffer.js';
 
 // ── Application: dto / errors / pipeline ────────────────────────────────────
 export * from './application/dto/SubmitChannel.dto.js';
@@ -84,6 +92,8 @@ export * from './application/dto/jobs.dto.js';
 export * from './application/errors.js';
 export * from './application/pipeline/PipelineOrchestrator.js';
 export * from './application/landing/pageContract.js';
+export * from './application/landing/templateContract.js';
+export * from './application/landing/bindTemplate.js';
 
 // ── Application: use cases ──────────────────────────────────────────────────
 export * from './application/use-cases/SubmitChannelUseCase.js';
@@ -114,4 +124,6 @@ export * from './application/use-cases/GenerateFrontBackMatterUseCase.js';
 export * from './application/use-cases/GenerateCoverImageUseCase.js';
 export * from './application/use-cases/GenerateIllustrationsUseCase.js';
 export * from './application/use-cases/GenerateLandingPageUseCase.js';
+export * from './application/use-cases/GenerateClonedLandingPageUseCase.js';
+export * from './application/use-cases/ExtractTemplateUseCase.js';
 export * from './application/use-cases/PublishLandingPageUseCase.js';

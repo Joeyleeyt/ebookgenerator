@@ -224,7 +224,7 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   // under a row of differently-priced products, which reads as a fourth,
   // nameless offer.
   if (bodyHtml.includes(PLACEHOLDERS.offerGrid)) {
-    for (const section of bodyHtml.split(/<section\b/i)) {
+    for (const section of sectionBodies(bodyHtml)) {
       if (!section.includes(PLACEHOLDERS.offerGrid)) continue;
       for (const token of [PLACEHOLDERS.price, PLACEHOLDERS.cta] as string[]) {
         if (section.includes(token)) {
@@ -427,6 +427,34 @@ export function fillCopySlots(bodyHtml: string, values: Record<string, string>):
 
 function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
+}
+
+/**
+ * The contents of each `<section>`, bounded by its OWN closing tag.
+ *
+ * Splitting on the opening tag alone runs every chunk to the start of the NEXT
+ * section, which silently annexes whatever follows the last one — a closing
+ * call to action wrapped in a `<div>`, and the whole `<footer>`. On a page
+ * whose offer grid IS the final section — which is how the three-book
+ * reference is built — that read a perfectly placed closing CTA as a loose
+ * price sitting beside the grid. All three layout attempts were rejected for
+ * it, the repair round kept telling the model to move a placeholder that was
+ * already where it belonged, and the page fell back to the built-in template.
+ *
+ * A nested section ends its parent's chunk early, so a placeholder after the
+ * inner one closes is missed. That direction is deliberate: this rule rejects
+ * an entire layout, so failing to flag costs a loose price on one page, while
+ * flagging wrongly costs every page its template.
+ */
+function sectionBodies(bodyHtml: string): string[] {
+  return bodyHtml
+    .split(/<section\b/i)
+    // Anything before the first <section> belongs to no section at all.
+    .slice(1)
+    .map((chunk) => {
+      const end = chunk.search(/<\/section\s*>/i);
+      return end === -1 ? chunk : chunk.slice(0, end);
+    });
 }
 
 /**

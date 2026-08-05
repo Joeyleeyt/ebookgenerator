@@ -161,6 +161,25 @@ describe('validateGeneratedPage', () => {
       expect(errors.some((e) => e.includes('same section as {{OFFER_GRID}}'))).toBe(true);
     });
 
+    // The three-book reference ends on its offer grid, so the closing call to
+    // action and the footer follow the last </section>. Bounded on the opening
+    // tag alone they were read as sitting INSIDE the grid's section, and every
+    // layout attempt was rejected for a placeholder that was already where the
+    // repair round kept telling the model to put it.
+    it('allows a closing price and button after the offer grid section closes', () => {
+      const p = page({
+        bodyHtml:
+          '<section data-section="hero"><h1>A headline</h1>{{COVER}}</section>' +
+          '<section data-section="inside"><h2>Inside</h2>{{BOOK_BREAKDOWN}}</section>' +
+          '<section data-section="faq"><h2>Questions</h2></section>' +
+          '<section data-section="order"><h2>Order</h2>{{OFFER_GRID}}</section>' +
+          '<div class="last-call"><h2>Last call</h2>{{PRICE}}{{CTA_BUTTON}}</div>' +
+          '<footer>{{FOOTER_LEGAL}}</footer>',
+      });
+      const errors = (validateGeneratedPage(p, { productCount: 3 }) as { error?: string[] }).error ?? [];
+      expect(errors.some((e) => e.includes('same section as {{OFFER_GRID}}'))).toBe(false);
+    });
+
     it('caps the book breakdown at one placement', () => {
       const p = page({ bodyHtml: page().bodyHtml + '{{BOOK_BREAKDOWN}}'.repeat(2) });
       expect(errorsOf(p).some((e) => e.includes('{{BOOK_BREAKDOWN}} may appear at most once'))).toBe(true);

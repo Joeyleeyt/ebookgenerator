@@ -4,7 +4,11 @@ import {
   LandingPageId,
   Palette,
   ProjectId,
+  type LandingBinding,
   type LandingCopy,
+  type LandingEngine,
+  type LandingFidelity,
+  type LandingPageAsset,
   type LandingPageRepository,
   type LandingPageState,
 } from '@yeg/core';
@@ -22,6 +26,11 @@ interface LandingPageRow {
   url: string | null;
   input_hash: string | null;
   error: string | null;
+  engine: string | null;
+  template_id: string | null;
+  binding: LandingBinding | null;
+  assets: LandingPageAsset[] | null;
+  fidelity: LandingFidelity | null;
   created_at: string;
   updated_at: string;
 }
@@ -76,6 +85,11 @@ export class SupabaseLandingPageRepository implements LandingPageRepository {
         url: props.url,
         input_hash: props.inputHash,
         error: props.error,
+        engine: props.engine,
+        template_id: props.templateId,
+        binding: props.binding,
+        assets: props.assets,
+        fidelity: props.fidelity,
         updated_at: props.updatedAt.toISOString(),
       },
       { onConflict: 'project_id' },
@@ -112,6 +126,14 @@ export class SupabaseLandingPageRepository implements LandingPageRepository {
         url: row.url,
         inputHash: row.input_hash,
         error: row.error,
+        // Rows written before 0013 have no engine column value; they were all
+        // produced by the built-in renderer or the retired layout path, and
+        // neither carries a template.
+        engine: (row.engine as LandingEngine | null) ?? 'builtin',
+        templateId: row.template_id,
+        binding: row.binding,
+        assets: row.assets ?? [],
+        fidelity: row.fidelity,
         createdAt: new Date(row.created_at),
         updatedAt: new Date(row.updated_at),
       },

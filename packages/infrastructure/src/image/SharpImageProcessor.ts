@@ -21,6 +21,16 @@ export class SharpImageProcessor implements ImageProcessor {
   }
 
   async downscaleToDataUri(input: { bytes: Uint8Array; maxWidth: number; quality: number }): Promise<Result<string>> {
+    const processed = await this.downscaleToBytes(input);
+    if (processed.isFail()) return Result.fail(processed.error);
+    return Result.ok(`data:image/webp;base64,${Buffer.from(processed.value.bytes).toString('base64')}`);
+  }
+
+  async downscaleToBytes(input: {
+    bytes: Uint8Array;
+    maxWidth: number;
+    quality: number;
+  }): Promise<Result<ProcessedImage>> {
     try {
       // WebP rather than mozjpeg: it keeps the alpha channel that logos and
       // transparent cover art rely on, and lands ~30% smaller at the same
@@ -29,7 +39,7 @@ export class SharpImageProcessor implements ImageProcessor {
         .resize({ width: input.maxWidth, withoutEnlargement: true })
         .webp({ quality: input.quality })
         .toBuffer();
-      return Result.ok(`data:image/webp;base64,${out.toString('base64')}`);
+      return Result.ok({ bytes: new Uint8Array(out), contentType: 'image/webp' });
     } catch (e) {
       return Result.fail(e instanceof Error ? e.message : String(e));
     }

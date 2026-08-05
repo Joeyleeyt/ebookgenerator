@@ -137,8 +137,52 @@ interface LandingPageProps {
   /** Hash of every generation input; an unchanged hash short-circuits a re-run. */
   inputHash: string | null;
   error: string | null;
+  /**
+   * Which engine produced this page.
+   *
+   * `clone` — the template site's own DOM and CSS, with content swapped.
+   * `builtin` — the hand-written fallback, used when a project has no template.
+   *
+   * Recorded because it decides what the page IS, and because the previous
+   * system chose silently: which of two structurally unrelated renderers ran
+   * depended on whether a layout derivation had happened to succeed, was logged
+   * once in the worker, and was invisible to the person looking at the result.
+   */
+  engine: LandingEngine;
+  /** The cloned template this page was bound from. Null on the builtin engine. */
+  templateId: string | null;
+  /**
+   * The values poured into the template's slots.
+   *
+   * Kept so one headline can be corrected and the page re-bound without asking
+   * Claude to rewrite the whole thing.
+   */
+  binding: LandingBinding | null;
+  /** What this page's deploy must ship alongside index.html. */
+  assets: LandingPageAsset[];
+  /** The post-bind verification report; publishing is gated on it. */
+  fidelity: LandingFidelity | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export type LandingEngine = 'clone' | 'builtin';
+
+export interface LandingBinding {
+  scalars: Record<string, string>;
+  repeats: Record<string, Array<Record<string, string>>>;
+}
+
+export interface LandingPageAsset {
+  sitePath: string;
+  storagePath: string;
+  contentType: string;
+}
+
+export interface LandingFidelity {
+  findings: Array<{ severity: 'BLOCKER' | 'WARN' | 'INFO'; code: string; message: string }>;
+  visual: Array<{ width: number; mismatchRatio: number; maskedMismatchRatio: number }>;
+  unresolvedSlots: string[];
 }
 
 /**
@@ -161,6 +205,11 @@ export class LandingPage extends AggregateRoot<LandingPageProps, LandingPageId> 
         url: null,
         inputHash: null,
         error: null,
+        engine: 'builtin',
+        templateId: null,
+        binding: null,
+        assets: [],
+        fidelity: null,
         createdAt: input.now,
         updatedAt: input.now,
       },
@@ -205,6 +254,38 @@ export class LandingPage extends AggregateRoot<LandingPageProps, LandingPageId> 
   get updatedAt() {
     return this.props.updatedAt;
   }
+  get engine() {
+    return this.props.engine;
+  }
+  get templateId() {
+    return this.props.templateId;
+  }
+  get binding() {
+    return this.props.binding;
+  }
+  get assets() {
+    return this.props.assets;
+  }
+  get fidelity() {
+    return this.props.fidelity;
+  }
+
+  /**
+   * True when verification found nothing that must block a deploy.
+   *
+   * The gate publishing consults. A page whose buy buttons still point at the
+   * template owner's store, or that carries a token as literal braces, is worse
+   * live than absent — and v1 could not tell, because every check it had ran
+   * before substitution rather than on the finished page.
+   */
+  get isPublishable(): boolean {
+    return !this.props.fidelity || !this.props.fidelity.findings.some((f) => f.severity === 'BLOCKER');
+  }
+
+  /** The blocking findings, for an error message that names the actual problem. */
+  get blockers(): string[] {
+    return (this.props.fidelity?.findings ?? []).filter((f) => f.severity === 'BLOCKER').map((f) => f.message);
+  }
 
   /** A page that has been live at least once keeps its URL through re-drafts. */
   get isPublished(): boolean {
@@ -223,6 +304,14 @@ export class LandingPage extends AggregateRoot<LandingPageProps, LandingPageId> 
     this.props.palette = input.palette;
     this.props.html = input.html;
     this.props.inputHash = input.inputHash;
+    this.props.engine = 'builtin';
+    this.props.templateId = null;
+    this.props.binding = null;
+    this.props.assets = [];
+    // Nothing verifies the built-in renderer's output against a template,
+    // because there is no template to verify it against. Cleared rather than
+    // left stale, so a previous clone's report can never gate this page.
+    this.props.fidelity = null;
     // A republish is required for the new draft to reach the live URL, so a page
     // that is already live stays PUBLISHED (with stale content) rather than
     // silently reporting DRAFT while the old page is still being served.
@@ -231,8 +320,45 @@ export class LandingPage extends AggregateRoot<LandingPageProps, LandingPageId> 
     this.props.updatedAt = now;
   }
 
+  /**
+   * Store a draft produced by cloning a template.
+   *
+   * Separate from `setDraft` because the two engines carry different things: a
+   * cloned page has no derived palette (it keeps the template's own colours)
+   * and does have a template, a binding, assets and a fidelity report.
+   */
+  setClonedDraft(
+    input: {
+      copy: LandingCopy;
+      html: string;
+      inputHash: string;
+      templateId: string;
+      binding: LandingBinding;
+      assets: LandingPageAsset[];
+      fidelity: LandingFidelity;
+    },
+    now: Date,
+  ): void {
+    this.props.copy = input.copy;
+    this.props.html = input.html;
+    this.props.inputHash = input.inputHash;
+    this.props.engine = 'clone';
+    this.props.templateId = input.templateId;
+    this.props.binding = input.binding;
+    this.props.assets = input.assets;
+    this.props.fidelity = input.fidelity;
+    this.props.state = this.isPublished ? 'PUBLISHED' : 'DRAFT';
+    this.props.error = null;
+    this.props.updatedAt = now;
+  }
+
   markPublishing(now: Date): Result<void> {
     if (!this.props.html) return Result.fail('Nothing to publish — generate the page first');
+    if (!this.isPublishable) {
+      return Result.fail(
+        `This page did not pass verification and must not go live: ${this.blockers.slice(0, 3).join(' · ')}`,
+      );
+    }
     this.props.state = 'PUBLISHING';
     this.props.error = null;
     this.props.updatedAt = now;

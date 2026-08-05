@@ -21,12 +21,18 @@ export * from './net/NetlifyDeployer.js';
 export * from './net/HttpReferencePageFetcher.js';
 export * from './net/HttpImageFetcher.js';
 export * from './net/PuppeteerReferenceScreenshotter.js';
+export * from './net/PuppeteerTemplateCapturer.js';
 export * from './net/HttpWebFontFetcher.js';
 export * from './persistence/supabase/SupabaseLandingLayoutRepository.js';
 
 // ── Landing page (sales page renderer) ──────────────────────────────────────
 export * from './landing/LandingPageHtmlRenderer.js';
 export * from './landing/GeneratedPageAssembler.js';
+export * from './landing/TemplateBinder.js';
+export * from './landing/SharpPageDiffer.js';
+export * from './landing/SupabaseTemplateArtifactStore.js';
+export * from './landing/AssetRehoster.js';
+export * from './landing/CssBundler.js';
 
 // ── YouTube ─────────────────────────────────────────────────────────────────
 export * from './youtube/YouTubeDataApiProvider.js';
@@ -58,5 +64,6 @@ export * from './persistence/supabase/SupabaseBookRepository.js';
 export * from './persistence/supabase/SupabaseKnowledgeRepository.js';
 export * from './persistence/supabase/SupabaseExportArtifactRepository.js';
 export * from './persistence/supabase/SupabaseLandingPageRepository.js';
+export * from './persistence/supabase/SupabaseLandingTemplateRepository.js';
 export * from './persistence/supabase/SupabaseUnitOfWork.js';
 export * from './persistence/supabase/SupabaseIdempotencyStore.js';

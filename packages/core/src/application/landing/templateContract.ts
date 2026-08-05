@@ -1,0 +1,244 @@
+import { Result } from '../../domain/shared/Result.js';
+import {
+  REQUIRED_PLACEHOLDERS,
+  REPEATER_PLACEHOLDERS,
+  TOKEN_RE,
+  kindFor,
+  token,
+} from '../../domain/landing/PlaceholderVocabulary.js';
+import type { Finding, PlaceholderEntry, RepeaterEntry } from '../../domain/landing/TemplateManifest.js';
+
+/**
+ * What a cloned template and a bound page must satisfy.
+ *
+ * The v1 contract validated markup a MODEL had written, so most of it was about
+ * stopping the model doing something dangerous — no scripts, no raw colours, no
+ * external URLs, balanced tags. Very little of that applies now: the markup is
+ * the template's own and the model never touches it.
+ *
+ * What replaces it is verification that the clone is faithful and that the
+ * commercially dangerous parts are ours. Both of the checks that matter most —
+ * "does every buy button point at the seller's checkout" and "did the template's
+ * buy buttons all survive" — had no equivalent in v1 at all.
+ */
+
+function blocker(code: string, message: string): Finding {
+  return { severity: 'BLOCKER', code, message };
+}
+function warn(code: string, message: string): Finding {
+  return { severity: 'WARN', code, message };
+}
+
+/** Minimum sections before a capture is more likely an app shell than a page. */
+const MIN_SECTIONS = 3;
+
+export interface TemplateValidationInput {
+  html: string;
+  placeholders: PlaceholderEntry[];
+  repeaters: RepeaterEntry[];
+  /** Host of the template's own site — no link may still point there. */
+  sourceHost: string;
+  /** How many buy anchors the original page had. */
+  originalCtaCount: number;
+  sectionCount: number;
+}
+
+/**
+ * Validates a parameterised template, before it is stored.
+ */
+export function validateTemplate(input: TemplateValidationInput): Result<void, Finding[]> {
+  const findings: Finding[] = [];
+  const { html } = input;
+
+  // ── the vocabulary ────────────────────────────────────────────────────────
+  for (const key of REQUIRED_PLACEHOLDERS) {
+    if (!html.includes(token(key))) {
+      findings.push(
+        blocker('MISSING_REQUIRED_PLACEHOLDER', `No node was labelled ${token(key)}; the page cannot be filled.`),
+      );
+    }
+  }
+
+  const used = new Set<string>();
+  for (const match of html.matchAll(TOKEN_RE)) {
+    const key = match[1] ?? '';
+    used.add(key);
+    if (!kindFor(key)) {
+      findings.push(blocker('UNKNOWN_TOKEN', `${match[0]} is not a token this system knows how to fill.`));
+    }
+  }
+
+  // ── the placeholder map must describe the markup ──────────────────────────
+  for (const entry of input.placeholders) {
+    if (!used.has(entry.placeholder)) {
+      findings.push(
+        warn(
+          'PLACEHOLDER_NOT_PLACED',
+          `${token(entry.placeholder)} is in the map but not in the markup — its node was probably dropped.`,
+        ),
+      );
+    }
+    if (entry.maxChars <= 0) {
+      findings.push(blocker('BAD_MAX_CHARS', `${token(entry.placeholder)} has a non-positive character budget.`));
+    }
+  }
+
+  // ── repeaters ─────────────────────────────────────────────────────────────
+  for (const repeater of input.repeaters) {
+    if (!REPEATER_PLACEHOLDERS[repeater.key]) {
+      findings.push(blocker('UNKNOWN_REPEATER', `"${repeater.key}" is not a known repeating region.`));
+      continue;
+    }
+    if (!html.includes(`data-repeat="${repeater.key}"`)) {
+      findings.push(
+        blocker('REPEATER_NOT_PLACED', `Repeater "${repeater.key}" is declared but has no <template> in the markup.`),
+      );
+    }
+    if (repeater.originalCount < 1) {
+      findings.push(warn('EMPTY_REPEATER', `Repeater "${repeater.key}" captured no items.`));
+    }
+  }
+  for (const match of html.matchAll(/data-repeat="([^"]+)"/g)) {
+    const key = match[1] ?? '';
+    if (!input.repeaters.some((r) => r.key === key)) {
+      findings.push(blocker('UNDECLARED_REPEATER', `<template data-repeat="${key}"> is not in the repeater map.`));
+    }
+  }
+
+  // ── the checkout must survive cloning intact ──────────────────────────────
+  // Not a policy choice — the count is whatever the template does. This is the
+  // direct answer to "some CTA buttons are missing": v1 had no minimum CTA
+  // count at all, and a template with five buy buttons could legally become a
+  // page with one.
+  const ctaCount = occurrences(html, token('CHECKOUT_URL'));
+  if (input.originalCtaCount > 0 && ctaCount !== input.originalCtaCount) {
+    findings.push(
+      blocker(
+        'CTA_COUNT_CHANGED',
+        `The template had ${input.originalCtaCount} buy ${input.originalCtaCount === 1 ? 'button' : 'buttons'} but ` +
+          `${ctaCount} ${ctaCount === 1 ? 'was' : 'were'} labelled. Every one must carry the checkout link.`,
+      ),
+    );
+  }
+
+  // ── nothing may still belong to the template's owner ──────────────────────
+  findings.push(...residualSourceLinks(html, input.sourceHost));
+
+  // ── safety: none of this should survive cleaning, so any hit is a bug ─────
+  findings.push(...safetyFindings(html));
+
+  if (input.sectionCount < MIN_SECTIONS) {
+    findings.push(
+      blocker(
+        'TOO_FEW_SECTIONS',
+        `Only ${input.sectionCount} sections were found. This is usually an app shell that never finished ` +
+          'rendering, or a page behind a bot challenge.',
+      ),
+    );
+  }
+
+  return findings.some((f) => f.severity === 'BLOCKER') ? Result.fail(findings) : Result.ok<void, Finding[]>(undefined);
+}
+
+export interface BoundValidationInput {
+  html: string;
+  checkoutUrl: string | null;
+  sourceHost: string;
+  /** From the template — how many buy buttons this page must have. */
+  expectedCtaCount: number;
+}
+
+/**
+ * Validates the FINISHED page, after substitution.
+ *
+ * v1 ran every check before substitution and none after, so a page could ship
+ * with leaked slot tokens, empty sections, or markup that substitution itself
+ * broke. This is the check that was missing.
+ */
+export function validateBoundPage(input: BoundValidationInput): Finding[] {
+  const findings: Finding[] = [];
+  const { html } = input;
+
+  const residual = html.match(/\{\{[^}]{0,60}\}\}/);
+  if (residual) {
+    findings.push(blocker('RESIDUAL_TOKEN', `${residual[0]} would ship to a buyer as literal braces.`));
+  }
+
+  if (input.checkoutUrl) {
+    const hits = occurrences(html, input.checkoutUrl);
+    if (hits === 0) {
+      findings.push(blocker('CHECKOUT_MISSING', 'No buy button on the finished page points at the checkout URL.'));
+    } else if (input.expectedCtaCount > 0 && hits !== input.expectedCtaCount) {
+      findings.push(
+        warn(
+          'CHECKOUT_COUNT_DRIFT',
+          `The template has ${input.expectedCtaCount} buy buttons but the page carries ${hits} checkout links.`,
+        ),
+      );
+    }
+  }
+
+  // The worst possible defect on a cloned page: a live buy button still
+  // pointing at the site the template came from.
+  findings.push(...residualSourceLinks(html, input.sourceHost));
+  findings.push(...safetyFindings(html));
+
+  // ── accessibility ─────────────────────────────────────────────────────────
+  const h1s = occurrences(html, '<h1');
+  if (h1s === 0) findings.push(warn('NO_H1', 'The page has no <h1>.'));
+  if (h1s > 1) findings.push(warn('MULTIPLE_H1', `The page has ${h1s} <h1> elements; one is correct.`));
+
+  const imagesWithoutAlt = [...html.matchAll(/<img\b[^>]*>/gi)].filter((m) => !/\balt\s*=/i.test(m[0])).length;
+  if (imagesWithoutAlt > 0) {
+    findings.push(warn('IMG_NO_ALT', `${imagesWithoutAlt} image(s) have no alt text.`));
+  }
+
+  const emptyHref = occurrences(html, 'href=""');
+  if (emptyHref > 0) findings.push(blocker('EMPTY_HREF', `${emptyHref} link(s) have an empty href.`));
+
+  return findings;
+}
+
+/** Any http(s) link or asset still pointing at the template's own site. */
+function residualSourceLinks(html: string, sourceHost: string): Finding[] {
+  if (!sourceHost) return [];
+  const host = sourceHost.replace(/^www\./, '');
+  const re = new RegExp(`(?:href|src)\\s*=\\s*["']https?://(?:www\\.)?${escapeRegex(host)}`, 'gi');
+  const hits = [...html.matchAll(re)];
+  if (hits.length === 0) return [];
+  return [
+    blocker(
+      'SOURCE_LINK_SURVIVED',
+      `${hits.length} link(s) or asset(s) still point at ${sourceHost}. A published page must not send ` +
+        "traffic — or a buyer — to the template owner's site.",
+    ),
+  ];
+}
+
+/**
+ * Executable content and third-party requests. Cleaning removes all of this, so
+ * a hit here means the cleaner missed something rather than that a model
+ * misbehaved — which is why every one is a blocker.
+ */
+function safetyFindings(html: string): Finding[] {
+  const findings: Finding[] = [];
+  if (/<script\b/i.test(html)) findings.push(blocker('SCRIPT_SURVIVED', 'A <script> survived cleaning.'));
+  if (/<(iframe|object|embed)\b/i.test(html)) {
+    findings.push(blocker('EMBED_SURVIVED', 'An <iframe>, <object> or <embed> survived cleaning.'));
+  }
+  if (/<form\b/i.test(html)) findings.push(blocker('FORM_SURVIVED', 'A <form> survived cleaning.'));
+  if (/\son[a-z]+\s*=\s*["']/i.test(html)) {
+    findings.push(blocker('INLINE_HANDLER', 'An inline event handler (onclick, onload…) survived cleaning.'));
+  }
+  if (/javascript:/i.test(html)) findings.push(blocker('JS_URL', 'A javascript: URL survived cleaning.'));
+  return findings;
+}
+
+function occurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  return haystack.split(needle).length - 1;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

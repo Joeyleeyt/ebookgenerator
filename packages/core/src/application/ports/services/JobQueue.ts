@@ -15,7 +15,11 @@ export type QueueName =
   | 'extra-content'
   | 'ebook-assemble'
   | 'export'
-  | 'landing-page';
+  | 'landing-page'
+  // Cloning a template site. Once per template, not once per book — and its own
+  // queue so a template that cannot be captured fails on its own row rather
+  // than taking a book's page down with it.
+  | 'landing-template';
 
 export interface EnqueueOptions {
   /** Deterministic id → BullMQ de-duplicates identical jobs. */

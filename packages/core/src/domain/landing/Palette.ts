@@ -206,7 +206,13 @@ function hslToRgb(h: number, s: number, l: number): Rgb {
   return { r: (r1 + m) * 255, g: (g1 + m) * 255, b: (b1 + m) * 255 };
 }
 
-function hsl(h: number, s: number, l: number): string {
+/**
+ * HSL → `#rrggbb`. Exported because the cloned-template theme adaptation
+ * (ThemeAdaptation.ts) rebuilds a colour from a borrowed hue and needs exactly
+ * this conversion — and duplicating it there is how `romanYear` ended up
+ * implemented twice.
+ */
+export function hsl(h: number, s: number, l: number): string {
   return toHex(hslToRgb(h, clamp(s, 0, 1), clamp(l, 0, 1)));
 }
 

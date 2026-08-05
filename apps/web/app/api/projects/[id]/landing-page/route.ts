@@ -28,6 +28,10 @@ export const GET = handle(async (_req: Request, { params }: { params: { id: stri
       enabled: project.options.landingPage,
       checkoutUrl: project.options.landingCheckoutUrl ?? '',
       templateUrl: project.options.landingTemplateUrl ?? '',
+      templateId: project.options.landingTemplateId ?? '',
+      // Which renderer will run. Surfaced so the UI can say so BEFORE the user
+      // presses Generate — v1 decided this silently and told nobody.
+      engine: project.options.landingEngine,
       priceCents: project.options.landingPriceCents ?? null,
       compareAtCents: project.options.landingCompareAtCents ?? null,
       currency: project.options.landingCurrency,
@@ -49,11 +53,22 @@ export const GET = handle(async (_req: Request, { params }: { params: { id: stri
           error: page.error,
           hasDraft: page.html !== null,
           updatedAt: page.updatedAt.toISOString(),
+          engine: page.engine,
+          templateId: page.templateId,
+          // The verification report. `blockers` is what stops a publish, and
+          // naming them is the difference between a greyed-out button and a
+          // user who can act.
+          fidelity: page.fidelity,
+          isPublishable: page.isPublishable,
+          blockers: page.blockers,
         }
       : null,
     // Surfaced so the UI can explain a disabled Publish button instead of
     // failing the request after the user clicks it.
-    canPublish: c.sitePublisher.isConfigured() && project.options.missingCheckoutPositions().length === 0,
+    canPublish:
+      c.sitePublisher.isConfigured() &&
+      project.options.missingCheckoutPositions().length === 0 &&
+      (page?.isPublishable ?? true),
     // Which books still need a buy link, so the UI can name them rather than
     // just greying the button out.
     missingCheckoutPositions: project.options.missingCheckoutPositions(),
