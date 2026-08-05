@@ -132,6 +132,18 @@ export interface ValidateOptions {
  */
 export const REQUIRED_SLOT_KEYS = ['hero.headline', 'hero.subheadline', 'cta.label'] as const;
 
+/**
+ * Required slots whose text the SYSTEM renders, so they are declared but must
+ * NOT be placed in the markup.
+ *
+ * `cta.label` is the whole list: it is written into the buy button by
+ * {{CTA_BUTTON}}. Requiring it to be declared AND placed — as the general rule
+ * does — left no passing answer: omit it and the required check fails, declare
+ * it and the placement check fails, place it and the label prints twice as
+ * loose text beside the button.
+ */
+export const SYSTEM_SLOT_KEYS: readonly string[] = ['cta.label'];
+
 export function validateGeneratedPage(page: GeneratedPage, options: ValidateOptions = {}): Result<void, string[]> {
   const errors: string[] = [];
   const { css, bodyHtml } = page;
@@ -298,7 +310,16 @@ function slotErrors(page: GeneratedPage, minSlots: number): string[] {
     if (!declaredKeys.has(key)) errors.push(`{{COPY:${key}}} is used in the markup but missing from "slots".`);
   }
   for (const slot of declared) {
-    if (!usedKeys.has(slot.key)) errors.push(`Slot "${slot.key}" is declared but never placed in the markup.`);
+    const systemRendered = SYSTEM_SLOT_KEYS.includes(slot.key);
+    if (systemRendered) {
+      if (usedKeys.has(slot.key)) {
+        errors.push(
+          `Slot "${slot.key}" must NOT appear in the markup — the system renders it. Declare it only.`,
+        );
+      }
+    } else if (!usedKeys.has(slot.key)) {
+      errors.push(`Slot "${slot.key}" is declared but never placed in the markup.`);
+    }
     if (!slot.purpose?.trim()) errors.push(`Slot "${slot.key}" needs a "purpose" — the copywriter only sees that.`);
     if (!Number.isFinite(slot.maxChars) || slot.maxChars <= 0) {
       errors.push(`Slot "${slot.key}" needs a positive "maxChars".`);

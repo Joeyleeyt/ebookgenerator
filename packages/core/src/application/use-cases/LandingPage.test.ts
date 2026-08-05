@@ -500,7 +500,7 @@ function goodLayout(): string {
     slots,
     bodyHtml:
       '<section data-section="hero"><h1>{{COPY:hero.headline}}</h1><p>{{COPY:hero.subheadline}}</p>' +
-      '<p>{{COPY:cta.label}}</p>{{COVER}}{{PRICE}}{{CTA_BUTTON}}</section>' +
+      '{{COVER}}{{PRICE}}{{CTA_BUTTON}}</section>' +
       '<section data-section="inside"><h2>{{COPY:inside.heading}}</h2>{{CONTENTS}}</section>' +
       '<section data-section="order"><h2>{{COPY:order.heading}}</h2>{{PRICE}}{{CTA_BUTTON}}</section>' +
       '<section data-section="faq"><h3>{{COPY:faq.q1}}</h3><p>{{COPY:faq.a1}}</p>' +

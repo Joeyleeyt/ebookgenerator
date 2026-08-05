@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { PLACEHOLDERS, fillPlaceholders, validateGeneratedPage, type GeneratedPage } from './pageContract.js';
+import {
+  PLACEHOLDERS,
+  fillPlaceholders,
+  fillCopySlots,
+  validateGeneratedPage,
+  type GeneratedPage,
+} from './pageContract.js';
 
 /** A page that satisfies the contract; each test breaks one thing. */
 function page(overrides: Partial<GeneratedPage> = {}): GeneratedPage {
@@ -168,6 +174,76 @@ describe('validateGeneratedPage', () => {
 
   it('rejects a page too large to be one', () => {
     expect(errorsOf(page({ css: 'a{}'.repeat(60_000) })).some((e) => e.includes('CSS is'))).toBe(true);
+  });
+});
+
+describe('reusable layout slots', () => {
+  /** A layout that satisfies the slot contract. */
+  function layout(over: Partial<GeneratedPage> = {}): GeneratedPage {
+    const keys = ['hero.headline', 'hero.subheadline', 'inside.heading', 's1.a', 's1.b', 's2.a', 'faq.q1', 'faq.a1'];
+    return {
+      css: 'body { background: var(--bg); }',
+      slots: [
+        ...keys.map((key) => ({ key, purpose: `Text for ${key}`, maxChars: 120 })),
+        // Declared but never placed — the system writes it into the button.
+        { key: 'cta.label', purpose: 'Button label', maxChars: 28 },
+      ],
+      bodyHtml:
+        `<section data-section="hero">${keys
+          .slice(0, 2)
+          .map((k) => `<p>{{COPY:${k}}}</p>`)
+          .join('')}{{COVER}}{{PRICE}}{{CTA_BUTTON}}</section>` +
+        `<section data-section="inside">${keys
+          .slice(2)
+          .map((k) => `<p>{{COPY:${k}}}</p>`)
+          .join('')}{{CONTENTS}}</section>` +
+        '<section data-section="order"></section><section data-section="faq"></section>' +
+        '<footer>{{FOOTER_LEGAL}}</footer>',
+      ...over,
+    };
+  }
+
+  const slotErrors = (p: GeneratedPage) =>
+    (validateGeneratedPage(p, { expectSlots: true }) as { error?: string[] }).error ?? [];
+
+  it('accepts a layout whose prose is entirely slots', () => {
+    expect(validateGeneratedPage(layout(), { expectSlots: true }).isOk()).toBe(true);
+  });
+
+  // This exact combination made every layout unpassable: cta.label was required
+  // to be declared, every declared slot had to be placed, and placing it would
+  // print the button's label twice. Nothing could satisfy all three.
+  it('requires cta.label to be declared but NOT placed', () => {
+    const placed = layout({
+      bodyHtml: layout().bodyHtml.replace('{{CTA_BUTTON}}', '{{CTA_BUTTON}}{{COPY:cta.label}}'),
+    });
+    expect(slotErrors(placed).some((e) => e.includes('must NOT appear in the markup'))).toBe(true);
+
+    const undeclared = layout({ slots: layout().slots!.filter((s) => s.key !== 'cta.label') });
+    expect(slotErrors(undeclared).some((e) => e.includes('"cta.label" is required'))).toBe(true);
+  });
+
+  it('rejects a layout with no slots at all', () => {
+    expect(slotErrors(layout({ slots: [] })).some((e) => e.includes('must be reusable'))).toBe(true);
+  });
+
+  it('catches tokens and declarations that disagree', () => {
+    const undeclaredToken = layout({
+      bodyHtml: layout().bodyHtml.replace('{{COPY:hero.headline}}', '{{COPY:hero.mystery}}'),
+    });
+    const errors = slotErrors(undeclaredToken);
+    expect(errors.some((e) => e.includes('{{COPY:hero.mystery}} is used'))).toBe(true);
+    expect(errors.some((e) => e.includes('"hero.headline" is declared but never placed'))).toBe(true);
+  });
+
+  it('rejects the same slot placed twice', () => {
+    const twice = layout({ bodyHtml: `${layout().bodyHtml}<p>{{COPY:faq.q1}}</p>` });
+    expect(slotErrors(twice).some((e) => e.includes('appears more than once'))).toBe(true);
+  });
+
+  it('fills slots and drops any the copy call left out', () => {
+    const filled = fillCopySlots('<h1>{{COPY:a}}</h1><p>{{COPY:b}}</p>', { a: 'Hello' });
+    expect(filled).toBe('<h1>Hello</h1><p></p>');
   });
 });
 
