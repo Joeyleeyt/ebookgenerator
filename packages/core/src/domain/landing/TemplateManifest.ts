@@ -183,6 +183,14 @@ export interface ExtractionReport {
   lostFamilies: string[];
   assetBytes: number;
   sectionCount: number;
+  /**
+   * Repeating regions MECHANICAL detection found, before the model named any.
+   *
+   * The difference between "detection found nothing" and "the model named
+   * nothing it found" — two very different bugs that look identical from a
+   * stored row, and the first extraction could not distinguish them.
+   */
+  detectedRepeaters: Array<{ containerTplId: string; itemCount: number; flexibleCount: boolean }>;
   notes: string[];
 }
 

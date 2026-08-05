@@ -96,6 +96,16 @@ const MAX_CLEANING_LOSS = 0.2;
 interface ExtractionFailure {
   reason: string;
   report: ExtractionReport | null;
+  /**
+   * What the run had worked out before it stopped.
+   *
+   * A failed row used to store a blank record, so `placeholderCount: 0` and
+   * `repeaterCount: 0` meant "we did not save them" rather than "we found
+   * none" — and there was no way to tell those apart from outside. Diagnosing a
+   * failure needs to know which of the two it was.
+   */
+  placeholders?: PlaceholderEntry[] | undefined;
+  repeaters?: RepeaterEntry[] | undefined;
 }
 
 export interface ExtractTemplateInput {
@@ -176,6 +186,8 @@ export class ExtractTemplateUseCase {
         // Keep the measurements. Without them a failed row says only that it
         // failed, and the numbers that explain WHY are gone.
         report: outcome.error.report,
+        placeholders: outcome.error.placeholders ?? [],
+        repeaters: outcome.error.repeaters ?? [],
       });
       return Result.fail(outcome.error.reason);
     }
@@ -224,6 +236,11 @@ export class ExtractTemplateUseCase {
       assetBytes: 0,
       sectionCount: page.sections.length,
       notes,
+      detectedRepeaters: page.repeaters.map((r) => ({
+        containerTplId: r.containerTplId,
+        itemCount: r.originalCount,
+        flexibleCount: r.flexibleCount,
+      })),
     });
 
     // What cleaning cost, measured rather than assumed.
@@ -325,7 +342,12 @@ export class ExtractTemplateUseCase {
 
     const blockers = findings.filter((f) => f.severity === 'BLOCKER');
     if (blockers.length > 0) {
-      return Result.fail({ reason: blockers.map((f) => f.message).join(' · '), report: partial() });
+      return Result.fail({
+        reason: blockers.map((f) => f.message).join(' · '),
+        report: partial(),
+        placeholders: kept,
+        repeaters: repeaters.filter((r) => r.key),
+      });
     }
 
     // Only assets the parameterised page still references are worth keeping —
@@ -356,6 +378,11 @@ export class ExtractTemplateUseCase {
           rect: { x: 0, y: 0, width: img.width, height: img.height },
         })),
       fontFidelity: stored.value.fontFidelity,
+      detectedRepeaters: page.repeaters.map((r) => ({
+        containerTplId: r.containerTplId,
+        itemCount: r.originalCount,
+        flexibleCount: r.flexibleCount,
+      })),
       lostFamilies: stored.value.lostFamilies,
       assetBytes: pruned.reduce((total, a) => total + a.byteSize, 0),
       sectionCount: page.sections.length,
@@ -669,6 +696,7 @@ function emptyReport(): ExtractionReport {
     lostFamilies: [],
     assetBytes: 0,
     sectionCount: 0,
+    detectedRepeaters: [],
     notes: [],
   };
 }

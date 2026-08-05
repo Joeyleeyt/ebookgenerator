@@ -82,6 +82,12 @@ export const GET = handle(async (_req: Request, { params }: { params: { id: stri
     })),
     overrides: template.overrides,
     report: template.report,
+    // Present even on a FAILED row: what the run worked out before it stopped
+    // is the only way to tell a detection bug from a labelling one.
+    detected: {
+      repeaters: template.report?.detectedRepeaters ?? [],
+      placeholders: template.placeholders.length,
+    },
     responsive: { widths: template.responsive.widths, breakpoints: template.responsive.breakpoints },
     assets: {
       count: assets.length,

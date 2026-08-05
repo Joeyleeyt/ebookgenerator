@@ -60,12 +60,26 @@ export function validateTemplate(input: TemplateValidationInput): Result<void, F
   // specific placeholder when a multi-product page legitimately uses a
   // different one, so a correct answer was rejected and there was no passing
   // response available.
-  const coversInRepeater = html.includes(token('OFFER_ITEMS.coverSrc'));
+  // Any repeating region carrying a cover per item, not just the offer grid —
+  // a template can show its books in a "what's inside" row as readily as in a
+  // pricing row, and either one covers every product rather than only one.
+  const coversInRepeater = /\{\{[A-Z_]+\.coverSrc\}\}/.test(html);
   for (const key of REQUIRED_PLACEHOLDERS) {
     if (html.includes(token(key))) continue;
     if (key === 'BOOK_COVER' && coversInRepeater) continue;
     findings.push(
-      blocker('MISSING_REQUIRED_PLACEHOLDER', `No node was labelled ${token(key)}; the page cannot be filled.`),
+      blocker(
+        'MISSING_REQUIRED_PLACEHOLDER',
+        key === 'BOOK_COVER'
+          ? // Naming the consequence, because the fix is a decision rather than
+            // a retry: every image on this page is still the template owner's,
+            // so publishing it would show THEIR book covers on a page selling
+            // someone else's book.
+            'No image was labelled as a product cover. Label one node BOOK_COVER, or — if the template ' +
+              'shows several products — label the covers inside a repeating region as <KEY>.coverSrc so each ' +
+              "product gets its own. Without this the page would keep the template owner's cover images."
+          : `No node was labelled ${token(key)}; the page cannot be filled.`,
+      ),
     );
   }
 

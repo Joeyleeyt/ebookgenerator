@@ -312,20 +312,56 @@ export const STAMP = `(function () {
 
 /** Shared helpers, prepended to the scripts that need them. */
 const HELPERS = `
+  /**
+   * Any CSS colour to [r,g,b], by asking the browser rather than parsing it.
+   *
+   * A regex over rgb()/rgba() is wrong on this template and on most modern
+   * ones: Tailwind v4 and every design-token build emit oklch(), and
+   * getComputedStyle hands that straight back. It produced no accent at all and
+   * reported a dark page as light — the same class of failure v1's detectors
+   * had, reproduced here by parsing strings instead of asking the engine that
+   * already knows the answer.
+   *
+   * A 1x1 canvas handles every format the browser understands: oklch, lab,
+   * color-mix, hsl, named colours. The browser does the conversion.
+   */
+  const rgbProbe = document.createElement('canvas');
+  rgbProbe.width = 1;
+  rgbProbe.height = 1;
+  const rgbCtx = rgbProbe.getContext('2d', { willReadFrequently: true });
+  const toRgb = (value) => {
+    if (!value) return null;
+    try {
+      rgbCtx.clearRect(0, 0, 1, 1);
+      // An unparseable value leaves fillStyle untouched, so a sentinel is what
+      // tells "could not parse" apart from "genuinely black".
+      rgbCtx.fillStyle = '#010203';
+      rgbCtx.fillStyle = value;
+      if (rgbCtx.fillStyle === '#010203') return null;
+      rgbCtx.fillRect(0, 0, 1, 1);
+      const d = rgbCtx.getImageData(0, 0, 1, 1).data;
+      // Fully transparent is not a colour. Reporting it as black is how a
+      // transparent header ends up matching a token and becoming the accent.
+      if (d[3] === 0) return null;
+      return [d[0], d[1], d[2]];
+    } catch (e) {
+      return null;
+    }
+  };
   const hex = (value) => {
-    const m = /rgba?\\((\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/.exec(value || '');
-    if (!m) return null;
-    const h = (n) => Math.max(0, Math.min(255, parseInt(n, 10))).toString(16).padStart(2, '0');
-    return '#' + h(m[1]) + h(m[2]) + h(m[3]);
+    const c = toRgb(value);
+    if (!c) return null;
+    const h = (n) => n.toString(16).padStart(2, '0');
+    return '#' + h(c[0]) + h(c[1]) + h(c[2]);
   };
   const luminance = (value) => {
-    const m = /rgba?\\((\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/.exec(value || '');
-    if (!m) return 1;
-    const c = [m[1], m[2], m[3]].map((n) => {
-      const s = parseInt(n, 10) / 255;
+    const c = toRgb(value);
+    if (!c) return 1;
+    const lin = c.map((n) => {
+      const s = n / 255;
       return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
     });
-    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
   };
   const pathOf = (el) => {
     const parts = [];
@@ -595,10 +631,26 @@ export const MEASURE = `(function () {
   }
 
   const ctaIds = ctas.map((a) => a.getAttribute('data-tpl')).filter(Boolean);
-  const primary = ctas[0] || null;
-  const ctaStyle = primary ? getComputedStyle(primary) : null;
-  const accentValue = ctaStyle ? hex(ctaStyle.backgroundColor) : null;
-  const onAccentValue = ctaStyle ? hex(ctaStyle.color) : null;
+  // Whichever buy button actually PAINTS a background is the accent. The first
+  // one in document order is frequently a plain text link in the header, whose
+  // background is transparent — reading that one returned no accent at all, so
+  // the theme adaptation had nothing to work from and silently did nothing.
+  //
+  // The background can also sit on a child (an anchor wrapping a styled span),
+  // so each candidate's descendants are checked before moving on.
+  let accentValue = null;
+  let onAccentValue = null;
+  for (let i = 0; i < ctas.length && !accentValue; i++) {
+    const candidates = [ctas[i]].concat(Array.prototype.slice.call(ctas[i].querySelectorAll('*')).slice(0, 6));
+    for (let c = 0; c < candidates.length; c++) {
+      const style = getComputedStyle(candidates[c]);
+      const painted = hex(style.backgroundColor);
+      if (!painted) continue;
+      accentValue = painted;
+      onAccentValue = hex(style.color) || hex(getComputedStyle(ctas[i]).color);
+      break;
+    }
+  }
 
   // ── :root tokens, resolved ──
   const rootStyle = getComputedStyle(document.documentElement);
@@ -623,8 +675,22 @@ export const MEASURE = `(function () {
     }
   }
 
-  const bodyBg = getComputedStyle(document.body).backgroundColor;
-  const isDark = luminance(bodyBg) < 0.4;
+  // The FIRST element that actually paints a ground, walking outward-in.
+  // document.body is very often transparent with the real background on <html>
+  // or on a wrapper div — reading body alone reported this dark template as
+  // light, which is the single most visible way a cloned page stops looking
+  // like its template.
+  let groundValue = null;
+  const groundCandidates = [document.documentElement, document.body].concat(
+    Array.prototype.slice.call(document.querySelectorAll('body > div, main, body > section')).slice(0, 4),
+  );
+  for (let i = 0; i < groundCandidates.length; i++) {
+    const el = groundCandidates[i];
+    if (!el) continue;
+    const value = getComputedStyle(el).backgroundColor;
+    if (toRgb(value)) { groundValue = value; break; }
+  }
+  const isDark = groundValue ? luminance(groundValue) < 0.4 : false;
 
   // ── typography, as the browser resolved it ──
   // Asked of the live page for the same reason the accent is: a stylesheet says
@@ -790,7 +856,12 @@ export const COLLECT_IMAGE_URLS = `(function () {
       if (inner && inner[2] && !inner[2].startsWith('data:')) urls.add(new URL(inner[2], location.href).href);
     }
   }
-  return Array.prototype.slice.call(urls);
+  // Array.from, NOT Array.prototype.slice.call: slice reads a length property,
+  // which a Set does not have, so it silently returns an empty array. That is
+  // exactly what it did — no image was ever re-hosted, and rewriteHtmlAssets
+  // drops every img it has no local copy for, so a cloned page came back with
+  // no images at all.
+  return Array.from(urls);
 })()`;
 
 /**
