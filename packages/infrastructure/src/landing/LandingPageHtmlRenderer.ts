@@ -413,7 +413,7 @@ function sectionTheBook(model: LandingPageModel, p: LandingProduct | undefined, 
     <div class="wrap">
       <p class="mark">${n()}</p>
       <h2>${esc(copy.whatsInsideHeading)}</h2>
-      <p class="lede">${esc(copy.closingBody)}</p>
+      ${copy.closingBody ? `<p class="lede">${esc(copy.closingBody)}</p>` : ''}
       ${p?.pageCount ? `<p class="muted">${p.pageCount} pages · PDF and DOCX · read on any device</p>` : ''}
       ${copy.painPoints.length > 0 ? `<hr class="rule">
       <ul class="pains stagger">
@@ -671,9 +671,12 @@ function sectionLastCall(model: LandingPageModel, p: LandingProduct | undefined)
   // what the bundle is. Falling back to the primary book would make the last
   // thing a reader sees an offer for one third of what the page just sold.
   const target = model.products.find((o) => o.kind === 'bundle') ?? p;
+  // An empty <h2> above the final buy button is worse than no heading: it
+  // opens a heading-sized gap and reads as a rendering fault. The price and
+  // the button are what this section is for; the line above them is a bonus.
   return `  <section class="reveal center">
     <div class="wrap">
-      <h2>${esc(model.copy.closingHeading)}</h2>
+      ${model.copy.closingHeading ? `<h2>${esc(model.copy.closingHeading)}</h2>` : ''}
       ${priceBlock(target, model)}
       ${ctaButton(target, model.copy.ctaLabel, model)}
     </div>

@@ -485,6 +485,26 @@ describe('GenerateLandingPageUseCase', () => {
     expect(pages.current()?.state).toBe('FAILED');
   });
 
+  // The two fields the copy model most often leaves out — a page that already
+  // closes with a price and a button. Left required, that judgement call failed
+  // the whole generation on a schema error, and the retry put the same question
+  // to the same model.
+  it('still writes a page when the closing copy comes back missing', async () => {
+    const partial = JSON.parse(COPY_JSON) as Record<string, unknown>;
+    delete partial['closingHeading'];
+    delete partial['closingBody'];
+    const { useCase, pages, rendered } = buildGenerate({ aiText: JSON.stringify(partial) });
+
+    const result = await useCase.execute({ projectId: 'p1' });
+
+    if (result.isFail()) throw new Error(result.error);
+    expect(pages.current()?.state).toBe('DRAFT');
+    // Empty, not absent: the renderer omits the section rather than painting an
+    // empty heading above the final buy button.
+    expect(rendered[0]?.copy.closingHeading).toBe('');
+    expect(rendered[0]?.copy.closingBody).toBe('');
+  });
+
   // `save` writes every column including `html` — a self-contained page with
   // its covers embedded as base64. Rewriting that to flip an enum is what put
   // landing_pages.save past the database's statement timeout.
@@ -642,6 +662,8 @@ function buildWithReference(
     canScreenshot?: boolean;
     /** Verdicts returned by the visual reviewer, in order. */
     reviews?: string[];
+    /** Every page model handed to the assembler, review renders included. */
+    onAssemble?: (model: LandingPageModel) => void;
   } = {},
 ) {
   const project = makeProject({ landingTemplateUrl: 'https://eliasyoder.com/' });
@@ -685,8 +707,9 @@ function buildWithReference(
       },
     },
     {
-      assemble: () => {
+      assemble: ({ model }: { model: LandingPageModel }) => {
         assembled++;
+        opts.onAssemble?.(model);
         return '<html>generated</html>';
       },
     },
@@ -819,6 +842,31 @@ describe('GenerateLandingPageUseCase — reference-driven layout', () => {
   });
 
   // The point of storing layouts: the second book pays no layout cost at all.
+  // The reviewer was shown a fixture with no cover at all, so a sound layout
+  // came back rejected for "a large image placeholder, mostly blank, creating an
+  // unfilled region" — an empty frame that existed only in the review render.
+  // Two of those and the page falls back to the built-in template, which is how
+  // a page ends up ignoring the reference it was supposed to follow.
+  const reviewModel = async (): Promise<LandingPageModel | undefined> => {
+    const models: LandingPageModel[] = [];
+    const h = buildWithReference([goodLayout()], { canScreenshot: true, onAssemble: (m) => models.push(m) });
+    await h.useCase.execute({ projectId: 'p1' });
+    return models.find((m) => m.siteName === 'Preview');
+  };
+
+  it('shows the reviewer a cover, so an empty slot is not read as a defect', async () => {
+    const review = await reviewModel();
+    expect(review, 'the reviewer never ran').toBeDefined();
+    expect(review?.products[0]?.coverDataUri).toBeTruthy();
+  });
+
+  // The original intent survives: this project has no portrait, so a layout that
+  // only looks right with one must still fail review.
+  it('withholds the portrait when the project has none', async () => {
+    const review = await reviewModel();
+    expect(review?.authorPhotoDataUri).toBeNull();
+  });
+
   it('reuses a stored layout instead of deriving it again', async () => {
     const h = buildWithReference([goodLayout()], {
       stored: {

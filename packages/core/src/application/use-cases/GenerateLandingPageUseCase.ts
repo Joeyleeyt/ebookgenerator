@@ -176,11 +176,36 @@ function fillerFor(slots: Array<{ key: string; maxChars: number }>): Record<stri
  * Every figure is obviously synthetic — this render is never shown to a buyer,
  * it only goes to the reviewer as an image.
  */
-function previewModel(): Parameters<LandingPageRenderer['render']>[0] {
+/**
+ * Stand-in artwork for the visual review, so the reviewer judges the LAYOUT and
+ * not the fixture. Flat SVG rather than a real photograph: it fills the slot at
+ * the right aspect ratio and is obviously a placeholder, which is what the
+ * reviewer needs to tell "the cover sits badly here" from "there is no cover".
+ */
+const PREVIEW_COVER =
+  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MDAgNjAwIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjYwMCIgZmlsbD0iIzFkMjczMyIvPjxyZWN0IHg9IjI2IiB5PSIzNCIgd2lkdGg9IjM0OCIgaGVpZ2h0PSI1MzIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2M5Yjk4ZCIgc3Ryb2tlLXdpZHRoPSIyIi8+PHRleHQgeD0iMjAwIiB5PSIyOTAiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhLHNlcmlmIiBmb250LXNpemU9IjM4IiBmaWxsPSIjZWFkOWI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5QUkVWSUVXPC90ZXh0Pjx0ZXh0IHg9IjIwMCIgeT0iMzMwIiBmb250LWZhbWlseT0iR2VvcmdpYSxzZXJpZiIgZm9udC1zaXplPSIyMCIgZmlsbD0iIzlmYjBjNCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Q09WRVI8L3RleHQ+PC9zdmc+';
+const PREVIEW_PHOTO =
+  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MDAgNTAwIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0iIzViNjQ3MiIvPjxjaXJjbGUgY3g9IjIwMCIgY3k9IjE5MCIgcj0iNzgiIGZpbGw9IiM4ZDk3YTYiLz48cGF0aCBkPSJNNjAgNTAwYzAtODggNjMtMTUwIDE0MC0xNTBzMTQwIDYyIDE0MCAxNTB6IiBmaWxsPSIjOGQ5N2E2Ii8+PC9zdmc+';
+const PREVIEW_LOGO =
+  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA5NiA5NiI+PGNpcmNsZSBjeD0iNDgiIGN5PSI0OCIgcj0iNDgiIGZpbGw9IiNjOWI5OGQiLz48dGV4dCB4PSI0OCIgeT0iNjIiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhLHNlcmlmIiBmb250LXNpemU9IjQyIiBmaWxsPSIjMWQyNzMzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5QPC90ZXh0Pjwvc3ZnPg==';
+
+/**
+ * The page the visual reviewer looks at.
+ *
+ * `has` MUST mirror what the layout call was told, because the reviewer's only
+ * job is to spot a broken layout. Reviewing a fixed all-null fixture meant a
+ * layout was told "a portrait is available, place it", placed it, and was then
+ * judged on a render where it did not exist — so the empty frame came back as
+ * "a large image placeholder, mostly blank, creating an unfilled region" and
+ * the layout was rejected for a defect the real page would never have.
+ */
+function previewModel(has: { authorPhoto: boolean; logo: boolean }): Parameters<LandingPageRenderer['render']>[0] {
   const product: LandingProduct = {
     title: 'Preview Title',
     subtitle: 'Preview subtitle',
-    coverDataUri: null,
+    // Every book reaching this point has cover art, and {{COVER}} is always
+    // available to a layout — so an empty cover slot is never what ships.
+    coverDataUri: PREVIEW_COVER,
     pageCount: 120,
     categoryLabel: 'Preview',
     features: ['Preview feature one', 'Preview feature two', 'Preview feature three'],
@@ -224,15 +249,16 @@ function previewModel(): Parameters<LandingPageRenderer['render']>[0] {
     testimonials: [],
     products: [product],
     siteName: 'Preview',
-    logoDataUri: null,
+    logoDataUri: has.logo ? PREVIEW_LOGO : null,
     stats: [
       { value: '120', label: 'Pages' },
       { value: '30', label: 'Day guarantee' },
     ],
     heroImageDataUri: null,
-    // Null on purpose: a layout that only looks right WITH a portrait must not
-    // pass review, because most books have none.
-    authorPhotoDataUri: null,
+    // Still null when this project has no portrait — a layout that only looks
+    // right WITH one must not pass review. But when the layout call was TOLD a
+    // portrait exists, reviewing without it judges the wrong page.
+    authorPhotoDataUri: has.authorPhoto ? PREVIEW_PHOTO : null,
     authorCredential: 'Preview Author · Preview Channel',
     promoEndsAt: null,
     rating: null,
@@ -285,8 +311,15 @@ const CopySchema = z.object({
   productFeatures: z.array(z.string()).default([]),
   comparisonWithout: z.array(z.string()).default([]),
   comparisonWith: z.array(z.string()).default([]),
-  closingHeading: z.string(),
-  closingBody: z.string(),
+  // Defaulted like their neighbours, and for the same reason. These two sit
+  // second-from-last in the prompt's key list and are the two the model most
+  // often decides are redundant — a page that already closes with a price and
+  // a button. Left required, that judgement call failed the whole generation
+  // on a schema error, and the retry made the same call again. Both renderers
+  // omit the section when it is empty, so absent copy costs a closing line,
+  // not a page.
+  closingHeading: z.string().default(''),
+  closingBody: z.string().default(''),
   fontFamily: z.enum(['serif', 'sans']).default('sans'),
   // One entry per reference section, so the page can follow the whole template
   // rather than only the parts the fixed fields above happen to cover.
@@ -560,9 +593,18 @@ export class GenerateLandingPageUseCase {
         });
 
     if (written.isFail()) {
-      page.markFailed(written.error, this.clock.now());
+      // On the fallback path this is usually the SECOND failure of the run: the
+      // reference layout was already rejected, and THAT is the reason worth
+      // reading. The layout reasons only ride out on the success return, so a
+      // run that dies here reported a bare copy error and gave no hint that the
+      // page had stopped following the template at all.
+      const reason =
+        !layout && this.lastLayoutFailure
+          ? `${written.error} (the reference layout was rejected first: ${this.lastLayoutFailure.join('; ')})`
+          : written.error;
+      page.markFailed(reason, this.clock.now());
       await this.pages.saveState(page);
-      return Result.fail(written.error);
+      return Result.fail(reason);
     }
     const { slotValues } = written.value;
     // The reference's own typography wins over the copy model's genre guess.
@@ -835,8 +877,12 @@ export class GenerateLandingPageUseCase {
         continue;
       }
 
-      // Mechanically valid is not the same as usable. Render it and look.
-      const visual = await this.reviewRendered(generated, input.projectId);
+      // Mechanically valid is not the same as usable. Render it and look —
+      // with the same images the layout was told it would have.
+      const visual = await this.reviewRendered(generated, input.projectId, {
+        authorPhoto: input.hasAuthorPhoto,
+        logo: input.hasLogo,
+      });
       if (visual.length === 0) return generated;
       repairErrors = visual;
     }
@@ -856,10 +902,14 @@ export class GenerateLandingPageUseCase {
    * not a gate: a browser that fails to launch must not stop a seller getting
    * a page, so an inconclusive review passes.
    */
-  private async reviewRendered(layout: GeneratedPage, projectId: string): Promise<string[]> {
+  private async reviewRendered(
+    layout: GeneratedPage,
+    projectId: string,
+    has: { authorPhoto: boolean; logo: boolean },
+  ): Promise<string[]> {
     const html = this.assembler.assemble({
       page: { css: layout.css, bodyHtml: fillCopySlots(layout.bodyHtml, fillerFor(layout.slots ?? [])) },
-      model: previewModel(),
+      model: previewModel(has),
     });
 
     const shots = await this.screenshots.captureHtml(html);
