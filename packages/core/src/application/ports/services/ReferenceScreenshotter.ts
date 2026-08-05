@@ -28,4 +28,15 @@ export interface ReferenceScreenshotter {
    * whole is mostly unreadable once scaled to fit the model's image limits.
    */
   capture(url: string): Promise<Result<ReferenceShot[]>>;
+
+  /**
+   * Renders HTML we generated and captures it, for visual review before the
+   * layout is accepted.
+   *
+   * The page contract checks everything mechanical — placeholders, sections,
+   * balanced tags, colours, slots — and a layout can pass all of it while
+   * still putting a portrait over its own header or squeezing a list into
+   * twelve-character columns. Those are only visible once painted.
+   */
+  captureHtml(html: string): Promise<Result<ReferenceShot[]>>;
 }

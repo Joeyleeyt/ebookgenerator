@@ -63,12 +63,18 @@ function makeBookSummary(over: { title?: string; hasChapters?: boolean } = {}) {
 
 class FakeLandingRepo implements LandingPageRepository {
   saves = 0;
+  stateSaves = 0;
   constructor(private page: LandingPage | null = null) {}
   async findByProject(): Promise<LandingPage | null> {
     return this.page;
   }
   async save(page: LandingPage): Promise<void> {
     this.saves++;
+    this.page = page;
+  }
+  /** State-only writes land in the same place for the fakes' purposes. */
+  async saveState(page: LandingPage): Promise<void> {
+    this.stateSaves++;
     this.page = page;
   }
   current(): LandingPage | null {
@@ -165,7 +171,8 @@ function buildGenerate(options: {
     { assemble: () => '<html>generated</html>' },
     // No reference URL is set on the default fixture, so this is never called.
     { fetch: async () => Result.fail('no reference') },
-    { capture: async () => Result.fail("no screenshots in tests") } as never,
+    { capture: async () => Result.fail("no screenshots in tests"), captureHtml: async () => Result.fail("no browser in tests") } as never,
+    { embedFrom: async () => Result.ok([]) } as never,
     { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
     { fetchDataUri: async () => Result.fail("no logo in tests") } as never,
     {
@@ -260,7 +267,8 @@ function buildTriple(opts: {
     },
     { assemble: () => '<html>generated</html>' },
     { fetch: async () => Result.fail('no reference') },
-    { capture: async () => Result.fail("no screenshots in tests") } as never,
+    { capture: async () => Result.fail("no screenshots in tests"), captureHtml: async () => Result.fail("no browser in tests") } as never,
+    { embedFrom: async () => Result.ok([]) } as never,
     { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
     { fetchDataUri: async () => Result.fail('no logo in tests') } as never,
     {
@@ -409,6 +417,28 @@ describe('GenerateLandingPageUseCase', () => {
     expect(pages.current()?.state).toBe('FAILED');
   });
 
+  // `save` writes every column including `html` — a self-contained page with
+  // its covers embedded as base64. Rewriting that to flip an enum is what put
+  // landing_pages.save past the database's statement timeout.
+  it('writes only the state when marking a page as generating', async () => {
+    const { useCase, pages } = buildGenerate({});
+
+    await useCase.execute({ projectId: 'p1' });
+
+    expect(pages.stateSaves).toBeGreaterThan(0);
+    // Exactly one full save: the finished draft, which genuinely has new html.
+    expect(pages.saves).toBe(1);
+  });
+
+  it('writes only the state when a generation fails', async () => {
+    const { useCase, pages } = buildGenerate({ truncated: true });
+
+    await useCase.execute({ projectId: 'p1' });
+
+    expect(pages.stateSaves).toBeGreaterThan(0);
+    expect(pages.saves).toBe(0); // nothing was ever worth persisting in full
+  });
+
   it('never invents testimonials', async () => {
     const { useCase, rendered } = buildGenerate({});
     await useCase.execute({ projectId: 'p1' });
@@ -487,7 +517,8 @@ const REFERENCE = {
   headings: [{ level: 2, text: 'I. The Manual' }],
   text: 'A reference sales page.',
   markup: '<section class="hero"><h1>x</h1></section>',
-  style: { serifHeadings: true, headingFont: 'Playfair Display', grounds: ['#faf7f0'], accent: '#b8860b', numberedSections: true, imageDensity: 0.3, measurePx: 720 },
+  styleCss: '',
+  style: { serifHeadings: true, serifBody: false, headingFont: 'Playfair Display', bodyFont: null, grounds: ['#faf7f0'], accent: '#b8860b', numberedSections: true, imageDensity: 0.3, measurePx: 720 },
 };
 
 /**
@@ -539,6 +570,10 @@ function buildWithReference(
     /** What the copy call returns — slot map by default, fixed schema when the
      *  test expects the built-in fallback path. */
     copyText?: string;
+    /** Simulate a browser: screenshots of the candidate become available. */
+    canScreenshot?: boolean;
+    /** Verdicts returned by the visual reviewer, in order. */
+    reviews?: string[];
   } = {},
 ) {
   const project = makeProject({ landingTemplateUrl: 'https://eliasyoder.com/' });
@@ -559,6 +594,15 @@ function buildWithReference(
       generate: async (req: { metadata?: { stage: string } }) => {
         const stage = req.metadata?.stage ?? '';
         calls.push(stage);
+        if (stage === 'landing-layout-review') {
+          return Result.ok({
+            text: opts.reviews?.shift() ?? '{"ok":true,"problems":[]}',
+            model: 'm',
+            inputTokens: 1,
+            outputTokens: 1,
+            stopReason: 'end_turn',
+          });
+        }
         const text =
           stage === 'landing-page'
             ? (opts.copyText ?? SLOT_COPY_JSON)
@@ -579,7 +623,14 @@ function buildWithReference(
       },
     },
     { fetch: async () => Result.ok(REFERENCE) },
-    { capture: async () => Result.fail('no screenshots in tests') } as never,
+    {
+      capture: async () => Result.fail('no screenshots in tests'),
+      captureHtml: async () =>
+        opts.canScreenshot
+          ? Result.ok([{ mediaType: 'image/png', dataBase64: 'AAA' }])
+          : Result.fail('no browser in tests'),
+    } as never,
+    { embedFrom: async () => Result.ok([]) } as never,
     { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
     { fetchDataUri: async () => Result.fail("no logo in tests") } as never,
     {
@@ -606,7 +657,9 @@ describe('GenerateLandingPageUseCase — reference-driven layout', () => {
     expect(result.isOk()).toBe(true);
     if (result.isFail()) throw new Error(result.error);
     expect(result.value.layout).toBe('generated');
-    expect(h.counts()).toEqual({ assembled: 1, builtin: 0 });
+    // Two assemblies: one to render the candidate for visual review, one for
+    // the finished page. No fallback to the built-in template.
+    expect(h.counts()).toEqual({ assembled: 2, builtin: 0 });
     expect(h.calls).toEqual(['landing-layout', 'landing-page']);
   });
 
@@ -626,7 +679,9 @@ describe('GenerateLandingPageUseCase — reference-driven layout', () => {
 
     if (result.isFail()) throw new Error(result.error);
     expect(result.value.layout).toBe('generated');
-    expect(h.counts().assembled).toBe(1);
+    // The rejected candidate never reaches the renderer; the repaired one is
+    // assembled twice — once for review, once for real.
+    expect(h.counts().assembled).toBe(2);
   });
 
   it('falls back to the built-in template after repeated failures', async () => {
@@ -660,6 +715,38 @@ describe('GenerateLandingPageUseCase — reference-driven layout', () => {
     if (result.isFail()) throw new Error(result.error);
     // Too few slots and the required ones missing — never stored, never used.
     expect(result.value.layout).toBe('builtin');
+  });
+
+  // The contract cannot see a portrait rendered over the sticky header or a
+  // list squeezed into twelve-character columns — those only exist once
+  // painted, and each of them shipped to the client.
+  it('rejects a layout the rendered page shows to be broken', async () => {
+    const h = buildWithReference([goodLayout(), goodLayout()], {
+      canScreenshot: true,
+      reviews: [
+        JSON.stringify({ ok: false, problems: ['The author photo covers the sticky header.'] }),
+        JSON.stringify({ ok: true, problems: [] }),
+      ],
+    });
+
+    const result = await h.useCase.execute({ projectId: 'p1' });
+
+    if (result.isFail()) throw new Error(result.error);
+    expect(result.value.layout).toBe('generated');
+    // Two derivations: the first was rendered, reviewed and sent back.
+    expect(h.calls.filter((c) => c === 'landing-layout')).toHaveLength(2);
+    expect(h.calls.filter((c) => c === 'landing-layout-review')).toHaveLength(2);
+  });
+
+  // Quality assurance, not a gate: a worker with no browser must still ship.
+  it('accepts the layout when the page cannot be rendered for review', async () => {
+    const h = buildWithReference([goodLayout()], { canScreenshot: false });
+
+    const result = await h.useCase.execute({ projectId: 'p1' });
+
+    if (result.isFail()) throw new Error(result.error);
+    expect(result.value.layout).toBe('generated');
+    expect(h.calls).not.toContain('landing-layout-review');
   });
 
   // The point of storing layouts: the second book pays no layout cost at all.

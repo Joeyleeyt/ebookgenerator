@@ -45,6 +45,26 @@ export const PLACEHOLDERS = {
    * buy links on one page, the model never decides which link goes where.
    */
   offerGrid: '{{OFFER_GRID}}',
+  /**
+   * Every book's cover together, as the reference's hero shows the set.
+   *
+   * {{COVER}} renders the FEATURED book and nothing else — its later
+   * occurrences are deliberately lightweight copies of the first image — so
+   * repeating it to suggest a collection produces the same book three times,
+   * which is exactly what shipped. This is the only way to show three books.
+   */
+  coverStack: '{{COVER_STACK}}',
+  /**
+   * The "what's inside" breakdown, one block per book: its OWN cover, its own
+   * title, its own contents.
+   *
+   * System-rendered for the same reason as the offer grid. Asked to build this
+   * from the copy, the model wrote one book's chapters as three ranges —
+   * "chapters 1-5", "6-10", "11-14" — and showed the same cover beside each,
+   * because pairing a cover with the book it belongs to is bookkeeping, not
+   * layout. Here each block reads one product record, so it cannot mismatch.
+   */
+  bookBreakdown: '{{BOOK_BREAKDOWN}}',
 } as const;
 
 /** A page without these is not a sales page. */
@@ -193,6 +213,52 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   if (occurrences(bodyHtml, PLACEHOLDERS.cover) > 6) {
     errors.push(`${PLACEHOLDERS.cover} may appear at most 6 times.`);
   }
+  if (occurrences(bodyHtml, PLACEHOLDERS.coverStack) > 2) {
+    errors.push(`${PLACEHOLDERS.coverStack} may appear at most 2 times.`);
+  }
+  if (occurrences(bodyHtml, PLACEHOLDERS.bookBreakdown) > 1) {
+    errors.push(`${PLACEHOLDERS.bookBreakdown} may appear at most once.`);
+  }
+  // The offer grid already carries a price and a button per card. A loose
+  // {{PRICE}} or {{CTA_BUTTON}} beside it shows the FEATURED book's price
+  // under a row of differently-priced products, which reads as a fourth,
+  // nameless offer.
+  if (bodyHtml.includes(PLACEHOLDERS.offerGrid)) {
+    for (const section of bodyHtml.split(/<section\b/i)) {
+      if (!section.includes(PLACEHOLDERS.offerGrid)) continue;
+      for (const token of [PLACEHOLDERS.price, PLACEHOLDERS.cta] as string[]) {
+        if (section.includes(token)) {
+          errors.push(
+            `${token} sits in the same section as ${PLACEHOLDERS.offerGrid}. The grid already gives every ` +
+              `product its own price and button; put ${token} in the hero or the closing section instead.`,
+          );
+        }
+      }
+    }
+  }
+  // A multi-book page must show each book with its own cover somewhere. Both
+  // placeholders do that; without either, every book on the page is
+  // represented by the featured book's cover.
+  if (
+    (options.productCount ?? 1) > 1 &&
+    !bodyHtml.includes(PLACEHOLDERS.bookBreakdown) &&
+    !bodyHtml.includes(PLACEHOLDERS.coverStack)
+  ) {
+    errors.push(
+      `This page sells ${options.productCount} books but shows no per-book covers. Place ` +
+        `${PLACEHOLDERS.bookBreakdown} where the reference describes each book, and/or ` +
+        `${PLACEHOLDERS.coverStack} where it shows them as a set.`,
+    );
+  }
+  // On a multi-book page, repeated {{COVER}} is how the same book ends up
+  // displayed as if it were three different ones.
+  if ((options.productCount ?? 1) > 1 && occurrences(bodyHtml, PLACEHOLDERS.cover) > 2) {
+    errors.push(
+      `${PLACEHOLDERS.cover} always renders the SAME (featured) book, so repeating it cannot show a set. ` +
+        `On a page selling ${options.productCount} books use ${PLACEHOLDERS.coverStack} where the reference ` +
+        `shows the books together, and keep ${PLACEHOLDERS.cover} to at most 2 uses.`,
+    );
+  }
   if (occurrences(bodyHtml, PLACEHOLDERS.cta) > 6) {
     errors.push(`${PLACEHOLDERS.cta} may appear at most 6 times.`);
   }
@@ -203,6 +269,24 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   const known = new Set<string>(Object.values(PLACEHOLDERS));
   for (const m of bodyHtml.matchAll(/\{\{[A-Z_]+\}\}/g)) {
     if (!known.has(m[0])) errors.push(`Unknown placeholder ${m[0]}. Use only: ${[...known].join(', ')}.`);
+  }
+
+  // ── page-sized elements must live in the page ──
+  // The sticky bar sits before the first <section>. A cover or a portrait put
+  // up there renders at page scale inside a fixed element and covers
+  // everything behind it — which is exactly how a generated page shipped with
+  // a 460x575 photograph over its own header.
+  const firstSection = bodyHtml.search(/<section\b/i);
+  if (firstSection > 0) {
+    const beforeSections = bodyHtml.slice(0, firstSection);
+    for (const token of [PLACEHOLDERS.cover, PLACEHOLDERS.authorPhoto] as string[]) {
+      if (beforeSections.includes(token)) {
+        errors.push(
+          `${token} appears in the top bar, before the first <section>. It renders at page scale and ` +
+            `would cover the header. Only ${PLACEHOLDERS.logo} and ${PLACEHOLDERS.cta} belong there.`,
+        );
+      }
+    }
   }
 
   // ── structure ──

@@ -96,6 +96,24 @@ export interface LandingCopy {
   /** Serif suits narrative//lifestyle subjects; sans suits technical ones. */
   fontFamily: 'serif' | 'sans';
   /**
+   * The face for BODY and small text, chosen independently of the headings.
+   *
+   * The pairing is the design. Reference templates typically set a serif
+   * display face over sans-serif body copy, and tying both to one choice put
+   * eyebrows, bullets and fine print in Georgia where the reference uses sans.
+   * Absent, it follows `fontFamily` — the old single-face behaviour.
+   */
+  bodyFontFamily?: 'serif' | 'sans';
+  /**
+   * Resolved CSS font stacks, chosen from the reference's ACTUAL typefaces
+   * rather than from the serif/sans flag alone. A high-contrast display serif
+   * and an old-style book serif read nothing alike, and mapping both to Georgia
+   * lost most of what makes a template recognisable. Absent → the generic
+   * serif/sans defaults.
+   */
+  displayFontStack?: string;
+  bodyFontStack?: string;
+  /**
    * The reference's own sections, in its order, written from this book. Empty
    * when there is no reference page — then the fixed fields above carry the
    * whole page, as they always did.

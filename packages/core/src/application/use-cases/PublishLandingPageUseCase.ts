@@ -50,9 +50,11 @@ export class PublishLandingPageUseCase {
 
     const marked = page.markPublishing(this.clock.now());
     if (marked.isFail()) return Result.fail(marked.error);
-    await this.pages.save(page);
+    // State only: the html is what we are about to publish, not something to
+    // rewrite. Re-saving megabytes to flip an enum is what timed out.
+    await this.pages.saveState(page);
 
-    const book = await this.books.findByProject(projectId);
+    const book = await this.books.findSummaryByProject(projectId);
     const title = book?.title ?? project.options.bookTitle ?? 'book';
 
     const published = await this.publisher.publish({
@@ -65,7 +67,7 @@ export class PublishLandingPageUseCase {
 
     if (published.isFail()) {
       page.markFailed(published.error, this.clock.now());
-      await this.pages.save(page);
+      await this.pages.saveState(page);
       return Result.fail(published.error);
     }
 

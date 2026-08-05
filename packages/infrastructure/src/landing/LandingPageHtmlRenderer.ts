@@ -33,16 +33,24 @@ export class LandingPageHtmlRenderer implements LandingPageRenderer {
     const { copy, palette } = model;
     const products = model.products;
     const primary = products.find((p) => p.featured) ?? products[0];
-    const fonts =
-      copy.fontFamily === 'sans'
-        ? {
-            display: '"Helvetica Neue", Inter, system-ui, -apple-system, "Segoe UI", sans-serif',
-            body: 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-          }
-        : {
-            display: 'Georgia, "Iowan Old Style", "Times New Roman", serif',
-            body: 'Georgia, "Iowan Old Style", "Times New Roman", serif',
-          };
+    // Display and body are chosen INDEPENDENTLY. Tying them together set the
+    // eyebrows, bullets and fine print in Georgia on any page whose headings
+    // were serif — where the reference pairs a serif display face with
+    // sans-serif body copy.
+    const SERIF = 'Georgia, "Iowan Old Style", "Times New Roman", serif';
+    // Display sans is tighter and more assertive than the body sans; they were
+    // always two different stacks and must stay so.
+    const DISPLAY_SANS = '"Helvetica Neue", Inter, system-ui, -apple-system, "Segoe UI", sans-serif';
+    const SANS = 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+    const fonts = {
+      // A stack resolved from the reference's ACTUAL typeface wins over the
+      // serif/sans flag: "Playfair Display" and "Merriweather" are both serif
+      // and read nothing alike, and mapping both to Georgia lost most of what
+      // makes a template recognisable.
+      display: copy.displayFontStack ?? (copy.fontFamily === 'sans' ? DISPLAY_SANS : SERIF),
+      // Unset follows the headings, which is what it always did.
+      body: copy.bodyFontStack ?? ((copy.bodyFontFamily ?? copy.fontFamily) === 'sans' ? SANS : SERIF),
+    };
 
     // Numbering is assigned as sections are emitted, so omitting one never
     // leaves a gap in the sequence.
@@ -116,6 +124,12 @@ ${primary?.coverDataUri ? `<meta property="og:image" content="${esc(primary.cove
   /* ── masthead ─────────────────────────────────────────────────────────── */
   .masthead { background: var(--deep); color: var(--on-deep); padding: 18px 0; text-align: center; }
   .masthead .wrap { display: flex; flex-direction: column; gap: 6px; }
+  /* The channel avatar as a brand mark. Sized as a mark, not as an image: the
+     source is a 800px YouTube thumbnail and unconstrained it would fill the bar. */
+  .masthead-logo {
+    width: 34px; height: 34px; border-radius: 50%; object-fit: cover;
+    align-self: center; display: block;
+  }
   .masthead-line {
     font-family: ${fonts.display}; font-size: .76rem; letter-spacing: .22em;
     text-transform: uppercase; color: var(--on-deep-muted);
@@ -305,6 +319,7 @@ ${primary?.coverDataUri ? `<meta property="og:image" content="${esc(primary.cove
 
 <div class="masthead">
   <div class="wrap">
+    ${model.logoDataUri ? `<img class="masthead-logo" src="${esc(model.logoDataUri)}" alt="${esc(model.siteName)}">` : ''}
     <div class="masthead-line">${esc(primary?.title ?? model.siteName)}</div>
     ${model.promoEndsAt ? `<div class="promo" data-ends="${esc(model.promoEndsAt)}">Launch price ends in <span data-countdown>&mdash;</span></div>` : ''}
     ${proofLine(model)}

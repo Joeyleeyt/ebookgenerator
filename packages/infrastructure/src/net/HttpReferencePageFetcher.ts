@@ -209,9 +209,14 @@ export function digest(url: string, html: string, externalCss = ''): ReferencePa
     headings: headings.slice(0, 60),
     text,
     markup: pruneMarkup(html),
+    // Capped: only the @font-face rules are wanted, and they sit near the top
+    // of a stylesheet in practice.
+    styleCss: css.slice(0, 200_000),
     style: {
-      serifHeadings: hasSerifFont(css),
-      headingFont: pickHeadingFont(css),
+      serifHeadings: serifHeadingsOf(css),
+      serifBody: serifBodyOf(css),
+      headingFont: fontNameFor(css, /(^|[\s,>+~])h[1-3]/) ?? pickHeadingFont(css),
+      bodyFont: fontNameFor(css, /(^|[\s,>+~])(body|html|:root)/),
       grounds: uniqueColors(css).slice(0, 5),
       accent: pickAccent(css),
       // "I." / "01" / "Step 1" leading a heading is the numbering signal.
@@ -272,11 +277,57 @@ function textOf(fragment: string): string {
  * sans-serif page as serif — and then every generated page comes out in
  * Georgia. Drop the sans- declarations before looking for a serif family.
  */
+function isSerifDeclaration(decl: string): boolean {
+  // "sans-serif" contains "serif", so it has to be removed before the test.
+  const cleaned = decl.toLowerCase().replace(/sans-serif/g, '');
+  return /\bserif\b|georgia|times|garamond|playfair|iowan|baskerville|caslon/.test(cleaned);
+}
+
 function hasSerifFont(css: string): boolean {
-  return (css.match(/font-family:[^;}]*/gi) ?? []).some((decl) => {
-    const cleaned = decl.toLowerCase().replace(/sans-serif/g, '');
-    return /\bserif\b|georgia|times|garamond|playfair|iowan|baskerville|caslon/.test(cleaned);
-  });
+  return (css.match(/font-family:[^;}]*/gi) ?? []).some(isSerifDeclaration);
+}
+
+/**
+ * Whether rules matching a kind of selector set a serif face, or null when the
+ * stylesheet says nothing about them.
+ *
+ * Headings and body text are asked separately because the PAIRING is the
+ * design: these templates run a serif display face over sans-serif body copy.
+ * A page-wide "is there any serif here" test answers yes and sets the small
+ * text in Georgia too, which is the mismatch that shipped.
+ */
+function serifFor(css: string, selector: RegExp): boolean | null {
+  const rules = css.match(/[^{}]+\{[^}]*\}/g) ?? [];
+  const decls = rules
+    .filter((rule) => selector.test((rule.split('{')[0] ?? '').toLowerCase()))
+    .flatMap((rule) => rule.match(/font-family:[^;}]*/gi) ?? []);
+  if (decls.length === 0) return null;
+  return decls.some(isSerifDeclaration);
+}
+
+/** Headings specifically; falls back to the page-wide signal. */
+function serifHeadingsOf(css: string): boolean {
+  return serifFor(css, /(^|[\s,>+~])h[1-3]\b/) ?? hasSerifFont(css);
+}
+
+/**
+ * Body text specifically. Falls back to NOT serif rather than to the page-wide
+ * signal: a template with a serif display face and no explicit body rule is
+ * far more likely to be running a sans default than to be serif throughout.
+ */
+function fontNameFor(css: string, selector: RegExp): string | null {
+  const rules = css.match(/[^{}]+\{[^}]*\}/g) ?? [];
+  for (const rule of rules) {
+    if (!selector.test((rule.split('{')[0] ?? '').toLowerCase())) continue;
+    const decl = /font-family:\s*([^;}]+)/i.exec(rule);
+    const first = decl?.[1]?.split(',')[0]?.trim().replace(/^["']|["']$/g, '');
+    if (first && !GENERIC_FONTS.has(first.toLowerCase()) && !first.startsWith('var(')) return first;
+  }
+  return null;
+}
+
+function serifBodyOf(css: string): boolean {
+  return serifFor(css, /(^|[\s,>+~])(body|html|:root)\b/) ?? false;
 }
 
 const GENERIC_FONTS = new Set([

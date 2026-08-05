@@ -49,6 +49,7 @@ import {
   HttpReferencePageFetcher,
   HttpImageFetcher,
   PuppeteerReferenceScreenshotter,
+  HttpWebFontFetcher,
   labs69ProxyRotator,
   YouTubeDataApiProvider,
   YouTubeTranscriptProvider,
@@ -121,6 +122,8 @@ export function buildContainer(env: Env = loadEnv()) {
   // Screenshots the reference so the layout model can see how it looks, not
   // just how it is structured.
   const referenceShots = new PuppeteerReferenceScreenshotter();
+  // Inlines the reference's real typefaces when their licence allows it.
+  const webFonts = new HttpWebFontFetcher();
   const sitePublisher = new NetlifyDeployer(env.NETLIFY_AUTH_TOKEN ?? '', env.NETLIFY_ACCOUNT_SLUG);
   const youtube = new YouTubeDataApiProvider(env.YOUTUBE_API_KEY);
   const transcripts = new YouTubeTranscriptProvider();
@@ -189,6 +192,7 @@ export function buildContainer(env: Env = loadEnv()) {
       landingAssembler,
       referencePages,
       referenceShots,
+      webFonts,
       colorSampler,
       imageFetcher,
       storage,

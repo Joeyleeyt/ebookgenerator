@@ -21,6 +21,7 @@ export * from './net/NetlifyDeployer.js';
 export * from './net/HttpReferencePageFetcher.js';
 export * from './net/HttpImageFetcher.js';
 export * from './net/PuppeteerReferenceScreenshotter.js';
+export * from './net/HttpWebFontFetcher.js';
 export * from './persistence/supabase/SupabaseLandingLayoutRepository.js';
 
 // ── Landing page (sales page renderer) ──────────────────────────────────────

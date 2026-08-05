@@ -24,9 +24,17 @@ export const LandingSlotCopyPrompt = {
     pageCount: number | null;
     tone: string;
     slots: Array<{ key: string; purpose: string; maxChars: number }>;
-    /** Titles of the other books, on a multi-book page. */
-    otherTitles?: string[];
+    /**
+     * The other books on the page, with what each one covers.
+     *
+     * Their CONTENTS, not just their names: a "what's inside" section on a
+     * three-book page has to say what each book contains, and a copywriter
+     * given only the featured book's chapters writes about that book three
+     * times over.
+     */
+    otherBooks?: Array<{ title: string; chapterTitles: string[] }>;
   }) {
+    const others = input.otherBooks ?? [];
     return {
       system: [
         'You are a direct-response copywriter filling a sales page template for a non-fiction ebook.',
@@ -36,6 +44,16 @@ export const LandingSlotCopyPrompt = {
         'Every key listed below must appear exactly once. No other keys. Plain text',
         'only — no markdown, no HTML, no emoji.',
         '',
+        ...(others.length > 0
+          ? [
+              `THIS PAGE SELLS ${others.length + 1} BOOKS. Where a slot describes what the`,
+              'reader gets, cover the SET — one book per group of slots, in order, using',
+              "each book's own chapters. Never describe the first book three times over,",
+              'and never split one book into chapter ranges as if the ranges were the',
+              'separate products. Book 1 leads; the others follow in the order listed.',
+              '',
+            ]
+          : []),
         'LENGTH IS A HARD CONSTRAINT. Each slot states maxChars. That is what the',
         'design physically holds; going over breaks the layout it was written for.',
         'Write to the length, do not pad to it.',
@@ -61,15 +79,23 @@ export const LandingSlotCopyPrompt = {
         input.author ? `Author byline: ${input.author}` : '',
         `Creator/channel: ${input.channelTitle}`,
         input.pageCount ? `Length: ${input.pageCount} pages` : '',
-        ...(input.otherTitles && input.otherTitles.length > 0
-          ? ['', 'Also sold on this page:', ...input.otherTitles.map((t) => `  - ${t}`)]
-          : []),
         '',
         '=== POSITIONING ===',
         input.strategy,
         '',
-        '=== CHAPTERS (the only content you may promise) ===',
+        others.length > 0
+          ? `=== BOOK 1 CHAPTERS: ${input.bookTitle} ===`
+          : '=== CHAPTERS (the only content you may promise) ===',
         input.chapterTitles.map((t, i) => `${i + 1}. ${t}`).join('\n'),
+        // Each other book with its OWN contents. A slot asking what is inside
+        // the set can only be answered per book if the chapters are here.
+        ...others.flatMap((b, i) => [
+          '',
+          `=== BOOK ${i + 2} CHAPTERS: ${b.title} ===`,
+          b.chapterTitles.length > 0
+            ? b.chapterTitles.map((t, j) => `${j + 1}. ${t}`).join('\n')
+            : '(chapter list unavailable)',
+        ]),
         '',
         '=== SLOTS TO FILL ===',
         ...input.slots.map((s) => `${s.key}  (max ${s.maxChars} chars) — ${s.purpose}`),

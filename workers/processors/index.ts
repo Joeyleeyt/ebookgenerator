@@ -456,7 +456,8 @@ async function recordLandingFailure(container: Container, projectId: string, err
     const page = await container.repositories.landingPages.findByProject(ProjectId.from(projectId));
     if (!page) return;
     page.markFailed(String(err instanceof Error ? err.message : err), container.clock.now());
-    await container.repositories.landingPages.save(page);
+    // State only — the failure handler must never be the thing that fails.
+    await container.repositories.landingPages.saveState(page);
   } catch {
     /* best-effort */
   }

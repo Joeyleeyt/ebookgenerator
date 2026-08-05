@@ -76,9 +76,10 @@ describe('LandingLayoutPrompt', () => {
       headings: [{ level: 1, text: 'The old methods' }],
       text: 'body text',
       markup: '<main><h1>The old methods</h1></main>',
+      styleCss: '',
       style: {
-        serifHeadings: true,
-        headingFont: null,
+        serifHeadings: true, serifBody: false,
+        headingFont: null, bodyFont: null,
         grounds: [],
         accent: null,
         numberedSections: true,
@@ -103,11 +104,28 @@ describe('LandingLayoutPrompt', () => {
   it('offers the author photo only when one was actually uploaded', () => {
     const withPhoto = LandingLayoutPrompt.build({ ...base, productCount: 1, hasAuthorPhoto: true }).system;
     expect(withPhoto).toContain('a real photograph of the author');
-    expect(withPhoto).not.toContain('NOT AVAILABLE for this page');
+    // Scoped to the photo's own line: the logo carries the same wording on its
+    // line, so a bare match would pass no matter which placeholder was withheld.
+    expect(withPhoto).not.toContain('{{AUTHOR_PHOTO}}   NOT AVAILABLE');
 
     const without = LandingLayoutPrompt.build({ ...base, productCount: 1, hasAuthorPhoto: false }).system;
-    expect(without).toContain('NOT AVAILABLE for this page');
+    expect(without).toContain('{{AUTHOR_PHOTO}}   NOT AVAILABLE');
     expect(without).toContain('Do not place it');
+  });
+
+  // Same failure as the portrait, one row up: a header designed around a brand
+  // mark that resolves to nothing is a bar with a hole in it.
+  it('offers the logo only when the channel avatar actually resolved', () => {
+    const withLogo = LandingLayoutPrompt.build({ ...base, productCount: 1, hasLogo: true }).system;
+    expect(withLogo).toContain("the channel's avatar as a small round brand mark");
+    expect(withLogo).not.toContain('{{LOGO}}           NOT AVAILABLE');
+    expect(withLogo).toContain('{{LOGO}}, the brand text and');
+
+    const without = LandingLayoutPrompt.build({ ...base, productCount: 1, hasLogo: false }).system;
+    expect(without).toContain('{{LOGO}}           NOT AVAILABLE');
+    // The top-bar rule must stop naming a placeholder the page cannot fill.
+    expect(without).not.toContain('{{LOGO}}, the brand text and');
+    expect(without).toContain('there is no logo for this page');
   });
 
   // The edition line changes with the year, and the layout is stored and

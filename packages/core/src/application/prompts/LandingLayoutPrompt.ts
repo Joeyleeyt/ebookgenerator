@@ -1,4 +1,5 @@
 import { PALETTE_VARS, PLACEHOLDERS } from '../landing/pageContract.js';
+import { systemStackFor } from '../../domain/landing/fontStacks.js';
 import type { ReferencePage } from '../ports/services/ReferencePageFetcher.js';
 import type { ReferenceShot } from '../ports/services/ReferenceScreenshotter.js';
 import type { AiContentBlock } from '../ports/services/AiTextGenerator.js';
@@ -32,6 +33,12 @@ export const LandingLayoutPrompt = {
      * where the reference has a portrait.
      */
     hasAuthorPhoto?: boolean;
+    /**
+     * Whether a channel avatar actually resolved. Told explicitly for the same
+     * reason as the photo: a header designed around a brand mark that renders
+     * to nothing is a lopsided bar with a hole where the reference has a logo.
+     */
+    hasLogo?: boolean;
     /** e.g. "MMXXVI · No. I", for a masthead slot the reference has. */
     edition?: string | null;
     /** Screenshots of the reference, attached to the user message as images. */
@@ -77,14 +84,40 @@ export const LandingLayoutPrompt = {
       `  ${PLACEHOLDERS.price}          a standalone price block with strike-through and savings chip.`,
       '                        NEVER put it right next to the button — the price would show twice.',
       '                        Use it once, in the order section, above the button.',
-      `  ${PLACEHOLDERS.cover}          the book cover image — wherever the template shows the book,`,
-      '                        up to 6 times; each renders the same cover',
+      `  ${PLACEHOLDERS.cover}          ONE book cover — always the same (featured) book, however`,
+      '                        many times you place it. Use it where the template shows a',
+      '                        single book.',
+      ...(input.productCount > 1
+        ? [
+            `  ${PLACEHOLDERS.bookBreakdown} one block per book — each book's OWN cover, title and`,
+            '                        contents. Put it where the reference describes the books',
+            '                        individually ("what\'s inside"). Once only. You do not build',
+            '                        these blocks: pairing a cover with its book is ours to get',
+            '                        right, not yours.',
+            `  ${PLACEHOLDERS.coverStack}    ALL ${input.productCount} covers together, side by side. Use this`,
+            '                        wherever the reference shows the books as a set — the hero,',
+            `                        a bundle panel. Repeating ${PLACEHOLDERS.cover} would show the`,
+            '                        SAME book that many times, which is not a set.',
+          ]
+        : []),
       `  ${PLACEHOLDERS.contents}       the chapter breakdown list`,
       `  ${PLACEHOLDERS.guarantee}      the guarantee panel (omit if not wanted)`,
       `  ${PLACEHOLDERS.paymentMarks}   payment marks — a full-width row on its OWN line,`,
       '                        directly beneath a buy button; never beside a price',
       `  ${PLACEHOLDERS.testimonials}   reader quotes — may render to nothing, so never`,
       '                        put a heading inside a section that has only this',
+      ...(input.hasLogo
+        ? [
+            `  ${PLACEHOLDERS.logo}           the channel's avatar as a small round brand mark —`,
+            '                        the header, and the footer if the reference marks it too.',
+            '                        At most 3 times.',
+          ]
+        : [
+            `  ${PLACEHOLDERS.logo}           NOT AVAILABLE for this page — this channel has no avatar.`,
+            '                        Do not place it. Where the reference shows a logo, the brand',
+            '                        text alone carries the header; do not leave a slot, box or',
+            '                        circle sitting empty in its place.',
+          ]),
       ...(input.hasAuthorPhoto
         ? [
             `  ${PLACEHOLDERS.authorPhoto}   a real photograph of the author — put it where the`,
@@ -175,8 +208,14 @@ export const LandingLayoutPrompt = {
             '',
           ]
         : ['You may choose the order of sections and which copy goes where.', '']),
-      'TOP BAR. If the page has a sticky bar, build it like a professional brand',
-      'header, not a text row:',
+      'TOP BAR. If the page has a sticky bar, the ONLY things allowed inside it are',
+      input.hasLogo
+        ? `${PLACEHOLDERS.logo}, the brand text and ${PLACEHOLDERS.cta}. Never put`
+        : `the brand text and ${PLACEHOLDERS.cta} (there is no logo for this page). Never put`,
+      `${PLACEHOLDERS.cover}, ${PLACEHOLDERS.authorPhoto}, a price block or a`,
+      'section heading in there — those are page-sized elements, and in a fixed bar',
+      'they cover the page behind them.',
+      'Build it like a professional brand header, not a text row:',
       '  - a single slim row, vertically centered, padding-block 10-12px',
       '  - brand block on the left: the book title set in a SANS-SERIF stack even on',
       '    a serif page, uppercase, ~0.8rem, letter-spacing .12-.18em, one line with',
@@ -221,6 +260,17 @@ export const LandingLayoutPrompt = {
       'never absolute-position content out of a column. Text columns need a sane',
       'minimum width (18ch+); if a split cannot hold both sides, stack them.',
       '',
+      'NEVER NEST A SPLIT INSIDE A SPLIT. A two-column section whose text side is',
+      'itself split into two columns leaves each one around 12 characters wide, and',
+      'headings and bullets then wrap after two or three words. If a section shows',
+      'an image beside a list, the list stays ONE column. Any column holding prose',
+      'must be at least 22 characters wide at every breakpoint; if the split cannot',
+      'give both sides that, stack them instead.',
+      '',
+      'BALANCE THE SPLIT. When a section pairs text with an image, the text takes',
+      'the larger share (about 3:2) and the image sits centred in its own column at',
+      'its natural size. Do not leave a third of the section empty beside it.',
+      '',
       'ONE COLUMN PER SECTION. Every block inside a section — eyebrow, heading,',
       'body, card grid, table, button — shares ONE centred content column and ONE',
       'left edge. A heading indented further than the grid beneath it reads as a',
@@ -249,12 +299,22 @@ export const LandingLayoutPrompt = {
           '',
           'Observed treatment:',
           `  headings: ${input.reference.style.serifHeadings ? 'serif' : 'sans-serif'}`,
+          `  body and small text: ${input.reference.style.serifBody ? 'serif' : 'sans-serif'}` +
+            (input.reference.style.serifHeadings !== input.reference.style.serifBody
+              ? ' — the two DIFFER, and that pairing is the design. Set them separately:'
+                + ' eyebrows, labels, bullets, captions, buttons and fine print all take the'
+                + ' BODY face, not the heading face.'
+              : ''),
+          // The closest renderable stack is COMPUTED, not described. The page
+          // loads no fonts, so the reference's real webface is unavailable, and
+          // "pick something similar" gave Georgia for every serif regardless of
+          // how the original actually read.
           input.reference.style.headingFont
-            ? `  display typeface: "${input.reference.style.headingFont}" — you cannot load fonts, so pick the` +
-              ' SYSTEM stack closest in character (a high-contrast serif → Georgia/"Iowan Old Style"; a geometric' +
-              ' sans → "Avenir Next"/"Century Gothic"/"Helvetica Neue"; a grotesque → "Helvetica Neue"/Arial)' +
-              ' and echo its feel with weight, letter-spacing and case'
-            : '',
+            ? `  display typeface: "${input.reference.style.headingFont}" — unavailable here (no webfonts).`
+            : '  display typeface: not detected.',
+          `  USE EXACTLY THIS for headings: font-family: ${systemStackFor(input.reference.style.headingFont, input.reference.style.serifHeadings)};`,
+          `  USE EXACTLY THIS for body and small text: font-family: ${systemStackFor(input.reference.style.bodyFont, input.reference.style.serifBody)};`,
+          '  Echo the original with weight, letter-spacing and case; substitute no other families.',
           `  section numbering: ${input.reference.style.numberedSections ? 'yes — number the sections the same way' : 'no'}`,
           `  content column: ${input.reference.style.measurePx ? `${input.reference.style.measurePx}px` : 'unspecified'}`,
           `  imagery: ${input.reference.style.imageDensity < 1 ? 'text-led, very few images' : input.reference.style.imageDensity < 4 ? 'balanced' : 'image-led'}`,

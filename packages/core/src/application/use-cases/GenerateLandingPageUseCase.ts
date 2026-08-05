@@ -20,12 +20,15 @@ import type { Clock } from '../ports/Clock.js';
 import type { Hasher } from '../ports/Hasher.js';
 import { LandingPagePrompt, LandingSlotCopyPrompt } from '../prompts/LandingPagePrompt.js';
 import { LandingLayoutPrompt } from '../prompts/LandingLayoutPrompt.js';
+import { LayoutReviewPrompt } from '../prompts/LayoutReviewPrompt.js';
 import { parseJsonCompletion } from '../prompts/parse.js';
 import { validateGeneratedPage, fillCopySlots, type GeneratedPage } from '../landing/pageContract.js';
 import type { LandingPageAssembler } from '../ports/services/LandingPageAssembler.js';
 import type { ReferencePage, ReferencePageFetcher } from '../ports/services/ReferencePageFetcher.js';
 import type { ReferenceScreenshotter, ReferenceShot } from '../ports/services/ReferenceScreenshotter.js';
+import type { WebFontFetcher } from '../ports/services/WebFontFetcher.js';
 import { referenceUrlFor } from '../../domain/landing/LandingTemplate.js';
+import { preferredStackFor } from '../../domain/landing/fontStacks.js';
 import type {
   LandingLayoutRepository,
   StoredLandingLayout,
@@ -119,6 +122,106 @@ function outlineOf(reference: ReferencePage): Array<{ heading: string; excerpt: 
     const excerpt = text.slice(after, end).trim();
     return { heading: h.text, excerpt: excerpt || '(heading only)' };
   });
+}
+
+/**
+ * Filler text for a layout review, sized to each slot's own ceiling.
+ *
+ * Realistic LENGTH is the whole point: a slot filled with "text" tells you
+ * nothing about whether its column can hold a sentence, and the defects worth
+ * catching — two-word wrapping, clipped headings — only appear at full length.
+ */
+function fillerFor(slots: Array<{ key: string; maxChars: number }>): Record<string, string> {
+  const words =
+    'the quote you were given covers parts labour and a diagnostic fee that any owner can read in a driveway with a cheap scanner before agreeing to anything at all'.split(
+      ' ',
+    );
+  const out: Record<string, string> = {};
+  for (const slot of slots) {
+    // 85% of the ceiling: long enough to stress the column, short enough that
+    // an overflow in the shot is the layout's fault and not the filler's.
+    const target = Math.max(4, Math.floor(slot.maxChars * 0.85));
+    let text = '';
+    for (let i = 0; text.length < target; i++) {
+      const next = words[i % words.length] as string;
+      if (text.length + next.length + 1 > target) break;
+      text = text ? `${text} ${next}` : next;
+    }
+    out[slot.key] = text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  return out;
+}
+
+/**
+ * A stand-in page model for reviewing a layout before any book is attached.
+ * Every figure is obviously synthetic — this render is never shown to a buyer,
+ * it only goes to the reviewer as an image.
+ */
+function previewModel(): Parameters<LandingPageRenderer['render']>[0] {
+  const product: LandingProduct = {
+    title: 'Preview Title',
+    subtitle: 'Preview subtitle',
+    coverDataUri: null,
+    pageCount: 120,
+    categoryLabel: 'Preview',
+    features: ['Preview feature one', 'Preview feature two', 'Preview feature three'],
+    contents: ['Preview chapter one', 'Preview chapter two'],
+    sections: [{ title: 'Preview section', items: ['Preview point one', 'Preview point two'] }],
+    priceCents: 2700,
+    compareAtCents: 7900,
+    checkoutUrl: 'https://example.com/preview',
+    kind: 'book',
+    featured: true,
+  };
+  return {
+    copy: {
+      headline: 'Preview headline',
+      subheadline: 'Preview subheadline',
+      eyebrow: 'Preview',
+      ctaLabel: 'Get the book',
+      painPoints: [],
+      whatsInsideHeading: '',
+      bullets: [],
+      whoIsItForHeading: '',
+      whoIsItFor: [],
+      authorHeading: '',
+      authorBio: '',
+      faqs: [],
+      categoryLabel: 'Preview',
+      productFeatures: product.features,
+      comparisonWithout: [],
+      comparisonWith: [],
+      closingHeading: '',
+      closingBody: '',
+      fontFamily: 'sans',
+      templateSections: [],
+    },
+    palette: Palette.neutral(),
+    currency: 'USD',
+    guaranteeDays: 30,
+    author: 'Preview Author',
+    channelTitle: 'Preview Channel',
+    subscriberCount: 100_000,
+    testimonials: [],
+    products: [product],
+    siteName: 'Preview',
+    logoDataUri: null,
+    stats: [
+      { value: '120', label: 'Pages' },
+      { value: '30', label: 'Day guarantee' },
+    ],
+    heroImageDataUri: null,
+    // Null on purpose: a layout that only looks right WITH a portrait must not
+    // pass review, because most books have none.
+    authorPhotoDataUri: null,
+    authorCredential: 'Preview Author · Preview Channel',
+    promoEndsAt: null,
+    rating: null,
+    valueStack: [],
+    costComparison: null,
+    paymentMethods: ['Visa', 'Mastercard'],
+    edition: 'MMXXVI · No. I',
+  };
 }
 
 /** Roman numeral year for the footer's edition line, e.g. 2026 → "MMXXVI". */
@@ -227,6 +330,7 @@ export class GenerateLandingPageUseCase {
     private readonly assembler: LandingPageAssembler,
     private readonly references: ReferencePageFetcher,
     private readonly screenshots: ReferenceScreenshotter,
+    private readonly fonts: WebFontFetcher,
     private readonly colors: ImageColorSampler,
     private readonly images: RemoteImageFetcher,
     private readonly storage: ObjectStorage,
@@ -314,7 +418,9 @@ export class GenerateLandingPageUseCase {
     }
 
     page.markGenerating(now);
-    await this.pages.save(page);
+    // State only: a full save would rewrite the existing multi-megabyte html
+    // just to flip an enum, and that is what exceeded the statement timeout.
+    await this.pages.saveState(page);
 
     // ── the reference page this book's layout should follow ──
     // Which reference depends on the MODE, not on the project: a three-book
@@ -361,6 +467,13 @@ export class GenerateLandingPageUseCase {
     const artifactList = await this.artifacts.listByProject(projectId);
     const pageCount = artifactList.find((a) => a.pageCount > 0)?.pageCount ?? null;
 
+    // Loaded HERE rather than at render time because the layout call needs to
+    // know whether a brand mark exists before it designs the header. Resolved,
+    // not merely configured: a channel whose thumbnail URL is dead produces the
+    // same empty header as one with no avatar at all, so the fetch is the only
+    // honest signal.
+    const logoDataUri = await this.loadLogo(channel?.thumbnailUrl ?? null);
+
     // ── the stored layout for this template ──
     // Captured once per reference and reused by every book that follows it.
     // That is what makes each page structurally identical to the template
@@ -375,9 +488,30 @@ export class GenerateLandingPageUseCase {
           referenceShots,
           productCount: 1 + project.options.landingSiblings.length,
           hasAuthorPhoto: Boolean(project.options.landingAuthorPhotoPath),
+          hasLogo: logoDataUri !== null,
           rebuild: input.rebuildLayout ?? false,
         })
       : null;
+
+    // ── the other books on this page ──
+    // Loaded BEFORE the copy is written, not after: a three-book page needs
+    // prose about three books, and a copywriter given only the featured book's
+    // chapters writes about that book three times — which is how a "what's
+    // inside" section came back as chapter ranges 1-5, 6-10, 11-14 of one
+    // title where the template shows one block per book.
+    //
+    // A sibling that can't be loaded fails the whole generation rather than
+    // silently reducing the page to fewer books.
+    const siblingProducts: LandingProduct[] = [];
+    for (const sibling of project.options.landingSiblings) {
+      const loaded = await this.loadSiblingProduct(sibling, project.ownerId);
+      if (loaded.isFail()) {
+        page.markFailed(loaded.error, this.clock.now());
+        await this.pages.saveState(page);
+        return Result.fail(loaded.error);
+      }
+      siblingProducts.push(loaded.value);
+    }
 
     const written = layout
       ? await this.writeSlotCopy({
@@ -391,6 +525,7 @@ export class GenerateLandingPageUseCase {
           chapterTitles,
           pageCount,
           tone: project.options.tone,
+          otherBooks: siblingProducts.map((p) => ({ title: p.title, chapterTitles: p.contents })),
         })
       : await this.writeFixedCopy({
           projectId: input.projectId,
@@ -406,7 +541,7 @@ export class GenerateLandingPageUseCase {
 
     if (written.isFail()) {
       page.markFailed(written.error, this.clock.now());
-      await this.pages.save(page);
+      await this.pages.saveState(page);
       return Result.fail(written.error);
     }
     const { slotValues } = written.value;
@@ -416,7 +551,18 @@ export class GenerateLandingPageUseCase {
     // back in a sans face. What the reference actually does is observable, so
     // observe it rather than infer it.
     const copy: LandingCopy = reference
-      ? { ...written.value.copy, fontFamily: reference.style.serifHeadings ? 'serif' : 'sans' }
+      ? {
+          ...written.value.copy,
+          fontFamily: reference.style.serifHeadings ? 'serif' : 'sans',
+          // Independently observed: the reference's pairing is usually a serif
+          // display face over sans body copy, and following the headings for
+          // both set the small text in the wrong face.
+          bodyFontFamily: reference.style.serifBody ? 'serif' : 'sans',
+          // Resolved from the reference's named typefaces, so a display serif
+          // is not flattened into the same Georgia as a book serif.
+          displayFontStack: preferredStackFor(reference.style.headingFont, reference.style.serifHeadings),
+          bodyFontStack: preferredStackFor(reference.style.bodyFont, reference.style.serifBody),
+        }
       : written.value.copy;
 
     // ── render ──
@@ -445,20 +591,7 @@ export class GenerateLandingPageUseCase {
       featured: true,
     };
 
-    // ── the other books on this page ──
-    // A triple page sells three products, each with its own cover, price and
-    // buy link. A sibling that can't be loaded fails the whole generation
-    // rather than silently reducing the page to fewer books.
-    const products: LandingProduct[] = [product];
-    for (const sibling of project.options.landingSiblings) {
-      const loaded = await this.loadSiblingProduct(sibling, project.ownerId);
-      if (loaded.isFail()) {
-        page.markFailed(loaded.error, this.clock.now());
-        await this.pages.save(page);
-        return Result.fail(loaded.error);
-      }
-      products.push(loaded.value);
-    }
+    const products: LandingProduct[] = [product, ...siblingProducts];
 
     const bundle = this.buildBundle(project.options, products);
     if (bundle) products.push(bundle);
@@ -483,7 +616,7 @@ export class GenerateLandingPageUseCase {
       // it is named after the channel rather than after whichever book the user
       // happened to generate from.
       siteName: (project.options.isTripleLanding ? (channel?.title ?? title) : title),
-      logoDataUri: await this.loadLogo(channel?.thumbnailUrl ?? null),
+      logoDataUri,
       // Every stat is a fact the system already holds — never a figure the
       // model wrote. A fabricated "4,200 readers" is a false claim about real
       // people, so a stat with no source simply doesn't render.
@@ -549,6 +682,7 @@ export class GenerateLandingPageUseCase {
     referenceShots: ReferenceShot[];
     productCount: number;
     hasAuthorPhoto: boolean;
+    hasLogo: boolean;
     rebuild: boolean;
   }): Promise<StoredLandingLayout | null> {
     if (!input.rebuild) {
@@ -561,10 +695,15 @@ export class GenerateLandingPageUseCase {
     const derived = await this.deriveLayout(input);
     if (!derived) return null;
 
+    // The reference's real typefaces, inlined — once per template, into the
+    // stylesheet that every book on it will reuse. Licence-gated inside the
+    // fetcher: only origins that serve openly-licensed fonts are embedded.
+    const fontCss = input.reference ? await this.embedFonts(input.reference) : '';
+
     const stored: StoredLandingLayout = {
       referenceUrl: input.referenceUrl,
       mode: input.mode,
-      css: derived.css,
+      css: fontCss + derived.css,
       bodyHtml: derived.bodyHtml,
       slots: derived.slots ?? [],
       inputHash: this.hasher.hash({
@@ -572,6 +711,7 @@ export class GenerateLandingPageUseCase {
         mode: input.mode,
         products: input.productCount,
         photo: input.hasAuthorPhoto,
+        logo: input.hasLogo,
       }),
     };
     // A store failure costs the cache, not the page — this generation already
@@ -590,6 +730,7 @@ export class GenerateLandingPageUseCase {
     referenceShots: ReferenceShot[];
     productCount: number;
     hasAuthorPhoto: boolean;
+    hasLogo: boolean;
   }): Promise<GeneratedPage | null> {
     this.lastLayoutFailure = undefined;
     let repairErrors: string[] | undefined;
@@ -599,6 +740,7 @@ export class GenerateLandingPageUseCase {
         reference: input.reference,
         productCount: input.productCount,
         hasAuthorPhoto: input.hasAuthorPhoto,
+        hasLogo: input.hasLogo,
         referenceShots: input.referenceShots,
         ...(repairErrors ? { repairErrors } : {}),
       });
@@ -638,8 +780,15 @@ export class GenerateLandingPageUseCase {
         // that book's headline on every other book that reuses the template.
         expectSlots: true,
       });
-      if (check.isOk()) return generated;
-      repairErrors = check.error;
+      if (check.isFail()) {
+        repairErrors = check.error;
+        continue;
+      }
+
+      // Mechanically valid is not the same as usable. Render it and look.
+      const visual = await this.reviewRendered(generated, input.projectId);
+      if (visual.length === 0) return generated;
+      repairErrors = visual;
     }
     // The reasons ride back out so the worker can log them. Without this a
     // fallback is indistinguishable from success until someone compares the
@@ -647,6 +796,61 @@ export class GenerateLandingPageUseCase {
     // silently ignored the reference reached the client.
     this.lastLayoutFailure = repairErrors;
     return null;
+  }
+
+  /**
+   * Renders a candidate layout with filler copy and looks at it.
+   *
+   * Returns the visual defects found, or an empty list when the page is fine —
+   * including when the check itself could not run. This is quality assurance,
+   * not a gate: a browser that fails to launch must not stop a seller getting
+   * a page, so an inconclusive review passes.
+   */
+  private async reviewRendered(layout: GeneratedPage, projectId: string): Promise<string[]> {
+    const html = this.assembler.assemble({
+      page: { css: layout.css, bodyHtml: fillCopySlots(layout.bodyHtml, fillerFor(layout.slots ?? [])) },
+      model: previewModel(),
+    });
+
+    const shots = await this.screenshots.captureHtml(html);
+    if (shots.isFail() || shots.value.length === 0) return [];
+
+    const prompt = LayoutReviewPrompt.build({ shots: shots.value });
+    const completion = await this.ai.generate({
+      // Sonnet: this is "does this picture look broken", not design judgement,
+      // and it runs on every layout derivation.
+      model: 'claude-sonnet-4-6',
+      system: prompt.system,
+      messages: [{ role: 'user', content: prompt.user }],
+      maxTokens: 1500,
+      cacheControl: { systemPrefix: true },
+      metadata: { projectId, stage: 'landing-layout-review' },
+    });
+    if (completion.isFail()) return [];
+
+    const parsed = parseJsonCompletion(
+      completion.value.text,
+      z.object({ ok: z.boolean(), problems: z.array(z.string()).default([]) }),
+    );
+    if (parsed.isFail()) return [];
+    if (parsed.value.ok) return [];
+
+    // Prefixed so the repair round can tell a rendering fault from a contract
+    // breach — the fixes are different in kind.
+    return parsed.value.problems.slice(0, 6).map((p) => `Visual defect in the rendered page: ${p}`);
+  }
+
+  /**
+   * The reference's own fonts as inline `@font-face` rules, or nothing.
+   *
+   * Strictly best-effort and strictly licence-gated: a page falling back to the
+   * closest system stack is a working page, and a font we may not redistribute
+   * is one we do not download at all.
+   */
+  private async embedFonts(reference: ReferencePage): Promise<string> {
+    const embedded = await this.fonts.embedFrom(reference.styleCss, reference.url);
+    if (embedded.isFail() || embedded.value.length === 0) return '';
+    return embedded.value.map((f) => f.fontFaceCss).join('\n') + '\n';
   }
 
   /** Fills a stored layout's slots for this book. */
@@ -661,6 +865,8 @@ export class GenerateLandingPageUseCase {
     chapterTitles: string[];
     pageCount: number | null;
     tone: string;
+    /** The other books on the page, with what each one actually covers. */
+    otherBooks: Array<{ title: string; chapterTitles: string[] }>;
   }): Promise<Result<{ copy: LandingCopy; slotValues: Record<string, string> }>> {
     const prompt = LandingSlotCopyPrompt.build({ ...input, slots: input.layout.slots });
 
@@ -847,10 +1053,6 @@ export class GenerateLandingPageUseCase {
   }
 
   /**
-   * The channel's avatar, used as the page's brand mark. Strictly best-effort,
-   * like the cover: a dead avatar URL must never cost the seller their page.
-   */
-  /**
    * The seller's uploaded author portrait. Optional by design and never
    * substituted with the channel avatar: an avatar is usually a logo or a small
    * crop, and enlarging it into the hero portrait the reference pages use looks
@@ -862,6 +1064,11 @@ export class GenerateLandingPageUseCase {
     return dataUri.isOk() ? dataUri.value : null;
   }
 
+  /**
+   * The channel's avatar, used as the page's brand mark. Strictly best-effort,
+   * like the cover: a dead avatar URL must never cost the seller their page.
+   * Note this is NOT a stand-in for the author portrait — see loadAuthorPhoto.
+   */
   private async loadLogo(thumbnailUrl: string | null): Promise<string | null> {
     if (!thumbnailUrl) return null;
     const fetched = await this.images.fetchDataUri(thumbnailUrl);

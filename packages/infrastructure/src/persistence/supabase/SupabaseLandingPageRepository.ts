@@ -63,6 +63,22 @@ export class SupabaseLandingPageRepository implements LandingPageRepository {
     if (error) throw queryError('landing_pages', 'save', error);
   }
 
+  async saveState(page: LandingPage): Promise<void> {
+    const props = page.toJSON();
+    // Update, not upsert: only state, error and the timestamp travel. The
+    // multi-megabyte html/copy/palette columns stay untouched on disk.
+    const { data, error } = await this.db
+      .from('landing_pages')
+      .update({ state: props.state, error: props.error, updated_at: props.updatedAt.toISOString() })
+      .eq('id', page.id.value)
+      .select('id');
+    if (error) throw queryError('landing_pages', 'saveState', error);
+    // First generation: the row does not exist yet, so there is nothing to
+    // update. Fall through to the full save — cheap here, because a page that
+    // has never been generated has no html to drag along.
+    if (!data || data.length === 0) await this.save(page);
+  }
+
   private toDomain(row: LandingPageRow): LandingPage {
     return LandingPage.rehydrate(
       {

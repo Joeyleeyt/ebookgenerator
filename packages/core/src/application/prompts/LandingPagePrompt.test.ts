@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LandingPagePrompt } from './LandingPagePrompt.js';
+import { LandingPagePrompt, LandingSlotCopyPrompt } from './LandingPagePrompt.js';
 
 const base = {
   bookTitle: 'The DIY Repair Bible',
@@ -58,6 +58,35 @@ describe('LandingPagePrompt', () => {
     });
     expect(user).toContain('cover the nearest equivalent');
     expect(user).toContain('an empty section is a hole in the');
+  });
+
+  // A three-book page needs prose about three books. Given only book one's
+  // chapters, the copywriter described that book three times over — as chapter
+  // ranges 1-5, 6-10 and 11-14 pretending to be separate products.
+  it('gives the slot copywriter every book on the page, with its chapters', () => {
+    const { system, user } = LandingSlotCopyPrompt.build({
+      ...base,
+      slots: [{ key: 'inside.heading', purpose: "What's inside", maxChars: 60 }],
+      otherBooks: [
+        { title: 'The Smart Driver Buying Bible', chapterTitles: ['Choosing tyres', 'Reading a spec sheet'] },
+        { title: 'The Mechanic Bible', chapterTitles: ['Service intervals'] },
+      ],
+    });
+
+    expect(system).toContain('THIS PAGE SELLS 3 BOOKS');
+    expect(system).toContain('Never describe the first book three times over');
+    expect(user).toContain('BOOK 2 CHAPTERS: The Smart Driver Buying Bible');
+    expect(user).toContain('Choosing tyres');
+    expect(user).toContain('BOOK 3 CHAPTERS: The Mechanic Bible');
+  });
+
+  it('says nothing about a set when only one book is sold', () => {
+    const { system, user } = LandingSlotCopyPrompt.build({
+      ...base,
+      slots: [{ key: 'inside.heading', purpose: "What's inside", maxChars: 60 }],
+    });
+    expect(system).not.toContain('THIS PAGE SELLS');
+    expect(user).toContain('CHAPTERS (the only content you may promise)');
   });
 
   it('still refuses invented social proof', () => {

@@ -43,6 +43,8 @@ export class GeneratedPageAssembler implements LandingPageAssembler {
       logo: logoMarkup(model),
       offerGrid: offerGridMarkup(model),
       authorPhoto: authorPhotoMarkup(model),
+      coverStack: coverStackMarkup(model),
+      bookBreakdown: bookBreakdownMarkup(model),
     });
 
     return `<!doctype html>
@@ -151,6 +153,39 @@ const COMPONENT_CSS = `
                              background: var(--surface); border-radius: 0 10px 10px 0; }
   .testimonials cite { font-style: normal; font-size: .84rem; color: var(--muted); }
 
+  /* The injected cover had NO default rule, so a layout that never styled
+     .cover left the image at its intrinsic size — floating in a column at
+     whatever width it happened to be, with dead space around it. */
+  .cover { display: block; width: 100%; max-width: min(280px, 60vw); height: auto;
+           margin-inline: auto; border-radius: 4px; }
+
+  /* One block per book — cover beside contents, as the reference's "what's
+     inside" presents each volume. Stacks on a phone. */
+  .books { display: grid; gap: 22px; }
+  .book { display: grid; grid-template-columns: minmax(120px, 180px) minmax(22ch, 1fr); gap: 24px;
+          align-items: start; padding: 22px; background: var(--surface);
+          border: 1px solid var(--border); border-radius: 10px; }
+  @media (max-width: 620px) { .book { grid-template-columns: 1fr; } }
+  .book-cover { display: block; width: 100%; height: auto; border-radius: 4px;
+                box-shadow: 0 12px 30px -12px rgba(0,0,0,.55); }
+  .book-body { min-width: 0; }
+  .book-index { margin: 0 0 4px; font-size: .68rem; letter-spacing: .16em; text-transform: uppercase;
+                color: var(--accent); }
+  .book-body h3 { margin: 0 0 .3em; color: var(--heading); font-size: 1.16rem; }
+  .book-sub { margin: 0 0 12px; font-size: .9rem; color: var(--muted); }
+  .book-body ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+  .book-body li { padding-left: 18px; position: relative; font-size: .92rem; color: var(--muted); }
+  .book-body li::before { content: "·"; position: absolute; left: 5px; color: var(--accent); }
+
+  /* The set of books, as the reference hero shows them: the featured title
+     centred and slightly larger, the others flanking it. */
+  .cover-stack { display: flex; align-items: center; justify-content: center; gap: 18px; flex-wrap: wrap; }
+  .cover-stack-item { display: block; width: min(200px, 26vw); height: auto; border-radius: 4px;
+                      box-shadow: 0 18px 40px -14px rgba(0,0,0,.55); }
+  .cover-stack-lead { width: min(240px, 32vw); order: -1; }
+  /* Centre the lead on wide viewports; stacked order is fine below that. */
+  @media (min-width: 700px) { .cover-stack-lead { order: 0; } }
+
   .cover-fallback { display: grid; place-items: center; aspect-ratio: 2/3; width: min(230px, 60vw);
                     background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
                     padding: 22px; text-align: center; font-weight: 700; color: var(--heading); }
@@ -167,6 +202,15 @@ const COMPONENT_CSS = `
     background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
   }
   .offer-featured { border-color: var(--accent); border-width: 2px; }
+  /* The bundle takes the full row rather than orphaning onto a second one as a
+     lone narrow card, and lays out horizontally where there is room. */
+  .offer-bundle { grid-column: 1 / -1; }
+  @media (min-width: 760px) {
+    .offer-bundle { display: grid; grid-template-columns: minmax(160px, 240px) 1fr minmax(200px, 260px);
+                    gap: 26px; align-items: center; }
+    .offer-bundle .offer-flag { grid-column: 1 / -1; }
+    .offer-bundle .offer-buy { margin-top: 0; }
+  }
   .offer-flag {
     align-self: flex-start; background: var(--accent); color: var(--accent-contrast);
     font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
@@ -194,8 +238,15 @@ const COMPONENT_CSS = `
 
   /* Sized to the slot it lands in rather than fixed: the reference pages use
      the same portrait large in the hero and small beside the author bio. */
-  .author-photo { display: block; width: 100%; max-width: 460px; aspect-ratio: 4/5;
-                  object-fit: cover; border-radius: 6px; }
+  /* Sized BY ITS CONTAINER, never by a fixed figure. The previous default —
+     max-width 460px with a forced 4/5 ratio — rendered a 460x575 portrait
+     wherever it landed, which covered the whole sticky bar and the hero behind
+     it when a layout placed it up there. The caps below mean a bad placement
+     is merely wrong, not page-breaking. */
+  .author-photo {
+    display: block; width: 100%; max-width: 100%; height: auto;
+    max-height: min(60vh, 520px); object-fit: cover; border-radius: 6px;
+  }
 `;
 
 // ── placeholder markup ───────────────────────────────────────────────────────
@@ -206,7 +257,18 @@ const COMPONENT_CSS = `
  * money. With no link the button renders inert, which is what makes a preview
  * possible before the product exists on the store.
  */
-function ctaMarkup(p: LandingProduct | undefined, model: LandingPageModel): string {
+function ctaMarkup(p: LandingProduct | undefined, model: LandingPageModel, label?: string): string {
+  // The copy's ctaLabel names the FEATURED book ("Get the DIY Repair Bible"),
+  // which is right in the hero and wrong on every other card of a multi-book
+  // offer grid — every button there advertised book one. Cards pass their own
+  // label, which already carries the price, so nothing is appended to it.
+  if (label) {
+    const cardText = esc(label);
+    if (!p?.checkoutUrl) {
+      return `<span class="cta-wrap"><span class="cta" aria-disabled="true">${cardText}</span><span class="cta-note">Checkout link not set yet</span></span>`;
+    }
+    return `<a class="cta" href="${esc(p.checkoutUrl)}" rel="noopener nofollow">${cardText}</a>`;
+  }
   const price = p && p.priceCents !== null ? ` — ${money(p.priceCents, model.currency)}` : '';
   const text = esc(model.copy.ctaLabel) + price;
   if (!p?.checkoutUrl) {
@@ -233,6 +295,61 @@ function coverCopyMarkup(p: LandingProduct | undefined): string {
   if (!p) return '';
   if (p.coverDataUri) return `<img class="cover" data-cover-copy alt="${esc(p.title)} cover">`;
   return `<span class="cover cover-fallback">${esc(p.title)}</span>`;
+}
+
+/**
+ * Every book's own cover, side by side, with the featured one raised.
+ *
+ * Each image carries its own data URI — unlike the repeated {{COVER}} slots,
+ * which are copies of one image on purpose. That is the whole distinction: a
+ * page selling three books must show three covers, and repeating {{COVER}}
+ * showed the same book three times.
+ */
+function coverStackMarkup(model: LandingPageModel): string {
+  const books = model.products.filter((p) => p.kind !== 'bundle');
+  if (books.length === 0) return '';
+  return `<div class="cover-stack">${books
+    .map((p) => {
+      const classes = `cover-stack-item${p.featured ? ' cover-stack-lead' : ''}`;
+      if (!p.coverDataUri) return `<span class="${classes} cover-fallback">${esc(p.title)}</span>`;
+      return `<img class="${classes}" src="${esc(p.coverDataUri)}" alt="${esc(p.title)} cover">`;
+    })
+    .join('')}</div>`;
+}
+
+/**
+ * One block per book: its own cover beside its own contents.
+ *
+ * Every field in a block comes from ONE product record in a single pass — the
+ * same discipline as the offer grid, and for the same reason. Left to the copy
+ * and the layout, this section came back as three chapter ranges of one book,
+ * each beside the same cover.
+ */
+function bookBreakdownMarkup(model: LandingPageModel): string {
+  const books = model.products.filter((p) => p.kind !== 'bundle');
+  if (books.length === 0) return '';
+
+  return `<div class="books">${books
+    .map((p, i) => {
+      // Its own outline if we have one, else its chapter titles. Never the
+      // featured book's — that is the mismatch this element exists to prevent.
+      const points = p.sections.length > 0 ? p.sections.map((s) => s.title) : p.contents;
+      const cover = p.coverDataUri
+        ? `<img class="book-cover" src="${esc(p.coverDataUri)}" alt="${esc(p.title)} cover">`
+        : `<span class="book-cover cover-fallback">${esc(p.title)}</span>`;
+
+      return (
+        `<div class="book">${cover}<div class="book-body">` +
+        `<p class="book-index">${books.length > 1 ? `Book ${i + 1}` : 'The book'}</p>` +
+        `<h3>${esc(p.title)}</h3>` +
+        (p.subtitle ? `<p class="book-sub">${esc(p.subtitle)}</p>` : '') +
+        (points.length > 0
+          ? `<ul>${points.slice(0, 6).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`
+          : '') +
+        '</div></div>'
+      );
+    })
+    .join('')}</div>`;
 }
 
 function coverMarkup(p: LandingProduct | undefined): string {
@@ -327,7 +444,7 @@ function offerCardMarkup(p: LandingProduct, model: LandingPageModel): string {
   const points = p.features.length > 0 ? p.features : p.contents.slice(0, 4);
 
   return (
-    `<div class="offer${isBundle ? ' offer-featured' : ''}">` +
+    `<div class="offer${isBundle ? ' offer-featured offer-bundle' : ''}">` +
     (flag ? `<span class="offer-flag">${esc(flag)}</span>` : '') +
     offerArtMarkup(p, isBundle) +
     `<h3>${esc(p.title)}</h3>` +
@@ -336,9 +453,19 @@ function offerCardMarkup(p: LandingProduct, model: LandingPageModel): string {
     '<div class="offer-buy">' +
     priceMarkup(p, model) +
     bundleSavingsMarkup(p, model) +
-    ctaMarkup(p, model) +
+    ctaMarkup(p, model, offerCtaLabel(p, model)) +
     '</div></div>'
   );
+}
+
+/**
+ * A card's button label. Names no book on purpose: with several cards on one
+ * page, "Get the <featured title>" is wrong on all but one of them, and the
+ * price is the thing a buyer is choosing between anyway.
+ */
+function offerCtaLabel(p: LandingProduct, model: LandingPageModel): string {
+  if (p.priceCents === null) return p.kind === 'bundle' ? 'Get the complete set' : 'Get this book';
+  return `Get it for ${money(p.priceCents, model.currency)}`;
 }
 
 /** A book shows its cover; a bundle shows the covers of everything in it. */

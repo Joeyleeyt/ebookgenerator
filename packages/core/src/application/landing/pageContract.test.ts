@@ -109,6 +109,69 @@ describe('validateGeneratedPage', () => {
     });
   });
 
+  // A generated page shipped with a 460x575 portrait sitting over its own
+  // sticky header, hiding the brand and the hero behind it.
+  describe('top bar', () => {
+    it.each([PLACEHOLDERS.cover, PLACEHOLDERS.authorPhoto])('rejects %s above the first section', (token) => {
+      const p = page({ bodyHtml: `<header>${token}</header>${page().bodyHtml}` });
+      expect(errorsOf(p).some((e) => e.includes('appears in the top bar'))).toBe(true);
+    });
+
+    it('allows the logo and the buy button up there', () => {
+      const p = page({
+        bodyHtml: `<header>{{LOGO}}{{CTA_BUTTON}}</header>${page().bodyHtml}`,
+      });
+      expect(errorsOf(p).some((e) => e.includes('top bar'))).toBe(false);
+    });
+  });
+
+  // {{COVER}} renders the featured book however often it appears, so a
+  // three-book hero built from repeats showed the same book three times.
+  describe('multi-book covers', () => {
+    it('rejects repeated {{COVER}} on a page selling several books', () => {
+      const p = page({ bodyHtml: page().bodyHtml + '{{COVER}}{{COVER}}' });
+      const errors = (validateGeneratedPage(p, { productCount: 3 }) as { error?: string[] }).error ?? [];
+      expect(errors.some((e) => e.includes('cannot show a set'))).toBe(true);
+    });
+
+    it('leaves single-book pages free to repeat it', () => {
+      const p = page({ bodyHtml: page().bodyHtml + '{{COVER}}{{COVER}}' });
+      expect(errorsOf(p).some((e) => e.includes('cannot show a set'))).toBe(false);
+    });
+
+    // Without one of these, every book on the page is represented by the
+    // featured book's cover.
+    it('requires per-book covers somewhere on a multi-book page', () => {
+      const errors = (validateGeneratedPage(page(), { productCount: 3 }) as { error?: string[] }).error ?? [];
+      expect(errors.some((e) => e.includes('shows no per-book covers'))).toBe(true);
+    });
+
+    it.each([PLACEHOLDERS.bookBreakdown, PLACEHOLDERS.coverStack])('accepts %s as that proof', (token) => {
+      const p = page({ bodyHtml: `${page().bodyHtml}<section>${token}{{OFFER_GRID}}</section>` });
+      const errors = (validateGeneratedPage(p, { productCount: 3 }) as { error?: string[] }).error ?? [];
+      expect(errors.some((e) => e.includes('shows no per-book covers'))).toBe(false);
+    });
+
+    // A loose price beside the grid reads as a fourth, nameless offer.
+    it('rejects a loose price or button in the offer grid section', () => {
+      const p = page({
+        bodyHtml: page().bodyHtml + '<section>{{OFFER_GRID}}{{PRICE}}{{CTA_BUTTON}}</section>',
+      });
+      const errors = errorsOf(p);
+      expect(errors.some((e) => e.includes('same section as {{OFFER_GRID}}'))).toBe(true);
+    });
+
+    it('caps the book breakdown at one placement', () => {
+      const p = page({ bodyHtml: page().bodyHtml + '{{BOOK_BREAKDOWN}}'.repeat(2) });
+      expect(errorsOf(p).some((e) => e.includes('{{BOOK_BREAKDOWN}} may appear at most once'))).toBe(true);
+    });
+
+    it('caps the cover stack at two placements', () => {
+      const p = page({ bodyHtml: page().bodyHtml + '{{COVER_STACK}}'.repeat(3) });
+      expect(errorsOf(p).some((e) => e.includes('{{COVER_STACK}} may appear at most 2'))).toBe(true);
+    });
+  });
+
   describe('structure', () => {
     it.each(['hero', 'inside', 'order', 'faq'])('requires the %s section', (name) => {
       const p = page({ bodyHtml: page().bodyHtml.replace(`data-section="${name}"`, 'data-x="y"') });
@@ -261,6 +324,8 @@ describe('fillPlaceholders', () => {
       logo: '<img src="data:image/png;base64,BB">',
       offerGrid: '<div class="offers"></div>',
       authorPhoto: '<img src="data:image/png;base64,CC">',
+      coverStack: '<div class="cover-stack"></div>',
+      bookBreakdown: '<div class="books"></div>',
     });
 
     expect(out).not.toMatch(/\{\{[A-Z_]+\}\}/); // nothing left unsubstituted
@@ -271,7 +336,7 @@ describe('fillPlaceholders', () => {
   it('drops a placeholder whose content is empty', () => {
     const out = fillPlaceholders('<div>{{TESTIMONIALS}}</div>', {
       cta: '', price: '', cover: '', guarantee: '', paymentMarks: '', testimonials: '', contents: '', legal: '',
-      logo: '', offerGrid: '', authorPhoto: '',
+      logo: '', offerGrid: '', authorPhoto: '', coverStack: '', bookBreakdown: '',
     });
     expect(out).toBe('<div></div>');
   });

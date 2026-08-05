@@ -41,6 +41,7 @@ export * from './domain/export/ExportArtifact.js';
 export * from './domain/landing/LandingPage.js';
 export * from './domain/landing/Palette.js';
 export * from './domain/landing/LandingTemplate.js';
+export * from './domain/landing/fontStacks.js';
 
 // ── Application: ports ──────────────────────────────────────────────────────
 export * from './application/ports/Clock.js';
@@ -73,6 +74,7 @@ export * from './application/ports/services/ImageColorSampler.js';
 export * from './application/ports/services/LandingPageRenderer.js';
 export * from './application/ports/services/ReferencePageFetcher.js';
 export * from './application/ports/services/ReferenceScreenshotter.js';
+export * from './application/ports/services/WebFontFetcher.js';
 export * from './application/ports/services/RemoteImageFetcher.js';
 export * from './application/ports/services/LandingPageAssembler.js';
 

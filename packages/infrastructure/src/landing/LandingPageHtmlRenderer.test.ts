@@ -83,6 +83,16 @@ describe('LandingPageHtmlRenderer', () => {
     expect(html).toContain('MMXXVI · No. I');
   });
 
+  // The fallback page used to drop the channel avatar entirely, even when it
+  // had loaded — the generated-layout path was the only one that showed it.
+  it('shows the channel avatar in the masthead, and nothing when there is none', () => {
+    const withLogo = render(model({ logoDataUri: 'data:image/png;base64,AQID' }));
+    expect(withLogo).toContain('class="masthead-logo"');
+    expect(withLogo).toContain('data:image/png;base64,AQID');
+
+    expect(render(model())).not.toContain('masthead-logo"');
+  });
+
   // The page must render from a static host with no network at all.
   it('fetches nothing from the network', () => {
     const html = render(model({ products: [product({ coverDataUri: 'data:image/png;base64,AQID' })] }));
@@ -384,6 +394,32 @@ describe('LandingPageHtmlRenderer', () => {
   // The built-in template is the guaranteed fallback when a generated layout
   // fails its contract. On a three-book page that makes these cases the last
   // thing standing between the client and a page that sells the wrong book.
+  // Reference templates pair a serif display face with sans-serif body copy.
+  // Tying both to one choice set the eyebrows, bullets and fine print in
+  // Georgia on any page whose headings were serif.
+  describe('type pairing', () => {
+    const bodyRule = (html: string) => /body \{[\s\S]*?font-family: ([^;]+);/.exec(html)?.[1] ?? '';
+    const headingRule = (html: string) => /h1, h2, h3 \{ font-family: ([^;]+);/.exec(html)?.[1] ?? '';
+
+    it('sets serif headings over sans body when the reference pairs them', () => {
+      const html = render(model({ copy: { ...copy, fontFamily: 'serif', bodyFontFamily: 'sans' } }));
+      expect(headingRule(html)).toContain('Georgia');
+      expect(bodyRule(html)).toContain('Inter');
+      expect(bodyRule(html)).not.toContain('Georgia');
+    });
+
+    it('follows the headings when no body face was observed', () => {
+      const html = render(model({ copy: { ...copy, fontFamily: 'serif' } }));
+      expect(bodyRule(html)).toContain('Georgia');
+    });
+
+    it('keeps an all-sans page all sans', () => {
+      const html = render(model({ copy: { ...copy, fontFamily: 'sans', bodyFontFamily: 'sans' } }));
+      expect(headingRule(html)).not.toContain('Georgia');
+      expect(bodyRule(html)).toContain('Inter');
+    });
+  });
+
   describe('multi-product pages', () => {
     const three = () =>
       model({

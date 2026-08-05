@@ -15,12 +15,27 @@ export interface ReferencePage {
    * is "same template, our branding and colours".
    */
   markup: string;
+  /**
+   * The page's own CSS, size-capped. Kept so a font embedder can read the
+   * `@font-face` rules — the only place the reference's real typefaces are
+   * named with a downloadable source.
+   */
+  styleCss: string;
   /** Observed visual treatment, read off the page's own stylesheet/markup. */
   style: {
     /** Whether headings use a serif face. */
     serifHeadings: boolean;
+    /**
+     * Whether BODY text uses a serif face — asked separately from headings
+     * because the pairing is the design. These templates run a serif display
+     * face over sans-serif body copy, and treating the page as "serif" set the
+     * small text in Georgia where the reference uses sans.
+     */
+    serifBody: boolean;
     /** The named display/heading typeface, e.g. "Playfair Display", when found. */
     headingFont: string | null;
+    /** The named BODY typeface, when the stylesheet sets one separately. */
+    bodyFont: string | null;
     /** Distinct background colours used as section grounds, most-used first. */
     grounds: string[];
     /** The most prominent non-neutral colour — usually the CTA. */
