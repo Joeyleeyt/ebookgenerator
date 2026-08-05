@@ -235,6 +235,13 @@ export class GenerateLandingPageUseCase {
     private readonly hasher: Hasher,
   ) {}
 
+  /**
+   * Why the last layout derivation failed, if it did. Held on the instance
+   * rather than threaded through every return type: it is diagnostic output
+   * for one call, and the use case is constructed per request.
+   */
+  private lastLayoutFailure: string[] | undefined;
+
   async execute(
     input: GenerateLandingPageInput,
   ): Promise<
@@ -399,7 +406,15 @@ export class GenerateLandingPageUseCase {
       await this.pages.save(page);
       return Result.fail(written.error);
     }
-    const { copy, slotValues } = written.value;
+    const { slotValues } = written.value;
+    // The reference's own typography wins over the copy model's genre guess.
+    // Left to itself the model picks "sans" for anything automotive or
+    // technical — which is how a page copied from a serif-set template came
+    // back in a sans face. What the reference actually does is observable, so
+    // observe it rather than infer it.
+    const copy: LandingCopy = reference
+      ? { ...written.value.copy, fontFamily: reference.style.serifHeadings ? 'serif' : 'sans' }
+      : written.value.copy;
 
     // ── render ──
     const product: LandingProduct = {
@@ -510,6 +525,7 @@ export class GenerateLandingPageUseCase {
       referenceUrl,
       screenshots: referenceShots.length,
       ...(referenceNote ? { referenceNote } : {}),
+      ...(this.lastLayoutFailure ? { layoutFailure: this.lastLayoutFailure } : {}),
     });
   }
 
@@ -572,6 +588,7 @@ export class GenerateLandingPageUseCase {
     productCount: number;
     hasAuthorPhoto: boolean;
   }): Promise<GeneratedPage | null> {
+    this.lastLayoutFailure = undefined;
     let repairErrors: string[] | undefined;
 
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -592,7 +609,10 @@ export class GenerateLandingPageUseCase {
         cacheControl: { systemPrefix: true },
         metadata: { projectId: input.projectId, stage: 'landing-layout' },
       });
-      if (completion.isFail()) return null;
+      if (completion.isFail()) {
+        this.lastLayoutFailure = [`Layout AI call failed: ${completion.error.type}`];
+        return null;
+      }
 
       if (completion.value.stopReason === 'max_tokens') {
         repairErrors = [
@@ -618,6 +638,11 @@ export class GenerateLandingPageUseCase {
       if (check.isOk()) return generated;
       repairErrors = check.error;
     }
+    // The reasons ride back out so the worker can log them. Without this a
+    // fallback is indistinguishable from success until someone compares the
+    // page against the template by eye — which is exactly how a page that
+    // silently ignored the reference reached the client.
+    this.lastLayoutFailure = repairErrors;
     return null;
   }
 
