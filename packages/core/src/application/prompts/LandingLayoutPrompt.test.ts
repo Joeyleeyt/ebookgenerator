@@ -110,20 +110,31 @@ describe('LandingLayoutPrompt', () => {
     expect(without).toContain('Do not place it');
   });
 
-  it('passes the edition line through for a masthead slot', () => {
+  // The edition line changes with the year, and the layout is stored and
+  // reused — so it is offered as a slot rather than written into the markup,
+  // which would freeze one year's line into every future page.
+  it('offers the edition as a slot rather than embedding its value', () => {
     const { user } = LandingLayoutPrompt.build({ ...base, productCount: 1, edition: 'MMXXVI · No. I' });
-    expect(user as string).toContain('MMXXVI · No. I');
-  });
-
-  it('names the other books without asking the model to render them', () => {
-    const { user } = LandingLayoutPrompt.build({
-      ...base,
-      productCount: 3,
-      otherTitles: ['The Buying Bible', 'The DIY Repair Bible'],
-    });
-
     const text = user as string;
-    expect(text).toContain('The Buying Bible');
-    expect(text).toContain('do NOT write these');
+    expect(text).toContain('masthead edition line is available');
+    expect(text).not.toContain('MMXXVI · No. I');
   });
+
+  it('names no book — the layout is reused by all of them', () => {
+    const { user } = LandingLayoutPrompt.build({ ...base, productCount: 3 });
+    const text = user as string;
+    expect(text).toContain('Do not name a book');
+    expect(text).not.toContain('The Mechanic Bible');
+  });
+
+  // A layout with one book's words baked in would print that book's headline
+  // on every other book that reuses the template.
+  it('demands copy slots rather than prose', () => {
+    const { system } = LandingLayoutPrompt.build({ ...base, productCount: 1 });
+    expect(system).toContain('COPY SLOTS');
+    expect(system).toContain('REUSABLE TEMPLATE');
+    expect(system).toContain('{{COPY:key}}');
+    expect(system).toContain('hero.headline, hero.subheadline, cta.label');
+  });
+
 });

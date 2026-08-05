@@ -67,6 +67,7 @@ import {
   SupabaseKnowledgeRepository,
   SupabaseExportArtifactRepository,
   SupabaseLandingPageRepository,
+  SupabaseLandingLayoutRepository,
   SupabaseIdempotencyStore,
 } from '@yeg/infrastructure';
 import { loadEnv, type Env } from './env.js';
@@ -135,6 +136,9 @@ export function buildContainer(env: Env = loadEnv()) {
   const knowledge = new SupabaseKnowledgeRepository(supabase);
   const artifacts = new SupabaseExportArtifactRepository(supabase);
   const landingPages = new SupabaseLandingPageRepository(supabase);
+  // Layouts are captured once per reference template and reused by every book
+  // that follows it — see SupabaseLandingLayoutRepository.
+  const landingLayouts = new SupabaseLandingLayoutRepository(supabase);
   const idempotency = new SupabaseIdempotencyStore(supabase);
 
   // ── orchestration ──
@@ -179,6 +183,7 @@ export function buildContainer(env: Env = loadEnv()) {
       channels,
       artifacts,
       landingPages,
+      landingLayouts,
       ai,
       landingRenderer,
       landingAssembler,
@@ -206,7 +211,7 @@ export function buildContainer(env: Env = loadEnv()) {
     idempotency,
     orchestrator,
     sitePublisher,
-    repositories: { projects, videos, channels, books, knowledge, artifacts, landingPages },
+    repositories: { projects, videos, channels, books, knowledge, artifacts, landingPages, landingLayouts },
     useCases,
   };
 }

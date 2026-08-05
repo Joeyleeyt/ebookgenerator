@@ -5,6 +5,81 @@
  * layout — those are fixed by the renderer — so there is no model-authored
  * markup to sanitise, and every book gets the same proven page structure.
  */
+/**
+ * Fills a stored layout's copy slots for one book.
+ *
+ * The layout is captured once per reference and reused, so this call does not
+ * decide what sections exist or how many cards they hold — the template already
+ * did. It writes the words for the slots that template declared, each within
+ * the length its design can actually hold.
+ */
+export const LandingSlotCopyPrompt = {
+  build(input: {
+    bookTitle: string;
+    subtitle: string;
+    channelTitle: string;
+    author: string | undefined;
+    strategy: string;
+    chapterTitles: string[];
+    pageCount: number | null;
+    tone: string;
+    slots: Array<{ key: string; purpose: string; maxChars: number }>;
+    /** Titles of the other books, on a multi-book page. */
+    otherTitles?: string[];
+  }) {
+    return {
+      system: [
+        'You are a direct-response copywriter filling a sales page template for a non-fiction ebook.',
+        '',
+        'Return ONLY a JSON object mapping every slot key to its text:',
+        '  { "hero.headline": "…", "hero.eyebrow": "…", … }',
+        'Every key listed below must appear exactly once. No other keys. Plain text',
+        'only — no markdown, no HTML, no emoji.',
+        '',
+        'LENGTH IS A HARD CONSTRAINT. Each slot states maxChars. That is what the',
+        'design physically holds; going over breaks the layout it was written for.',
+        'Write to the length, do not pad to it.',
+        '',
+        'HARD RULES.',
+        '1. NEVER invent testimonials, reviews, ratings, sales figures, subscriber',
+        '   counts, awards or endorsements. Fabricated social proof is not a stylistic',
+        '   choice, it is a false statement about real people. If a slot seems to ask',
+        '   for one, write the nearest honest thing instead.',
+        '2. NEVER promise a specific income, saving, health or legal outcome, and never',
+        '   state a figure the source material does not support.',
+        '3. NEVER mention price, discounts, countdowns, scarcity or bonuses — the',
+        '   system renders all of those.',
+        '4. Every claim must trace to the positioning or the chapter list below.',
+        '5. Figures may appear only if the book supports them, and the slot whose',
+        '   purpose mentions a source must say where they come from.',
+        '',
+        `Tone: ${input.tone}. Write for an intelligent reader; concrete beats clever.`,
+      ].join('\n'),
+      user: [
+        `=== BOOK ===\nTitle: ${input.bookTitle}`,
+        input.subtitle ? `Subtitle: ${input.subtitle}` : '',
+        input.author ? `Author byline: ${input.author}` : '',
+        `Creator/channel: ${input.channelTitle}`,
+        input.pageCount ? `Length: ${input.pageCount} pages` : '',
+        ...(input.otherTitles && input.otherTitles.length > 0
+          ? ['', 'Also sold on this page:', ...input.otherTitles.map((t) => `  - ${t}`)]
+          : []),
+        '',
+        '=== POSITIONING ===',
+        input.strategy,
+        '',
+        '=== CHAPTERS (the only content you may promise) ===',
+        input.chapterTitles.map((t, i) => `${i + 1}. ${t}`).join('\n'),
+        '',
+        '=== SLOTS TO FILL ===',
+        ...input.slots.map((s) => `${s.key}  (max ${s.maxChars} chars) — ${s.purpose}`),
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    };
+  },
+};
+
 export const LandingPagePrompt = {
   build(input: {
     bookTitle: string;

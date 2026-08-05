@@ -50,6 +50,14 @@ export const LandingPageJob = z.object({
   projectId: z.string().uuid(),
   mode: z.enum(['generate', 'publish']).default('generate'),
   publish: z.boolean().default(false),
+  /**
+   * Re-derive this template's stored layout instead of reusing it.
+   *
+   * Off by default on purpose: reusing the stored layout is what keeps every
+   * page on a template structurally identical, so re-deriving is a deliberate
+   * act — after a prompt change, or when the captured layout is simply wrong.
+   */
+  rebuildLayout: z.boolean().default(false),
 });
 
 export type ProjectJob = z.infer<typeof ProjectJob>;

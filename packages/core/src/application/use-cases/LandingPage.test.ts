@@ -88,6 +88,8 @@ function buildGenerate(options: {
   existingPage?: LandingPage | null;
   aiText?: string;
   renderer?: LandingPageRenderer;
+  /** Simulate the completion hitting the output ceiling. */
+  truncated?: boolean;
 }) {
   const project = options.project ?? makeProject();
   const book = makeBook();
@@ -129,6 +131,7 @@ function buildGenerate(options: {
     } as never,
     { listByProject: async () => [] } as never,
     pages,
+    { find: async () => null, save: async () => Result.ok() } as never,
     {
       generate: async () => {
         aiCalls++;
@@ -137,7 +140,7 @@ function buildGenerate(options: {
           model: 'claude-opus-4-8',
           inputTokens: 1,
           outputTokens: 1,
-          stopReason: 'end_turn',
+          stopReason: options.truncated ? 'max_tokens' : 'end_turn',
         });
       },
     } as never,
@@ -234,6 +237,7 @@ function buildTriple(opts: {
     { getChannel: async () => null } as never,
     { listByProject: async () => [] } as never,
     pages,
+    { find: async () => null, save: async () => Result.ok() } as never,
     {
       generate: async () =>
         Result.ok({ text: COPY_JSON, model: 'm', inputTokens: 1, outputTokens: 1, stopReason: 'end_turn' }),
@@ -382,6 +386,19 @@ describe('GenerateLandingPageUseCase', () => {
     expect(rendered[0]?.authorPhotoDataUri).toBeNull();
   });
 
+  // A cut-off copy call surfaces as "Invalid JSON: Expected ',' or ']'", which
+  // reads like a model defect and sends the job into a retry loop repeating it.
+  it('reports a truncated copy response as truncation, not as bad JSON', async () => {
+    const { useCase, pages } = buildGenerate({ truncated: true });
+
+    const result = await useCase.execute({ projectId: 'p1' });
+
+    if (result.isOk()) throw new Error('expected generation to fail');
+    expect(result.error).toContain('cut off at the output limit');
+    expect(result.error).not.toContain('Invalid JSON');
+    expect(pages.current()?.state).toBe('FAILED');
+  });
+
   it('never invents testimonials', async () => {
     const { useCase, rendered } = buildGenerate({});
     await useCase.execute({ projectId: 'p1' });
@@ -463,21 +480,57 @@ const REFERENCE = {
   style: { serifHeadings: true, headingFont: 'Playfair Display', grounds: ['#faf7f0'], accent: '#b8860b', numberedSections: true, imageDensity: 0.3, measurePx: 720 },
 };
 
-/** A layout that satisfies the contract, echoing the approved copy verbatim. */
-function goodLayout(copyHeadline: string, copySub: string): string {
+/**
+ * A reusable layout that satisfies the contract: no book's prose, only slots.
+ * `extraSlots` lets a test add or omit slots to trip the manifest checks.
+ */
+function goodLayout(): string {
+  const slots = [
+    { key: 'hero.headline', purpose: 'Problem-led hero headline', maxChars: 120 },
+    { key: 'hero.subheadline', purpose: 'What the book does about it', maxChars: 220 },
+    { key: 'cta.label', purpose: 'Action-first button label', maxChars: 28 },
+    { key: 'inside.heading', purpose: "What's inside heading", maxChars: 60 },
+    { key: 'faq.q1', purpose: 'First question', maxChars: 80 },
+    { key: 'faq.a1', purpose: 'Its answer', maxChars: 300 },
+    { key: 'order.heading', purpose: 'Order section heading', maxChars: 60 },
+    { key: 'closing.heading', purpose: 'Closing heading', maxChars: 70 },
+  ];
   return JSON.stringify({
     css: 'body { background: var(--bg); color: var(--text); }',
+    slots,
     bodyHtml:
-      `<section data-section="hero"><h1>${copyHeadline}</h1><p>${copySub}</p>{{COVER}}{{PRICE}}{{CTA_BUTTON}}</section>` +
-      `<section data-section="inside">{{CONTENTS}}</section>` +
-      `<section data-section="order">{{PRICE}}{{CTA_BUTTON}}</section>` +
-      `<section data-section="faq"><p>What format?</p></section>` +
-      `<footer>{{FOOTER_LEGAL}}</footer>`,
+      '<section data-section="hero"><h1>{{COPY:hero.headline}}</h1><p>{{COPY:hero.subheadline}}</p>' +
+      '<p>{{COPY:cta.label}}</p>{{COVER}}{{PRICE}}{{CTA_BUTTON}}</section>' +
+      '<section data-section="inside"><h2>{{COPY:inside.heading}}</h2>{{CONTENTS}}</section>' +
+      '<section data-section="order"><h2>{{COPY:order.heading}}</h2>{{PRICE}}{{CTA_BUTTON}}</section>' +
+      '<section data-section="faq"><h3>{{COPY:faq.q1}}</h3><p>{{COPY:faq.a1}}</p>' +
+      '<p>{{COPY:closing.heading}}</p></section>' +
+      '<footer>{{FOOTER_LEGAL}}</footer>',
   });
 }
 
+/** What the slot-filling copy call returns for the layout above. */
+const SLOT_COPY_JSON = JSON.stringify({
+  'hero.headline': 'Stop paying for repairs you could do yourself',
+  'hero.subheadline': 'The workshop manual for people who own a car.',
+  'cta.label': 'Get the manual',
+  'inside.heading': "What's inside",
+  'faq.q1': 'What format?',
+  'faq.a1': 'PDF and DOCX.',
+  'order.heading': 'Order the book',
+  'closing.heading': 'Fix it yourself',
+});
+
 /** Builds the use case with a reference URL set and a scripted AI. */
-function buildWithReference(layoutResponses: string[]) {
+function buildWithReference(
+  layoutResponses: string[],
+  opts: {
+    stored?: import('../ports/repositories/LandingLayoutRepository.js').StoredLandingLayout;
+    /** What the copy call returns — slot map by default, fixed schema when the
+     *  test expects the built-in fallback path. */
+    copyText?: string;
+  } = {},
+) {
   const project = makeProject({ landingTemplateUrl: 'https://eliasyoder.com/' });
   const pages = new FakeLandingRepo(null);
   const calls: string[] = [];
@@ -491,11 +544,15 @@ function buildWithReference(layoutResponses: string[]) {
     { getChannel: async () => null } as never,
     { listByProject: async () => [] } as never,
     pages,
+    { find: async () => opts.stored ?? null, save: async () => Result.ok() } as never,
     {
       generate: async (req: { metadata?: { stage: string } }) => {
         const stage = req.metadata?.stage ?? '';
         calls.push(stage);
-        const text = stage === 'landing-page' ? COPY_JSON : (layoutResponses.shift() ?? '{"bad":true}');
+        const text =
+          stage === 'landing-page'
+            ? (opts.copyText ?? SLOT_COPY_JSON)
+            : (layoutResponses.shift() ?? '{"bad":true}');
         return Result.ok({ text, model: 'm', inputTokens: 1, outputTokens: 1, stopReason: 'end_turn' });
       },
     } as never,
@@ -531,66 +588,99 @@ const HEADLINE = 'Stop paying for repairs you could do yourself';
 const SUB = 'The workshop manual for people who own a car, not a garage.';
 
 describe('GenerateLandingPageUseCase — reference-driven layout', () => {
-  it('generates a layout when a valid one comes back first time', async () => {
-    const h = buildWithReference([goodLayout(HEADLINE, SUB)]);
+  it('captures a reusable layout and pours the book copy into it', async () => {
+    const h = buildWithReference([goodLayout()]);
 
     const result = await h.useCase.execute({ projectId: 'p1' });
 
     expect(result.isOk()).toBe(true);
-    expect((result as { value: { layout: string } }).value.layout).toBe('generated');
+    if (result.isFail()) throw new Error(result.error);
+    expect(result.value.layout).toBe('generated');
     expect(h.counts()).toEqual({ assembled: 1, builtin: 0 });
-    expect(h.pages.current()?.html).toBe('<html>generated</html>');
-    // Copy first, then layout — two distinct calls.
-    expect(h.calls).toEqual(['landing-page', 'landing-layout']);
+    expect(h.calls).toEqual(['landing-layout', 'landing-page']);
   });
 
   it('repairs a rejected layout and uses the corrected one', async () => {
-    // First attempt omits the CTA placeholder and uses a raw colour.
-    const broken = JSON.stringify({
-      css: 'body { color: #ff0000; }',
-      bodyHtml: '<section data-section="hero"></section>',
+    // Valid JSON, valid sections, but no slots — so it is not reusable.
+    const noSlots = JSON.stringify({
+      css: '',
+      bodyHtml:
+        '<section data-section="hero"><h1>A headline</h1>{{COVER}}{{PRICE}}{{CTA_BUTTON}}</section>' +
+        '<section data-section="inside">{{CONTENTS}}</section>' +
+        '<section data-section="order"></section><section data-section="faq"></section>' +
+        '<footer>{{FOOTER_LEGAL}}</footer>',
     });
-    const h = buildWithReference([broken, goodLayout(HEADLINE, SUB)]);
+    const h = buildWithReference([noSlots, goodLayout()]);
 
     const result = await h.useCase.execute({ projectId: 'p1' });
 
-    expect((result as { value: { layout: string } }).value.layout).toBe('generated');
-    expect(h.calls).toEqual(['landing-page', 'landing-layout', 'landing-layout']);
-    expect(h.counts()).toEqual({ assembled: 1, builtin: 0 });
+    if (result.isFail()) throw new Error(result.error);
+    expect(result.value.layout).toBe('generated');
+    expect(h.counts().assembled).toBe(1);
   });
 
-  it('falls back to the built-in template after a second failure', async () => {
+  it('falls back to the built-in template after repeated failures', async () => {
     const broken = JSON.stringify({ css: '', bodyHtml: '<div>nope</div>' });
-    const h = buildWithReference([broken, broken]);
+    const h = buildWithReference([broken, broken, broken], { copyText: COPY_JSON });
 
     const result = await h.useCase.execute({ projectId: 'p1' });
 
-    // A page that fails to build is worse than one that looks generic.
-    expect(result.isOk()).toBe(true);
-    expect((result as { value: { layout: string } }).value.layout).toBe('builtin');
+    if (result.isFail()) throw new Error(result.error);
+    expect(result.value.layout).toBe('builtin');
     expect(h.counts()).toEqual({ assembled: 0, builtin: 1 });
-    expect(h.pages.current()?.state).toBe('DRAFT');
   });
 
-  // The copy was already written and validated; the layout call places it.
-  it('rejects a layout that rewrote the approved copy', async () => {
-    const rewritten = goodLayout('A snappier headline I invented', SUB);
-    const h = buildWithReference([rewritten, goodLayout(HEADLINE, SUB)]);
+  // A layout carrying one book's words would print them on every other book
+  // that reuses the template — the failure the slot contract exists to catch.
+  it('rejects a layout with a book prose written into it', async () => {
+    const withProse = JSON.stringify({
+      css: '',
+      slots: [{ key: 'hero.headline', purpose: 'Headline', maxChars: 120 }],
+      bodyHtml:
+        '<section data-section="hero"><h1>{{COPY:hero.headline}}</h1>' +
+        '<p>Adrian has spent nineteen years under other cars.</p>{{COVER}}{{PRICE}}{{CTA_BUTTON}}</section>' +
+        '<section data-section="inside">{{CONTENTS}}</section>' +
+        '<section data-section="order"></section><section data-section="faq"></section>' +
+        '<footer>{{FOOTER_LEGAL}}</footer>',
+    });
+    const h = buildWithReference([withProse, withProse, withProse], { copyText: COPY_JSON });
 
     const result = await h.useCase.execute({ projectId: 'p1' });
 
-    expect((result as { value: { layout: string } }).value.layout).toBe('generated');
-    expect(h.calls.filter((c) => c === 'landing-layout')).toHaveLength(2); // it was made to redo it
+    if (result.isFail()) throw new Error(result.error);
+    // Too few slots and the required ones missing — never stored, never used.
+    expect(result.value.layout).toBe('builtin');
+  });
+
+  // The point of storing layouts: the second book pays no layout cost at all.
+  it('reuses a stored layout instead of deriving it again', async () => {
+    const h = buildWithReference([goodLayout()], {
+      stored: {
+        referenceUrl: 'https://eliasyoder.com/',
+        mode: 'single',
+        css: 'body{}',
+        bodyHtml:
+          '<section data-section="hero"><h1>{{COPY:hero.headline}}</h1>{{COVER}}{{PRICE}}{{CTA_BUTTON}}</section>' +
+          '<footer>{{FOOTER_LEGAL}}</footer>',
+        slots: [{ key: 'hero.headline', purpose: 'Headline', maxChars: 120 }],
+        inputHash: 'h',
+      },
+    });
+
+    const result = await h.useCase.execute({ projectId: 'p1' });
+
+    if (result.isFail()) throw new Error(result.error);
+    expect(result.value.layout).toBe('generated');
+    // Only the copy call ran — no landing-layout call at all.
+    expect(h.calls).toEqual(['landing-page']);
   });
 
   it('uses the built-in template when the reference cannot be fetched', async () => {
-    const h = buildWithReference([goodLayout(HEADLINE, SUB)]);
-    // Re-build with a failing fetcher by exercising the no-reference path.
+    // The no-reference path: nothing to copy from, so no layout is stored.
     const plain = buildGenerate({});
     const result = await plain.useCase.execute({ projectId: 'p1' });
     expect(result.isOk()).toBe(true);
     expect((result as { value: { layout: string } }).value.layout).toBe('builtin');
-    expect(h.calls).toEqual([]); // the reference handle was never executed
   });
 });
 

@@ -85,7 +85,11 @@ export const POST = handle(async (req: Request, { params }: { params: { id: stri
     return error('The book must finish generating before its landing page can be written', 409);
   }
 
-  const publish = new URL(req.url).searchParams.get('publish') === 'true';
+  const params_ = new URL(req.url).searchParams;
+  const publish = params_.get('publish') === 'true';
+  // Opt-in: without it the stored layout is reused, which is what keeps every
+  // page on a template identical.
+  const rebuildLayout = params_.get('rebuildLayout') === 'true';
   const missingCheckout = project.options.missingCheckoutPositions();
   if (publish && missingCheckout.length > 0) {
     return error(
@@ -100,10 +104,10 @@ export const POST = handle(async (req: Request, { params }: { params: { id: stri
   // past a request's lifetime, and this way it retries like everything else.
   await c.queue.enqueue(
     'landing-page',
-    { projectId: params.id, mode: 'generate', publish },
+    { projectId: params.id, mode: 'generate', publish, rebuildLayout },
     { jobId: `landing-page:${params.id}:manual:${Date.now()}` },
   );
-  return json({ queued: true, willPublish: publish }, 202);
+  return json({ queued: true, willPublish: publish, rebuildLayout }, 202);
 });
 
 // PUT /api/projects/:id/landing-page — publish the existing draft as-is.

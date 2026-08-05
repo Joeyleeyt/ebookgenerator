@@ -1,25 +1,25 @@
 import { PALETTE_VARS, PLACEHOLDERS } from '../landing/pageContract.js';
-import type { LandingCopy } from '../../domain/landing/LandingPage.js';
 import type { ReferencePage } from '../ports/services/ReferencePageFetcher.js';
 import type { ReferenceShot } from '../ports/services/ReferenceScreenshotter.js';
 import type { AiContentBlock } from '../ports/services/AiTextGenerator.js';
 
 /**
- * The layout call: arrange already-approved copy into a page shaped after the
- * reference site the client nominated for this book.
+ * The layout call: capture a reference site's page structure as a REUSABLE
+ * template, with {{COPY:…}} slots wherever a book's words belong.
  *
- * This is deliberately a SECOND call, after the copy has been written and
- * schema-validated. Splitting them means a layout retry re-arranges the page
- * without re-authoring the claims on it, and the copy rules (no invented
- * testimonials, ratings or savings figures) are enforced once, upstream, rather
- * than repeated in a prompt that is mostly about markup.
+ * Runs once per reference, not once per book. That is both what makes it
+ * affordable — it was a 30k-token Opus call on every generation — and what
+ * satisfies the requirement it exists for: the client wants every page to
+ * follow the same template, and a layout re-derived per book is a different
+ * page every time. Captured once, every book pours into identical bones.
+ *
+ * It never sees a book. Copy is written separately against the slot manifest
+ * this returns, so no book's prose can be baked into a template that other
+ * books will reuse.
  */
 export const LandingLayoutPrompt = {
   build(input: {
     reference: ReferencePage | null;
-    copy: LandingCopy;
-    bookTitle: string;
-    pageCount: number | null;
     /**
      * How many products the page sells. Above one, the offer grid replaces the
      * single-product rules — the reference's own tier section is then a feature
@@ -34,19 +34,38 @@ export const LandingLayoutPrompt = {
     hasAuthorPhoto?: boolean;
     /** e.g. "MMXXVI · No. I", for a masthead slot the reference has. */
     edition?: string | null;
-    /** The other books on the page, so the copy block can name them. */
-    otherTitles?: string[];
     /** Screenshots of the reference, attached to the user message as images. */
     referenceShots?: ReferenceShot[];
     /** Errors from the previous attempt, when this is the repair round. */
     repairErrors?: string[];
   }) {
     const system = [
-      'You build single-page sales sites. You return ONLY JSON with exactly two keys:',
+      'You build single-page sales sites. You return ONLY JSON with exactly these keys:',
       '  css      — the page stylesheet, no <style> tag',
       '  bodyHtml — the page markup, no <html>, <head>, <body> or <style> tags',
+      '  slots    — the copy slots your markup uses (see COPY SLOTS below)',
       '',
       'YOU WRITE LAYOUT, NOT CONTENT AND NOT VALUES.',
+      '',
+      'COPY SLOTS. You are building a REUSABLE TEMPLATE, not one book\'s page.',
+      'Many different books will be poured into this exact markup, so it must not',
+      'contain any book\'s words. Everywhere text about the book belongs, write a',
+      'token {{COPY:key}} instead, and declare it in "slots":',
+      '  { "key": "hero.headline", "purpose": "Problem-led hero headline",',
+      '    "maxChars": 120 }',
+      'Rules:',
+      '  - keys are lowercase dot-separated, e.g. hero.eyebrow, s3.item2.title',
+      '  - every token you place must be declared, and every declared slot placed',
+      '  - each token appears EXACTLY ONCE',
+      '  - "purpose" is the only brief the copywriter gets — say what belongs',
+      '    there and in what voice, e.g. "One-sentence benefit, imperative mood"',
+      '  - "maxChars" must be what the design can actually hold at that size',
+      'These three keys are REQUIRED — the system builds the page title and the buy',
+      'button label from them: hero.headline, hero.subheadline, cta.label.',
+      'Fixed UI words that are the same for every book — "FAQ", "Instant download",',
+      '"Add to cart" — you may write directly. Anything specific to a book is a slot.',
+      'Structural text you can see in the reference (section headings, eyebrows,',
+      'card titles, FAQ questions and answers, body paragraphs) is ALL slots.',
       '',
       'PLACEHOLDERS. Position these exactly as written; the system substitutes real',
       'markup for them afterwards. Never write a price, a link or an image yourself.',
@@ -122,12 +141,11 @@ export const LandingLayoutPrompt = {
       '  no external URLs anywhere, no @import, no remote url() — system font stacks only',
       '  close every tag; unbalanced markup is rejected',
       '',
-      'COPY. The prose below is final and approved. Place it verbatim — do not',
-      'rewrite, shorten, extend or "improve" a single sentence, and do not invent',
-      'any new claim, statistic, review, rating or subscriber count. You MAY wrap',
-      'words of the approved copy in styling tags — e.g. an accent-coloured <span>',
-      'around a key phrase inside the headline, matching the template — as long as',
-      'the words themselves are untouched.',
+      'NO PROSE. You write no sentences about any book — every one of them is a',
+      'slot. You MAY wrap a slot in styling tags to match the template, e.g. an',
+      'accent-coloured <span> around {{COPY:hero.headline.emphasis}} beside',
+      '{{COPY:hero.headline}}; split a headline into two slots when the reference',
+      'styles half of it differently.',
       '',
       // Section order used to be free here, which directly contradicted the
       // reference block's "mirror this sequence" and is why generated pages
@@ -138,22 +156,19 @@ export const LandingLayoutPrompt = {
             'exactly — its Nth section is your Nth section. Never reorder, and never',
             'promote a later section to the top because it seems stronger.',
             '',
-            'BUILD EVERY SECTION THE REFERENCE HAS. The approved copy includes a',
-            '"templateSections" array written specifically to fill them, one entry per',
-            'reference section, already in order. Render every entry, giving each the',
-            'same treatment the reference gives that section — its heading, its eyebrow,',
-            'its intro, then its items in the shape named by "kind":',
-            '  prose      — the intro carries it; no list',
-            '  cards      — items as a card grid, matching the reference\'s card design',
-            '  list       — items as a plain list with the reference\'s markers',
-            '  steps      — items numbered, in the reference\'s numbering style',
-            '  comparison — items as two facing columns (before/after, with/without)',
-            '  table      — render "table": rows of label + two values, both column',
-            '               headings, both totals, and the source line beneath in small',
-            '               muted type. The source line is mandatory; never drop it.',
-            'A section whose entry is missing is a hole in the page. The only sections',
-            'you may leave out are ones needing customer reviews, a promotional deadline',
-            'or bonus products — the system renders those, and only when they are real.',
+            'BUILD EVERY SECTION THE REFERENCE HAS, in its order, with the same',
+            'treatment — its eyebrow, heading, intro and the shape of its contents',
+            '(card grid, numbered steps, two facing columns, a figure table). Give each',
+            'the slots that section needs: a heading slot, an intro slot, and one pair',
+            'of slots per card, step, row or list item the reference shows there.',
+            'Match the reference\'s COUNT: if it shows six cards, build six cards.',
+            '',
+            'A figure table gets a slot per cell plus a slot for the source line beneath',
+            'it in small muted type. Never omit the source line — an unsourced savings',
+            'figure is the riskiest thing that can appear on a page that takes money.',
+            '',
+            'Leave out only sections that need customer reviews, a promotional deadline',
+            'or bonus products; the system renders those, and only when they are real.',
             '',
           ]
         : ['You may choose the order of sections and which copy goes where.', '']),
@@ -320,30 +335,17 @@ export const LandingLayoutPrompt = {
           'closing call to action.',
         ].join('\n');
 
+    // No book is named here on purpose. This layout is stored and reused by
+    // every book that follows this template, so anything book-specific would be
+    // baked into a page that is not about that book.
     const copy = [
-      input.productCount > 1 ? '=== THE FEATURED BOOK ===' : '=== THE BOOK ===',
-      `Title: ${input.bookTitle}`,
-      input.pageCount ? `Length: ${input.pageCount} pages` : '',
-      input.edition ? `Edition line (for a masthead or top-bar slot): ${input.edition}` : '',
-      // Named only so the layout reads coherently around the grid. The cards
-      // themselves are system-rendered; the model never writes these titles.
-      ...(input.otherTitles && input.otherTitles.length > 0
-        ? [
-            '',
-            `Also sold on this page, inside ${PLACEHOLDERS.offerGrid} (do NOT write these`,
-            'as cards yourself — they are listed only so your headings and section',
-            'copy make sense on a multi-book page):',
-            ...input.otherTitles.map((t) => `  - ${t}`),
-          ]
-        : []),
-      '',
-      '=== APPROVED COPY — place verbatim ===',
-      // templateSections is the bulk of a template-driven page, so it is called
-      // out rather than left to be noticed inside a large JSON blob.
-      input.copy.templateSections?.length
-        ? `(templateSections has ${input.copy.templateSections.length} entries — render every one, in order.)`
-        : '',
-      JSON.stringify(input.copy, null, 2),
+      '=== WHAT THIS TEMPLATE IS FOR ===',
+      input.productCount > 1
+        ? `Non-fiction ebooks sold in sets of ${input.productCount}, via ${PLACEHOLDERS.offerGrid}.`
+        : 'Single non-fiction ebooks, sold from one offer section.',
+      'Do not name a book, an author, a subject or a price anywhere — those',
+      'arrive through the slots and the placeholders.',
+      input.edition ? 'A masthead edition line is available; give it a slot if the reference has one.' : '',
     ]
       .filter(Boolean)
       .join('\n');

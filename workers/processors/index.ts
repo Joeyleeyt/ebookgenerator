@@ -376,7 +376,11 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
     handler: async (p) => {
       try {
         if (p.mode === 'generate') {
-          const generated = await useCases.generateLandingPage.execute({ projectId: p.projectId, force: true });
+          const generated = await useCases.generateLandingPage.execute({
+            projectId: p.projectId,
+            force: true,
+            rebuildLayout: p.rebuildLayout,
+          });
           if (generated.isFail()) throw new Error(generated.error);
           // Which layout was used is the number worth watching on early runs:
           // 'builtin' means the reference-driven generation failed the contract
@@ -389,6 +393,9 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
             // measurably less like the template — invisible without this.
             reference: generated.value.referenceUrl ?? 'none',
             screenshots: generated.value.screenshots ?? 0,
+            // A stored layout means no layout call ran at all — the difference
+            // between a ~$0.15 page and a ~$2 one.
+            layoutRebuilt: p.rebuildLayout === true,
           });
           if (generated.value.referenceNote) {
             container.logger.warn('reference was degraded — layout fidelity will suffer', {

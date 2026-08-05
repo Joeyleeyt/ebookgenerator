@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ExternalLink, Eye, Loader2, RotateCcw, Rocket, Store, Upload } from 'lucide-react';
+import { ExternalLink, Eye, Hammer, Loader2, RotateCcw, Rocket, Store, Upload } from 'lucide-react';
 import { Card } from '../ui/card.js';
 import { Button } from '../ui/button.js';
 import { Badge } from '../ui/badge.js';
@@ -305,21 +305,28 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
     }
   }
 
-  async function run(action: 'generate' | 'publish') {
+  async function run(action: 'generate' | 'publish' | 'rebuild') {
     setBusy(true);
     setNote(null);
     setProblem(null);
     try {
       if (!(await save())) return;
-      const res = await fetch(`/api/projects/${projectId}/landing-page`, {
-        method: action === 'generate' ? 'POST' : 'PUT',
-      });
+      const res = await fetch(
+        `/api/projects/${projectId}/landing-page${action === 'rebuild' ? '?rebuildLayout=true' : ''}`,
+        { method: action === 'publish' ? 'PUT' : 'POST' },
+      );
       const body = await res.json();
       if (!res.ok) {
         setProblem(body.error ?? 'Something went wrong');
         return;
       }
-      setNote(action === 'generate' ? 'Writing the page — this takes a minute.' : 'Publishing…');
+      setNote(
+        action === 'publish'
+          ? 'Publishing…'
+          : action === 'rebuild'
+            ? 'Rebuilding the layout from the reference — this takes a few minutes.'
+            : 'Writing the page — this takes a minute.',
+      );
       // Remember the row as it stands, so polling can watch for it to change.
       setWatchFrom(data?.page?.updatedAt ?? 'none');
       await load({ keepEdits: true });
@@ -622,6 +629,21 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
                 <Eye className="size-4" />
                 Preview
               </a>
+            </Button>
+          )}
+
+          {/* Reusing the captured layout is what keeps every page on a template
+              identical, so re-deriving it is deliberate and separate. */}
+          {templateUrl.trim() && (
+            <Button
+              onClick={() => void run('rebuild')}
+              disabled={working}
+              variant="ghost"
+              size="sm"
+              title="Re-read the reference site and rebuild this template's layout from scratch. Slower and more expensive; only needed when the captured layout is wrong."
+            >
+              <Hammer className="size-4" />
+              Rebuild layout
             </Button>
           )}
 

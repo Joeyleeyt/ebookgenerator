@@ -55,6 +55,7 @@ export * from './application/ports/repositories/ChannelRepository.js';
 export * from './application/ports/repositories/KnowledgeRepository.js';
 export * from './application/ports/repositories/ExportArtifactRepository.js';
 export * from './application/ports/repositories/LandingPageRepository.js';
+export * from './application/ports/repositories/LandingLayoutRepository.js';
 export * from './application/ports/services/AiTextGenerator.js';
 export * from './application/ports/services/YouTubeMetadataProvider.js';
 export * from './application/ports/services/TranscriptProvider.js';

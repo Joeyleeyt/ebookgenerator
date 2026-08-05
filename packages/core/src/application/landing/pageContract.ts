@@ -63,9 +63,37 @@ export const PALETTE_VARS = [
 const MAX_CSS_BYTES = 120_000;
 const MAX_HTML_BYTES = 160_000;
 
+/**
+ * A slot in a stored layout where one book's copy goes.
+ *
+ * Layouts are captured once per reference and reused by every book that follows
+ * that template, so the markup cannot contain any book's words — it contains
+ * these instead, and the copy call fills them per book.
+ */
+export interface CopySlot {
+  /** Token key, e.g. "hero.headline" → {{COPY:hero.headline}}. */
+  key: string;
+  /** What belongs here, written for the copywriter. */
+  purpose: string;
+  /** Soft ceiling so long prose cannot break the layout it was written for. */
+  maxChars: number;
+}
+
+/** Matches a copy slot token and captures its key. */
+export const COPY_SLOT_RE = /\{\{COPY:([a-z0-9][a-z0-9._-]*)\}\}/g;
+
+export function copySlotToken(key: string): string {
+  return `{{COPY:${key}}}`;
+}
+
 export interface GeneratedPage {
   css: string;
   bodyHtml: string;
+  /**
+   * Present when the page is a REUSABLE layout rather than a finished one.
+   * Its markup then carries {{COPY:…}} tokens in place of prose.
+   */
+  slots?: CopySlot[];
 }
 
 /**
@@ -86,7 +114,23 @@ export interface ValidateOptions {
    * mandatory: it is the only element that carries each book's own buy link.
    */
   productCount?: number;
+  /**
+   * Validate this as a REUSABLE layout: prose must be replaced by {{COPY:…}}
+   * slots, and the declared manifest must match the tokens actually used. A
+   * layout with a book's words baked in cannot be reused by the next book, and
+   * that is the whole point of storing it.
+   */
+  expectSlots?: boolean;
+  /** Minimum slots a layout must declare, so a near-empty one is rejected. */
+  minSlots?: number;
 }
+
+/**
+ * Slots every layout must declare. The system reads these directly — the CTA's
+ * label, the document title and the meta description are built from them — so a
+ * layout without them produces a page with an empty <title>.
+ */
+export const REQUIRED_SLOT_KEYS = ['hero.headline', 'hero.subheadline', 'cta.label'] as const;
 
 export function validateGeneratedPage(page: GeneratedPage, options: ValidateOptions = {}): Result<void, string[]> {
   const errors: string[] = [];
@@ -100,6 +144,8 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
       errors.push(`Copy was altered. This must appear verbatim: "${truncateForError(text)}"`);
     }
   }
+
+  if (options.expectSlots) errors.push(...slotErrors(page, options.minSlots ?? 8));
 
   if (css.length > MAX_CSS_BYTES) errors.push(`CSS is ${css.length} bytes; the limit is ${MAX_CSS_BYTES}.`);
   if (bodyHtml.length > MAX_HTML_BYTES) {
@@ -214,6 +260,64 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   }
 
   return errors.length === 0 ? Result.ok<void, string[]>(undefined) : Result.fail<void, string[]>(errors);
+}
+
+/**
+ * Checks a reusable layout's slots against the manifest it declared.
+ *
+ * The failure this exists to catch is subtle and expensive: a layout that looks
+ * fine but has one book's headline written into the markup. It renders
+ * perfectly for that book and then puts that book's words on every other book
+ * that reuses the template.
+ */
+function slotErrors(page: GeneratedPage, minSlots: number): string[] {
+  const errors: string[] = [];
+  const declared = page.slots ?? [];
+  const used = [...page.bodyHtml.matchAll(COPY_SLOT_RE)].map((m) => m[1] as string);
+
+  if (declared.length === 0) {
+    return ['This layout must be reusable: declare a "slots" array and put {{COPY:key}} tokens in the markup.'];
+  }
+  if (declared.length < minSlots) {
+    errors.push(
+      `Only ${declared.length} copy slots were declared; a page of this size needs at least ${minSlots}. ` +
+        'Any text that is about THIS book must be a slot, not written into the markup.',
+    );
+  }
+
+  const declaredKeys = new Set(declared.map((s) => s.key));
+  const usedKeys = new Set(used);
+
+  for (const key of REQUIRED_SLOT_KEYS) {
+    if (!declaredKeys.has(key)) {
+      errors.push(`Slot "${key}" is required — the system builds the page title and CTA label from it.`);
+    }
+  }
+
+  for (const key of usedKeys) {
+    if (!declaredKeys.has(key)) errors.push(`{{COPY:${key}}} is used in the markup but missing from "slots".`);
+  }
+  for (const slot of declared) {
+    if (!usedKeys.has(slot.key)) errors.push(`Slot "${slot.key}" is declared but never placed in the markup.`);
+    if (!slot.purpose?.trim()) errors.push(`Slot "${slot.key}" needs a "purpose" — the copywriter only sees that.`);
+    if (!Number.isFinite(slot.maxChars) || slot.maxChars <= 0) {
+      errors.push(`Slot "${slot.key}" needs a positive "maxChars".`);
+    }
+  }
+  // A slot rendered twice would print the same sentence in two places.
+  for (const key of usedKeys) {
+    if (used.filter((k) => k === key).length > 1) errors.push(`{{COPY:${key}}} appears more than once.`);
+  }
+
+  return errors;
+}
+
+/**
+ * Substitutes one book's copy into a stored layout. A slot with no value
+ * collapses to nothing rather than leaving `{{COPY:…}}` visible to a buyer.
+ */
+export function fillCopySlots(bodyHtml: string, values: Record<string, string>): string {
+  return bodyHtml.replace(COPY_SLOT_RE, (_match, key: string) => values[key] ?? '');
 }
 
 function occurrences(haystack: string, needle: string): number {

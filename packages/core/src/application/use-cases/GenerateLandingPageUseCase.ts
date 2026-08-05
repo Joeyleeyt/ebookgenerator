@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Result } from '../../domain/shared/Result.js';
 import { ProjectId } from '../../domain/project/ProjectId.js';
 import { LandingPage, LandingPageId, type LandingCopy } from '../../domain/landing/LandingPage.js';
-import { normalizeBookTitle } from '../../domain/project/GenerationOptions.js';
+import { normalizeBookTitle, type LandingMode } from '../../domain/project/GenerationOptions.js';
 import { Palette, parseHexColor } from '../../domain/landing/Palette.js';
 import type { ProjectRepository } from '../ports/repositories/ProjectRepository.js';
 import type { BookRepository } from '../ports/repositories/BookRepository.js';
@@ -18,16 +18,29 @@ import type { ObjectStorage } from '../ports/services/ObjectStorage.js';
 import type { IdGenerator } from '../ports/IdGenerator.js';
 import type { Clock } from '../ports/Clock.js';
 import type { Hasher } from '../ports/Hasher.js';
-import { LandingPagePrompt } from '../prompts/LandingPagePrompt.js';
+import { LandingPagePrompt, LandingSlotCopyPrompt } from '../prompts/LandingPagePrompt.js';
 import { LandingLayoutPrompt } from '../prompts/LandingLayoutPrompt.js';
 import { parseJsonCompletion } from '../prompts/parse.js';
-import { validateGeneratedPage, type GeneratedPage } from '../landing/pageContract.js';
+import { validateGeneratedPage, fillCopySlots, type GeneratedPage } from '../landing/pageContract.js';
 import type { LandingPageAssembler } from '../ports/services/LandingPageAssembler.js';
 import type { ReferencePage, ReferencePageFetcher } from '../ports/services/ReferencePageFetcher.js';
 import type { ReferenceScreenshotter, ReferenceShot } from '../ports/services/ReferenceScreenshotter.js';
 import { referenceUrlFor } from '../../domain/landing/LandingTemplate.js';
+import type {
+  LandingLayoutRepository,
+  StoredLandingLayout,
+} from '../ports/repositories/LandingLayoutRepository.js';
 
-const LayoutSchema = z.object({ css: z.string(), bodyHtml: z.string() });
+const LayoutSchema = z.object({
+  css: z.string(),
+  bodyHtml: z.string(),
+  // Declared by the layout call so the copy call knows what to write. Defaulted
+  // rather than required so a malformed response is reported by the contract's
+  // slot check, which explains the problem, instead of by a schema error.
+  slots: z
+    .array(z.object({ key: z.string(), purpose: z.string().default(''), maxChars: z.number().default(120) }))
+    .default([]),
+});
 
 /** The bucket the cover art and exports already live in. */
 const EXPORTS_BUCKET = 'exports';
@@ -77,10 +90,24 @@ function compactCount(n: number): string {
  */
 function outlineOf(reference: ReferencePage): Array<{ heading: string; excerpt: string }> {
   const structural = reference.headings.filter((h) => h.level <= 2);
-  const headings = structural.length >= 3 ? structural : reference.headings;
+  const candidates = structural.length >= 3 ? structural : reference.headings;
   const text = reference.text;
 
-  return headings.slice(0, 14).map((h, i) => {
+  // Deduplicated and capped: every section costs output tokens in the copy
+  // call, and running past that ceiling returns truncated JSON rather than an
+  // error. Ten covers a long sales page; a reference with more than that is
+  // repeating itself, which duplicate headings usually confirm.
+  const seen = new Set<string>();
+  const headings = candidates
+    .filter((h) => {
+      const key = h.text.trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 10);
+
+  return headings.map((h, i) => {
     const start = text.indexOf(h.text);
     if (start === -1) return { heading: h.text, excerpt: '(no visible text captured)' };
     const after = start + h.text.length;
@@ -171,6 +198,11 @@ export interface GenerateLandingPageInput {
   projectId: string;
   /** Rebuild even when the inputs are unchanged (the user pressed Regenerate). */
   force?: boolean;
+  /**
+   * Re-derive the stored layout for this template instead of reusing it. The
+   * cache is what keeps pages identical, so re-deriving is an explicit act.
+   */
+  rebuildLayout?: boolean;
 }
 
 /**
@@ -189,6 +221,7 @@ export class GenerateLandingPageUseCase {
     private readonly channels: ChannelRepository,
     private readonly artifacts: ExportArtifactRepository,
     private readonly pages: LandingPageRepository,
+    private readonly layouts: LandingLayoutRepository,
     private readonly ai: AiTextGenerator,
     private readonly renderer: LandingPageRenderer,
     private readonly assembler: LandingPageAssembler,
@@ -318,44 +351,55 @@ export class GenerateLandingPageUseCase {
     const artifactList = await this.artifacts.listByProject(projectId);
     const pageCount = artifactList.find((a) => a.pageCount > 0)?.pageCount ?? null;
 
-    const prompt = LandingPagePrompt.build({
-      bookTitle: title,
-      subtitle: strategy?.subtitle ?? '',
-      channelTitle: channel?.title ?? 'this creator',
-      author: strategy?.author,
-      strategy: strategy?.toText() ?? '',
-      chapterTitles,
-      pageCount,
-      tone: project.options.tone,
-      hasRealTestimonials: false,
-      ...(reference
-        ? { referenceSections: outlineOf(reference), referenceTitle: reference.title }
-        : {}),
-    });
+    // ── the stored layout for this template ──
+    // Captured once per reference and reused by every book that follows it.
+    // That is what makes each page structurally identical to the template
+    // instead of a fresh interpretation, and what removes a 30k-token Opus
+    // call from every generation.
+    const layout = referenceUrl
+      ? await this.ensureLayout({
+          projectId: input.projectId,
+          referenceUrl,
+          mode: project.options.landingMode,
+          reference,
+          referenceShots,
+          productCount: 1 + project.options.landingSiblings.length,
+          hasAuthorPhoto: Boolean(project.options.landingAuthorPhotoPath),
+          rebuild: input.rebuildLayout ?? false,
+        })
+      : null;
 
-    const completion = await this.ai.generate({
-      // Opus: this is the one page a buyer reads before deciding, and it is a
-      // single call per book — the quality is worth more than the token saving.
-      model: 'claude-opus-4-8',
-      system: prompt.system,
-      messages: [{ role: 'user', content: prompt.user }],
-      maxTokens: 4000,
-      cacheControl: { systemPrefix: true },
-      metadata: { projectId: input.projectId, stage: 'landing-page' },
-    });
-    if (completion.isFail()) {
-      page.markFailed(`Copywriting failed: ${completion.error.type}`, this.clock.now());
-      await this.pages.save(page);
-      return Result.fail(completion.error.type);
-    }
+    const written = layout
+      ? await this.writeSlotCopy({
+          projectId: input.projectId,
+          layout,
+          bookTitle: title,
+          subtitle: strategy?.subtitle ?? '',
+          channelTitle: channel?.title ?? 'this creator',
+          author: strategy?.author,
+          strategy: strategy?.toText() ?? '',
+          chapterTitles,
+          pageCount,
+          tone: project.options.tone,
+        })
+      : await this.writeFixedCopy({
+          projectId: input.projectId,
+          bookTitle: title,
+          subtitle: strategy?.subtitle ?? '',
+          channelTitle: channel?.title ?? 'this creator',
+          author: strategy?.author,
+          strategy: strategy?.toText() ?? '',
+          chapterTitles,
+          pageCount,
+          tone: project.options.tone,
+        });
 
-    const parsed = parseJsonCompletion(completion.value.text, CopySchema);
-    if (parsed.isFail()) {
-      page.markFailed(parsed.error, this.clock.now());
+    if (written.isFail()) {
+      page.markFailed(written.error, this.clock.now());
       await this.pages.save(page);
-      return Result.fail(parsed.error);
+      return Result.fail(written.error);
     }
-    const copy = parsed.value as LandingCopy;
+    const { copy, slotValues } = written.value;
 
     // ── render ──
     const product: LandingProduct = {
@@ -447,143 +491,239 @@ export class GenerateLandingPageUseCase {
       edition: `${romanYear(this.clock.now().getFullYear())} · No. I`,
     };
 
-    // ── layout ──
-    // With a reference page the layout is generated to match it; without one
-    // (or when generation can't be made to pass the contract) the built-in
-    // template renders the same model. Either way the page gets built.
-    const layout = await this.buildLayout({
-      projectId: input.projectId,
-      reference,
-      copy,
-      bookTitle: title,
-      pageCount,
-      pageModel,
-      // Drives the contract's offer-grid rule: more than one product makes
-      // {{OFFER_GRID}} mandatory, because it is the only element that carries
-      // each book's own buy link.
-      productCount: products.length,
-      referenceShots,
-      otherTitles: products.slice(1).map((p) => p.title),
-      hasAuthorPhoto: authorPhoto !== null,
-      edition: pageModel.edition,
-    });
+    // ── render ──
+    // With a stored layout the book's copy is poured into the template's own
+    // markup; without one the built-in template renders the same model. Either
+    // way the page gets built.
+    const html = layout
+      ? this.assembler.assemble({
+          page: { css: layout.css, bodyHtml: fillCopySlots(layout.bodyHtml, slotValues) },
+          model: pageModel,
+        })
+      : this.renderer.render(pageModel);
 
-    page.setDraft({ copy, palette, html: layout.html, inputHash }, this.clock.now());
+    page.setDraft({ copy, palette, html, inputHash }, this.clock.now());
     await this.pages.save(page);
     return Result.ok({
       regenerated: true,
-      layout: layout.source,
+      layout: layout ? ('generated' as const) : ('builtin' as const),
       referenceUrl,
       screenshots: referenceShots.length,
       ...(referenceNote ? { referenceNote } : {}),
-      ...(layout.failure ? { layoutFailure: layout.failure } : {}),
     });
   }
 
+
   /**
-   * Produces the page body. With a reference page the model generates a layout
-   * shaped after it; that layout must clear the contract before it is used.
+   * The layout for this template — from storage when it has been captured
+   * before, otherwise derived once and stored for every book that follows.
    *
-   * One repair round, then the built-in template. Model-authored markup is
-   * unreliable in exactly the ways the validator checks for, and a sales page
-   * that fails to build is worse than one that looks generic — so the fallback
-   * is a guarantee, not an error path.
+   * Returns null when no usable layout can be produced, which sends the page
+   * down the built-in template instead. That is a fallback, not an error: a
+   * plainer page beats no page.
    */
-  private async buildLayout(input: {
+  private async ensureLayout(input: {
+    projectId: string;
+    referenceUrl: string;
+    mode: LandingMode;
+    reference: ReferencePage | null;
+    referenceShots: ReferenceShot[];
+    productCount: number;
+    hasAuthorPhoto: boolean;
+    rebuild: boolean;
+  }): Promise<StoredLandingLayout | null> {
+    if (!input.rebuild) {
+      const stored = await this.layouts.find(input.referenceUrl, input.mode);
+      // The whole point: every book after the first pays nothing for layout.
+      if (stored) return stored;
+    }
+    if (!input.reference) return null; // nothing to copy from
+
+    const derived = await this.deriveLayout(input);
+    if (!derived) return null;
+
+    const stored: StoredLandingLayout = {
+      referenceUrl: input.referenceUrl,
+      mode: input.mode,
+      css: derived.css,
+      bodyHtml: derived.bodyHtml,
+      slots: derived.slots ?? [],
+      inputHash: this.hasher.hash({
+        url: input.referenceUrl,
+        mode: input.mode,
+        products: input.productCount,
+        photo: input.hasAuthorPhoto,
+      }),
+    };
+    // A store failure costs the cache, not the page — this generation already
+    // has its layout in hand.
+    await this.layouts.save(stored);
+    return stored;
+  }
+
+  /**
+   * Asks the model for a reusable layout copied from the reference. One repair
+   * round, then give up and let the built-in template take over.
+   */
+  private async deriveLayout(input: {
     projectId: string;
     reference: ReferencePage | null;
-    copy: LandingCopy;
-    bookTitle: string;
-    pageCount: number | null;
-    pageModel: Parameters<LandingPageRenderer['render']>[0];
-    productCount: number;
     referenceShots: ReferenceShot[];
-    otherTitles: string[];
+    productCount: number;
     hasAuthorPhoto: boolean;
-    edition: string | null;
-  }): Promise<{ html: string; source: 'generated' | 'builtin'; failure?: string[] }> {
-    if (!input.reference) {
-      return { html: this.renderer.render(input.pageModel), source: 'builtin' };
-    }
-
-    // The copy was already written and validated; the layout call may place it
-    // but not rewrite it, and this is what proves it didn't.
-    // Every template section's heading is required verbatim. This is what turns
-    // "build every section the reference has" from an instruction into a
-    // mechanical check: a layout that quietly skipped one fails and gets told
-    // exactly which heading is missing.
-    const requiredText = [
-      input.copy.headline,
-      input.copy.subheadline,
-      ...input.copy.faqs.map((f) => f.question),
-      ...(input.copy.templateSections ?? []).map((s) => s.heading),
-    ];
-
+  }): Promise<GeneratedPage | null> {
     let repairErrors: string[] | undefined;
+
     for (let attempt = 0; attempt < 3; attempt++) {
       const prompt = LandingLayoutPrompt.build({
         reference: input.reference,
-        copy: input.copy,
-        bookTitle: input.bookTitle,
-        pageCount: input.pageCount,
         productCount: input.productCount,
-        otherTitles: input.otherTitles,
-        referenceShots: input.referenceShots,
         hasAuthorPhoto: input.hasAuthorPhoto,
-        edition: input.edition,
+        referenceShots: input.referenceShots,
         ...(repairErrors ? { repairErrors } : {}),
       });
 
       const completion = await this.ai.generate({
+        // Opus, and worth it: this runs once per template, not once per book.
         model: 'claude-opus-4-8',
         system: prompt.system,
         messages: [{ role: 'user', content: prompt.user }],
-        // A full page of markup and CSS. Generous on purpose: a ceiling that
-        // truncates the completion mid-JSON burns the attempt AND the repair.
         maxTokens: 30_000,
         cacheControl: { systemPrefix: true },
         metadata: { projectId: input.projectId, stage: 'landing-layout' },
       });
-      if (completion.isFail()) {
-        repairErrors = [`AI call failed: ${completion.error.type}`];
-        break;
-      }
+      if (completion.isFail()) return null;
 
-      // Truncation is the single most likely failure for a call this large, and
-      // it is invisible downstream — it just looks like broken JSON or an
-      // unbalanced tag. Name it, so the repair round fixes the actual problem.
       if (completion.value.stopReason === 'max_tokens') {
         repairErrors = [
-          'Your response was cut off at the output limit. Make it smaller and return the COMPLETE JSON: ' +
-            'keep the stylesheet under 10,000 characters, remove repeated rule blocks, and keep the markup lean.',
+          'Your response was cut off at the output limit. Return the COMPLETE JSON: keep the stylesheet ' +
+            'under 10,000 characters, remove repeated rule blocks, and keep the markup lean.',
         ];
         continue;
       }
 
       const parsed = parseJsonCompletion(completion.value.text, LayoutSchema);
       if (parsed.isFail()) {
-        repairErrors = [`Your response was not valid JSON with keys "css" and "bodyHtml": ${parsed.error}`];
+        repairErrors = [`Your response was not valid JSON with keys "css", "bodyHtml" and "slots": ${parsed.error}`];
         continue;
       }
 
-      const generated: GeneratedPage = parsed.value;
-      const check = validateGeneratedPage(generated, { requiredText, productCount: input.productCount });
-      if (check.isOk()) {
-        return {
-          html: this.assembler.assemble({ page: generated, model: input.pageModel }),
-          source: 'generated',
-        };
-      }
+      const generated = parsed.value as GeneratedPage;
+      const check = validateGeneratedPage(generated, {
+        productCount: input.productCount,
+        // The critical one: a layout with a book's words baked in would print
+        // that book's headline on every other book that reuses the template.
+        expectSlots: true,
+      });
+      if (check.isOk()) return generated;
       repairErrors = check.error;
     }
+    return null;
+  }
 
-    // The rejection reasons ride along so the worker can log them — a silent
-    // fallback is indistinguishable from success until someone compares pages.
-    return {
-      html: this.renderer.render(input.pageModel),
-      source: 'builtin',
-      ...(repairErrors ? { failure: repairErrors } : {}),
-    };
+  /** Fills a stored layout's slots for this book. */
+  private async writeSlotCopy(input: {
+    projectId: string;
+    layout: StoredLandingLayout;
+    bookTitle: string;
+    subtitle: string;
+    channelTitle: string;
+    author: string | undefined;
+    strategy: string;
+    chapterTitles: string[];
+    pageCount: number | null;
+    tone: string;
+  }): Promise<Result<{ copy: LandingCopy; slotValues: Record<string, string> }>> {
+    const prompt = LandingSlotCopyPrompt.build({ ...input, slots: input.layout.slots });
+
+    const completion = await this.ai.generate({
+      // Sonnet, not Opus: this is prose written from supplied source material
+      // into slots whose purpose and length are already specified — the task
+      // Sonnet is strongest at, at a fifth of the cost, and it now runs on
+      // every generation where the layout call does not.
+      model: 'claude-sonnet-4-6',
+      system: prompt.system,
+      messages: [{ role: 'user', content: prompt.user }],
+      maxTokens: 16_000,
+      cacheControl: { systemPrefix: true },
+      metadata: { projectId: input.projectId, stage: 'landing-page' },
+    });
+    if (completion.isFail()) return Result.fail(`Copywriting failed: ${completion.error.type}`);
+    if (completion.value.stopReason === 'max_tokens') {
+      return Result.fail(
+        'The copywriting response was cut off at the output limit — the layout declares more slots than ' +
+          'the budget allows.',
+      );
+    }
+
+    const parsed = parseJsonCompletion(completion.value.text, z.record(z.string()));
+    if (parsed.isFail()) return Result.fail(parsed.error);
+    const slotValues = parsed.value;
+
+    // The assembler needs a handful of these directly — the document title, the
+    // meta description and the buy button's label. The contract guarantees the
+    // layout declared them; the fallbacks cover a model that returned short.
+    return Result.ok({
+      slotValues,
+      copy: {
+        headline: slotValues['hero.headline'] ?? input.bookTitle,
+        subheadline: slotValues['hero.subheadline'] ?? input.subtitle,
+        ctaLabel: slotValues['cta.label'] ?? 'Get the book',
+        eyebrow: '',
+        painPoints: [],
+        whatsInsideHeading: '',
+        bullets: [],
+        whoIsItForHeading: '',
+        whoIsItFor: [],
+        authorHeading: '',
+        authorBio: '',
+        faqs: [],
+        categoryLabel: '',
+        productFeatures: [],
+        comparisonWithout: [],
+        comparisonWith: [],
+        closingHeading: '',
+        closingBody: '',
+        fontFamily: 'sans',
+        templateSections: [],
+      },
+    });
+  }
+
+  /**
+   * The no-reference path: the fixed copy schema that the built-in template
+   * renders. Unchanged, and still the fallback whenever a layout cannot be
+   * captured.
+   */
+  private async writeFixedCopy(input: {
+    projectId: string;
+    bookTitle: string;
+    subtitle: string;
+    channelTitle: string;
+    author: string | undefined;
+    strategy: string;
+    chapterTitles: string[];
+    pageCount: number | null;
+    tone: string;
+  }): Promise<Result<{ copy: LandingCopy; slotValues: Record<string, string> }>> {
+    const prompt = LandingPagePrompt.build({ ...input, hasRealTestimonials: false });
+
+    const completion = await this.ai.generate({
+      model: 'claude-opus-4-8',
+      system: prompt.system,
+      messages: [{ role: 'user', content: prompt.user }],
+      maxTokens: 8_000,
+      cacheControl: { systemPrefix: true },
+      metadata: { projectId: input.projectId, stage: 'landing-page' },
+    });
+    if (completion.isFail()) return Result.fail(`Copywriting failed: ${completion.error.type}`);
+    if (completion.value.stopReason === 'max_tokens') {
+      return Result.fail('The copywriting response was cut off at the output limit.');
+    }
+
+    const parsed = parseJsonCompletion(completion.value.text, CopySchema);
+    if (parsed.isFail()) return Result.fail(parsed.error);
+    return Result.ok({ copy: parsed.value as LandingCopy, slotValues: {} });
   }
 
   /**
