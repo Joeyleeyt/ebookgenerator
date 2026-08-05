@@ -8,6 +8,7 @@ import {
   type LandingPageRepository,
   type LandingPageState,
 } from '@yeg/core';
+import { queryError } from './queryError.js';
 
 interface LandingPageRow {
   id: string;
@@ -34,7 +35,7 @@ export class SupabaseLandingPageRepository implements LandingPageRepository {
       .select('*')
       .eq('project_id', projectId.value)
       .maybeSingle();
-    if (error) throw new Error(error.message);
+    if (error) throw queryError('landing_pages', 'findByProject', error);
     return data ? this.toDomain(data as LandingPageRow) : null;
   }
 
@@ -59,7 +60,7 @@ export class SupabaseLandingPageRepository implements LandingPageRepository {
       },
       { onConflict: 'project_id' },
     );
-    if (error) throw new Error(error.message);
+    if (error) throw queryError('landing_pages', 'save', error);
   }
 
   private toDomain(row: LandingPageRow): LandingPage {

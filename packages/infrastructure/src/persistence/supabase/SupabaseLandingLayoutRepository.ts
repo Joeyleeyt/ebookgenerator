@@ -6,6 +6,7 @@ import {
   type LandingMode,
   type StoredLandingLayout,
 } from '@yeg/core';
+import { queryError } from './queryError.js';
 
 interface LayoutRow {
   reference_url: string;
@@ -34,7 +35,7 @@ export class SupabaseLandingLayoutRepository implements LandingLayoutRepository 
       .eq('reference_url', referenceUrl)
       .eq('mode', mode)
       .maybeSingle();
-    if (error) throw new Error(error.message);
+    if (error) throw queryError('landing_layouts', 'find', error);
     if (!data) return null;
 
     const row = data as LayoutRow;
@@ -64,7 +65,7 @@ export class SupabaseLandingLayoutRepository implements LandingLayoutRepository 
       },
       { onConflict: 'reference_url,mode' },
     );
-    if (error) return Result.fail(error.message);
+    if (error) return Result.fail(queryError('landing_layouts', 'save', error).message);
     return Result.ok();
   }
 }

@@ -100,6 +100,20 @@ export const POST = handle(async (req: Request, { params }: { params: { id: stri
     );
   }
 
+  // One generation at a time per project. The job id carries a timestamp, so
+  // every click enqueues a distinct job and the queue runs three at once —
+  // duplicates for the same project then contend on the same landing_pages row
+  // and burn a full Opus layout call each.
+  const existing = await c.repositories.landingPages.findByProject(ProjectId.from(params.id));
+  if (existing?.state === 'GENERATING') {
+    // Stale guard: a worker that died mid-run would otherwise lock the project
+    // out for good.
+    const startedMsAgo = Date.now() - existing.updatedAt.getTime();
+    if (startedMsAgo < 10 * 60_000) {
+      return error('This page is already being generated — wait for it to finish before starting another', 409);
+    }
+  }
+
   // Queued rather than run inline: an Opus call plus a Netlify deploy is well
   // past a request's lifetime, and this way it retries like everything else.
   await c.queue.enqueue(

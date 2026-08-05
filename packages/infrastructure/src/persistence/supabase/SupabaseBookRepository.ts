@@ -16,6 +16,7 @@ import {
   type BookSummary,
   type SharedChapterContext,
 } from '@yeg/core';
+import { queryError } from './queryError.js';
 
 export class SupabaseBookRepository implements BookRepository {
   constructor(private readonly db: SupabaseClient) {}
@@ -28,7 +29,7 @@ export class SupabaseBookRepository implements BookRepository {
       .maybeSingle();
     // Surface real query failures (e.g. a missing table before its migration is
     // applied) instead of returning null and masquerading as "not found".
-    if (error) throw new Error(error.message);
+    if (error) throw queryError('books', 'findByProject', error);
     if (!data) return null;
     return this.toDomain(data);
   }
@@ -45,7 +46,7 @@ export class SupabaseBookRepository implements BookRepository {
       .select('title, cover_image_path, outlines(structure), chapters(position, title)')
       .eq('project_id', projectId.value)
       .maybeSingle();
-    if (error) throw new Error(error.message);
+    if (error) throw queryError('books', 'findSummaryByProject', error);
     if (!data) return null;
 
     const row = data as {
