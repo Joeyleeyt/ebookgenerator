@@ -57,7 +57,8 @@ export class GeneratedPageAssembler implements LandingPageAssembler {
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(truncate(model.copy.subheadline, 300))}">
 <meta property="og:type" content="website">
-${primary?.coverDataUri ? `<meta property="og:image" content="${esc(primary.coverDataUri)}">` : ''}
+<!-- No og:image — see the note in LandingPageHtmlRenderer: a data: URI is
+     ignored by every scraper, so this tag was pure page weight. -->
 <style>
   /* Palette derived from this book's cover; the generated CSS may only
      reference these, which is what makes its contrast provable. */

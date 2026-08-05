@@ -18,4 +18,14 @@ export interface ImageProcessor {
    * at `quality` (1–100). Returns the processed bytes and their content type.
    */
   downscaleToJpeg(input: { bytes: Uint8Array; maxWidth: number; quality: number }): Promise<Result<ProcessedImage>>;
+
+  /**
+   * The same downscale, returned as a `data:` URI ready to inline into a page.
+   *
+   * Separate from `downscaleToJpeg` for two reasons. The encoding is alpha-safe
+   * (a channel avatar is usually a transparent PNG, and flattening it onto JPEG's
+   * mandatory background turns a logo into a black box), and base64 belongs on
+   * this side of the port so the application layer stays free of Node's Buffer.
+   */
+  downscaleToDataUri(input: { bytes: Uint8Array; maxWidth: number; quality: number }): Promise<Result<string>>;
 }

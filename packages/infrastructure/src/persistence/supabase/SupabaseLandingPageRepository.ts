@@ -26,6 +26,18 @@ interface LandingPageRow {
   updated_at: string;
 }
 
+/**
+ * Ceiling on the rendered page before we refuse to write it.
+ *
+ * The html column carries every image on the page as an inlined data URI. When
+ * those were full-size cover PNGs the row reached tens of megabytes, and the
+ * write failed as a Postgres statement timeout (57014) on one attempt and a
+ * Cloudflare 502 from the PostgREST edge on the next — neither of which names
+ * the actual problem. A generated page is now a few hundred KB; anything past
+ * this is a regression in what gets inlined, and saying so beats a 502.
+ */
+const MAX_HTML_BYTES = 8 * 1024 * 1024;
+
 export class SupabaseLandingPageRepository implements LandingPageRepository {
   constructor(private readonly db: SupabaseClient) {}
 
@@ -41,6 +53,14 @@ export class SupabaseLandingPageRepository implements LandingPageRepository {
 
   async save(page: LandingPage): Promise<void> {
     const props = page.toJSON();
+    const htmlBytes = props.html ? Buffer.byteLength(props.html, 'utf8') : 0;
+    if (htmlBytes > MAX_HTML_BYTES) {
+      throw new Error(
+        `landing_pages.save refused: rendered html is ${(htmlBytes / 1024 / 1024).toFixed(1)}MB, ` +
+          `over the ${MAX_HTML_BYTES / 1024 / 1024}MB limit. Something is inlining full-size images — ` +
+          `check the downscale in GenerateLandingPageUseCase.inlineImage.`,
+      );
+    }
     // project_id is unique, so it is the conflict target: the worker and a manual
     // regenerate can both write without racing to create a second row.
     const { error } = await this.db.from('landing_pages').upsert(

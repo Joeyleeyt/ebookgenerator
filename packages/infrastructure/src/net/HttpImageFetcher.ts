@@ -13,6 +13,13 @@ export class HttpImageFetcher implements RemoteImageFetcher {
   constructor(private readonly fetchImpl: typeof fetch = fetch) {}
 
   async fetchDataUri(url: string): Promise<Result<string>> {
+    const fetched = await this.fetchBytes(url);
+    if (fetched.isFail()) return Result.fail(fetched.error);
+    const { bytes, contentType } = fetched.value;
+    return Result.ok(`data:${contentType};base64,${Buffer.from(bytes).toString('base64')}`);
+  }
+
+  async fetchBytes(url: string): Promise<Result<{ bytes: Uint8Array; contentType: string }>> {
     const safe = await assertPublicUrl(url);
     if (safe.isFail()) return Result.fail(safe.error);
 
@@ -35,6 +42,6 @@ export class HttpImageFetcher implements RemoteImageFetcher {
     if (buffer.byteLength > MAX_IMAGE_BYTES) return Result.fail('Image is too large to embed');
     if (buffer.byteLength === 0) return Result.fail('Image was empty');
 
-    return Result.ok(`data:${type.split(';')[0]};base64,${Buffer.from(buffer).toString('base64')}`);
+    return Result.ok({ bytes: new Uint8Array(buffer), contentType: type.split(';')[0]! });
   }
 }

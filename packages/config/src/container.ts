@@ -195,6 +195,7 @@ export function buildContainer(env: Env = loadEnv()) {
       webFonts,
       colorSampler,
       imageFetcher,
+      imageProcessor,
       storage,
       ids,
       clock,

@@ -19,4 +19,19 @@ export class SharpImageProcessor implements ImageProcessor {
       return Result.fail(e instanceof Error ? e.message : String(e));
     }
   }
+
+  async downscaleToDataUri(input: { bytes: Uint8Array; maxWidth: number; quality: number }): Promise<Result<string>> {
+    try {
+      // WebP rather than mozjpeg: it keeps the alpha channel that logos and
+      // transparent cover art rely on, and lands ~30% smaller at the same
+      // quality — and every browser that can render a sales page supports it.
+      const out = await sharp(Buffer.from(input.bytes))
+        .resize({ width: input.maxWidth, withoutEnlargement: true })
+        .webp({ quality: input.quality })
+        .toBuffer();
+      return Result.ok(`data:image/webp;base64,${out.toString('base64')}`);
+    } catch (e) {
+      return Result.fail(e instanceof Error ? e.message : String(e));
+    }
+  }
 }

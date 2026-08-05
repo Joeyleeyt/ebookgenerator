@@ -13,6 +13,7 @@ import type { LandingPageRepository } from '../ports/repositories/LandingPageRep
 import type { AiTextGenerator } from '../ports/services/AiTextGenerator.js';
 import type { ImageColorSampler } from '../ports/services/ImageColorSampler.js';
 import type { RemoteImageFetcher } from '../ports/services/RemoteImageFetcher.js';
+import type { ImageProcessor } from '../ports/services/ImageProcessor.js';
 import type { LandingPageRenderer, LandingProduct } from '../ports/services/LandingPageRenderer.js';
 import type { ObjectStorage } from '../ports/services/ObjectStorage.js';
 import type { IdGenerator } from '../ports/IdGenerator.js';
@@ -47,6 +48,24 @@ const LayoutSchema = z.object({
 
 /** The bucket the cover art and exports already live in. */
 const EXPORTS_BUCKET = 'exports';
+
+/**
+ * Widths every inlined image is resized to before it becomes a data URI, in
+ * device pixels — roughly 2× the CSS width each one is displayed at, so the
+ * page still looks sharp on a retina screen.
+ *
+ * These exist because the page carries its images INSIDE its HTML, and that HTML
+ * is a single Postgres column written in a single PostgREST request. Cover art
+ * arrives from gpt-image-1 at 1024×1536 (~3MB PNG, ~4MB once base64'd) and a
+ * three-book page embeds eight or so of them — which is how the whole write grew
+ * past both the statement timeout and the gateway's tolerance, and started
+ * failing as a Postgres 57014 on one attempt and a Cloudflare 502 on the next.
+ * At these widths the same page is a few hundred KB.
+ */
+const INLINE_WIDTHS = { cover: 720, authorPhoto: 400, logo: 240 } as const;
+
+/** Re-encode quality for inlined images. 72 is visually clean for WebP. */
+const INLINE_QUALITY = 72;
 
 /**
  * The stat row under the hero, built ONLY from facts already in the system.
@@ -333,6 +352,7 @@ export class GenerateLandingPageUseCase {
     private readonly fonts: WebFontFetcher,
     private readonly colors: ImageColorSampler,
     private readonly images: RemoteImageFetcher,
+    private readonly imageProcessor: ImageProcessor,
     private readonly storage: ObjectStorage,
     private readonly ids: IdGenerator,
     private readonly clock: Clock,
@@ -1053,6 +1073,26 @@ export class GenerateLandingPageUseCase {
   }
 
   /**
+   * Shrink an image to page scale and return it as a data URI, or null if it
+   * cannot be made small enough to embed.
+   *
+   * Every image on the page goes through here. Nothing else is allowed to build
+   * a data URI, because a single un-shrunk one is enough to push the row past
+   * what the write can carry.
+   */
+  private async inlineImage(bytes: Uint8Array, maxWidth: number): Promise<string | null> {
+    const shrunk = await this.imageProcessor.downscaleToDataUri({
+      bytes,
+      maxWidth,
+      quality: INLINE_QUALITY,
+    });
+    // A failure here means the bytes are not a decodable image, so there is no
+    // un-processed version worth falling back to — the browser would not render
+    // it either. Drop it: every caller already treats a missing image as normal.
+    return shrunk.isOk() ? shrunk.value : null;
+  }
+
+  /**
    * The seller's uploaded author portrait. Optional by design and never
    * substituted with the channel avatar: an avatar is usually a logo or a small
    * crop, and enlarging it into the hero portrait the reference pages use looks
@@ -1060,8 +1100,9 @@ export class GenerateLandingPageUseCase {
    */
   private async loadAuthorPhoto(path: string | undefined): Promise<string | null> {
     if (!path) return null;
-    const dataUri = await this.storage.getDataUri(EXPORTS_BUCKET, path);
-    return dataUri.isOk() ? dataUri.value : null;
+    const bytes = await this.storage.getBytes(EXPORTS_BUCKET, path);
+    if (bytes.isFail()) return null;
+    return this.inlineImage(bytes.value.bytes, INLINE_WIDTHS.authorPhoto);
   }
 
   /**
@@ -1071,8 +1112,9 @@ export class GenerateLandingPageUseCase {
    */
   private async loadLogo(thumbnailUrl: string | null): Promise<string | null> {
     if (!thumbnailUrl) return null;
-    const fetched = await this.images.fetchDataUri(thumbnailUrl);
-    return fetched.isOk() ? fetched.value : null;
+    const fetched = await this.images.fetchBytes(thumbnailUrl);
+    if (fetched.isFail()) return null;
+    return this.inlineImage(fetched.value.bytes, INLINE_WIDTHS.logo);
   }
 
   /**
@@ -1084,18 +1126,15 @@ export class GenerateLandingPageUseCase {
     path: string | null,
   ): Promise<{ dataUri: string | null; seed: { r: number; g: number; b: number } | null }> {
     if (!path) return { dataUri: null, seed: null };
-    // Two reads of the same object: the raw bytes for colour sampling, and the
-    // adapter's own base64 encoding for embedding. Keeping base64 in the adapter
-    // is what lets the application layer stay free of Node's Buffer.
-    const [bytes, dataUri] = await Promise.all([
-      this.storage.getBytes(EXPORTS_BUCKET, path),
-      this.storage.getDataUri(EXPORTS_BUCKET, path),
+    // One read, two uses: the colour sample wants the original pixels, and the
+    // embedded copy is re-encoded from the same bytes. Sampling before the
+    // downscale also keeps the palette off a re-compressed image.
+    const bytes = await this.storage.getBytes(EXPORTS_BUCKET, path);
+    if (bytes.isFail()) return { dataUri: null, seed: null };
+    const [dataUri, sampled] = await Promise.all([
+      this.inlineImage(bytes.value.bytes, INLINE_WIDTHS.cover),
+      this.colors.dominantColor(bytes.value.bytes),
     ]);
-    if (bytes.isFail()) return { dataUri: dataUri.isOk() ? dataUri.value : null, seed: null };
-    const sampled = await this.colors.dominantColor(bytes.value.bytes);
-    return {
-      dataUri: dataUri.isOk() ? dataUri.value : null,
-      seed: sampled.isOk() ? sampled.value : null,
-    };
+    return { dataUri, seed: sampled.isOk() ? sampled.value : null };
   }
 }

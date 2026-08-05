@@ -83,7 +83,9 @@ export class LandingPageHtmlRenderer implements LandingPageRenderer {
 <meta property="og:title" content="${esc(primary?.title ?? model.siteName)}">
 <meta property="og:description" content="${esc(truncate(copy.subheadline, 300))}">
 <meta property="og:type" content="website">
-${primary?.coverDataUri ? `<meta property="og:image" content="${esc(primary.coverDataUri)}">` : ''}
+<!-- No og:image. Every scraper that reads these tags requires an absolute URL
+     and ignores a data: URI, so embedding the cover here bought nothing and
+     cost a full second copy of it in the stored HTML. -->
 <style>
   :root {
     ${palette.toCssVariables()};

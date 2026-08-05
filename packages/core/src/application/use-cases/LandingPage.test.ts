@@ -20,6 +20,14 @@ const now = new Date('2026-08-03T00:00:00Z');
 
 // ── fakes ────────────────────────────────────────────────────────────────────
 
+/** What the fake processor returns, so tests can assert an image was shrunk. */
+const SHRUNK_URI = 'data:image/webp;base64,SHRUNK';
+
+const FAKE_IMAGE_PROCESSOR = {
+  downscaleToDataUri: async () => Result.ok(SHRUNK_URI),
+  downscaleToJpeg: async () => Result.fail('not used here'),
+} as never;
+
 function makeProject(landing: Partial<Parameters<typeof GenerationOptions.create>[0]> = {}): Project {
   return Project.create({
     id: ProjectId.from('11111111-1111-4111-8111-111111111111'),
@@ -174,7 +182,8 @@ function buildGenerate(options: {
     { capture: async () => Result.fail("no screenshots in tests"), captureHtml: async () => Result.fail("no browser in tests") } as never,
     { embedFrom: async () => Result.ok([]) } as never,
     { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
-    { fetchDataUri: async () => Result.fail("no logo in tests") } as never,
+    { fetchBytes: async () => Result.fail("no logo in tests") } as never,
+    FAKE_IMAGE_PROCESSOR,
     {
       getBytes: async () => Result.ok({ bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png' }),
       getDataUri: async () => Result.ok('data:image/png;base64,AQID'),
@@ -270,7 +279,8 @@ function buildTriple(opts: {
     { capture: async () => Result.fail("no screenshots in tests"), captureHtml: async () => Result.fail("no browser in tests") } as never,
     { embedFrom: async () => Result.ok([]) } as never,
     { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
-    { fetchDataUri: async () => Result.fail('no logo in tests') } as never,
+    { fetchBytes: async () => Result.fail('no logo in tests') } as never,
+    FAKE_IMAGE_PROCESSOR,
     {
       getBytes: async () => Result.ok({ bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png' }),
       getDataUri: async () => Result.ok('data:image/png;base64,AQID'),
@@ -395,7 +405,18 @@ describe('GenerateLandingPageUseCase', () => {
       project: makeProject({ landingAuthorPhotoPath: 'p1/landing/author.jpg' }),
     });
     await useCase.execute({ projectId: 'p1' });
-    expect(rendered[0]?.authorPhotoDataUri).toBe('data:image/png;base64,AQID');
+    // Shrunk on the way in — the page model never carries the source bytes.
+    expect(rendered[0]?.authorPhotoDataUri).toBe(SHRUNK_URI);
+  });
+
+  // The page carries its images inside its own HTML, and that HTML is one
+  // Postgres column written in one request. Inlining cover art at its source
+  // size (1024×1536 PNG ≈ 4MB base64) is what made the save fail as a 57014 and
+  // then a Cloudflare 502, so nothing reaches the model un-shrunk.
+  it('shrinks the cover before it reaches the page model', async () => {
+    const { useCase, rendered } = buildGenerate({});
+    await useCase.execute({ projectId: 'p1' });
+    expect(rendered[0]?.products[0]?.coverDataUri).toBe(SHRUNK_URI);
   });
 
   it('leaves the portrait absent when nothing was uploaded', async () => {
@@ -632,7 +653,8 @@ function buildWithReference(
     } as never,
     { embedFrom: async () => Result.ok([]) } as never,
     { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
-    { fetchDataUri: async () => Result.fail("no logo in tests") } as never,
+    { fetchBytes: async () => Result.fail("no logo in tests") } as never,
+    FAKE_IMAGE_PROCESSOR,
     {
       getBytes: async () => Result.fail('none'),
       getDataUri: async () => Result.fail('none'),
