@@ -443,6 +443,15 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
           // A fallback is invisible on the page itself — it just looks plainer
           // than the reference. Put the exact rejections in the log so a
           // 'builtin' result is diagnosable instead of a mystery.
+          // Accepted despite a visual complaint. Worth seeing — the reviewer
+          // judges still images and is not always right — but NOT a fallback:
+          // the page still follows the reference.
+          if (generated.value.visualNotes) {
+            container.logger.warn('reference layout shipped with visual notes', {
+              projectId: p.projectId,
+              notes: generated.value.visualNotes,
+            });
+          }
           if (generated.value.layoutFailure) {
             container.logger.warn('reference layout rejected — used the built-in template', {
               projectId: p.projectId,
@@ -481,6 +490,9 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
         sourceUrl: p.sourceUrl,
         attestOwnership: true, // asserted at the API boundary and recorded there
         force: p.force,
+        // The id the API already returned to the caller, so what they were
+        // handed is what they can poll for.
+        templateId: p.templateId,
       });
       if (extracted.isFail()) throw new Error(extracted.error);
 

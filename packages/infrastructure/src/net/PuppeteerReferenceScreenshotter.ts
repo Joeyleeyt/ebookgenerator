@@ -39,7 +39,7 @@ export class PuppeteerReferenceScreenshotter implements ReferenceScreenshotter {
       // The page reveals sections on scroll; without this the shots below the
       // fold capture the pre-animation state and every one looks empty.
       await page.evaluate("document.querySelectorAll('[data-anim]').forEach(function(e){e.removeAttribute('data-anim')})");
-      return Result.ok(await this.slice(page));
+      return Result.ok(await this.slice(page, true));
     } catch (e) {
       return Result.fail(`Could not screenshot the generated page: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -76,8 +76,41 @@ export class PuppeteerReferenceScreenshotter implements ReferenceScreenshotter {
     }
   }
 
-  /** Evenly-spaced viewport slices, top to bottom. */
-  private async slice(page: Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>['newPage']>>) {
+  /**
+   * Hides fixed-position furniture, for every shot after the first.
+   *
+   * A sticky bar renders at the top of EVERY viewport screenshot, sitting over
+   * whatever content happens to be at that scroll offset. That is what a sticky
+   * bar does — but to a reviewer looking at a still image it reads as "the
+   * navigation bar covers this heading", and it reads that way on every
+   * mid-page shot of every layout that has one.
+   *
+   * The prompt asks for a sticky bar, so this produced a defect report the
+   * layout could not avoid, on a gate that costs an attempt each time. Shot one
+   * still shows the bar in place, which is where a reviewer can actually judge
+   * it.
+   *
+   * `visibility` rather than `display` or `position`: a fixed element takes no
+   * space in flow, so hiding it this way cannot reflow anything and the shots
+   * still describe the same layout.
+   */
+  private static readonly HIDE_FIXED = `(function () {
+    const all = document.querySelectorAll('body *');
+    for (let i = 0; i < all.length; i++) {
+      if (getComputedStyle(all[i]).position === 'fixed') all[i].style.visibility = 'hidden';
+    }
+  })()`;
+
+  /**
+   * Evenly-spaced viewport slices, top to bottom.
+   *
+   * @param hideFixedAfterFirst Only for OUR pages, under review. The reference
+   *   site is captured exactly as it renders — that is the thing being copied.
+   */
+  private async slice(
+    page: Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>['newPage']>>,
+    hideFixedAfterFirst = false,
+  ) {
     const height = (await page.evaluate('document.body.scrollHeight')) as number;
     const slices = Math.max(1, Math.min(MAX_SLICES, Math.ceil(height / VIEWPORT.height)));
     const step = Math.max(1, Math.floor((height - VIEWPORT.height) / Math.max(1, slices - 1)));
@@ -86,6 +119,9 @@ export class PuppeteerReferenceScreenshotter implements ReferenceScreenshotter {
     for (let i = 0; i < slices; i++) {
       const top = slices === 1 ? 0 : Math.min(i * step, Math.max(0, height - VIEWPORT.height));
       await page.evaluate(`window.scrollTo(0, ${top})`);
+      if (i === 1 && hideFixedAfterFirst) {
+        await page.evaluate(PuppeteerReferenceScreenshotter.HIDE_FIXED);
+      }
       // Let lazy content triggered by the scroll actually paint.
       await new Promise((resolve) => setTimeout(resolve, 350));
       const buffer = await page.screenshot({ type: 'png' });

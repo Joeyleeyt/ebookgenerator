@@ -51,12 +51,22 @@ export function validateTemplate(input: TemplateValidationInput): Result<void, F
   const { html } = input;
 
   // ── the vocabulary ────────────────────────────────────────────────────────
+  // A template that sells a SET has no single "the book" cover — its covers
+  // live one per card in the product repeater, which is where they belong. The
+  // requirement is that the page shows cover art, and OFFER_ITEMS.coverSrc does
+  // that for every product rather than for one.
+  //
+  // This is the same mistake the v1 contract made with {{COVER}}: demanding one
+  // specific placeholder when a multi-product page legitimately uses a
+  // different one, so a correct answer was rejected and there was no passing
+  // response available.
+  const coversInRepeater = html.includes(token('OFFER_ITEMS.coverSrc'));
   for (const key of REQUIRED_PLACEHOLDERS) {
-    if (!html.includes(token(key))) {
-      findings.push(
-        blocker('MISSING_REQUIRED_PLACEHOLDER', `No node was labelled ${token(key)}; the page cannot be filled.`),
-      );
-    }
+    if (html.includes(token(key))) continue;
+    if (key === 'BOOK_COVER' && coversInRepeater) continue;
+    findings.push(
+      blocker('MISSING_REQUIRED_PLACEHOLDER', `No node was labelled ${token(key)}; the page cannot be filled.`),
+    );
   }
 
   const used = new Set<string>();
@@ -106,17 +116,29 @@ export function validateTemplate(input: TemplateValidationInput): Result<void, F
   }
 
   // ── the checkout must survive cloning intact ──────────────────────────────
-  // Not a policy choice — the count is whatever the template does. This is the
-  // direct answer to "some CTA buttons are missing": v1 had no minimum CTA
-  // count at all, and a template with five buy buttons could legally become a
-  // page with one.
+  // Asymmetric on purpose. A MISSING one is a live anchor still pointing at the
+  // template owner's store — the worst thing a cloned page can ship. An EXTRA
+  // one is a link the detector's heuristics missed and the model caught, and it
+  // points at the seller's own checkout, which costs nothing.
+  //
+  // Requiring exact equality made both directions fatal, and the model finding
+  // a seventh buy button on a six-button page failed the whole extraction.
   const ctaCount = occurrences(html, token('CHECKOUT_URL'));
-  if (input.originalCtaCount > 0 && ctaCount !== input.originalCtaCount) {
+  if (input.originalCtaCount > 0 && ctaCount < input.originalCtaCount) {
     findings.push(
       blocker(
         'CTA_COUNT_CHANGED',
         `The template had ${input.originalCtaCount} buy ${input.originalCtaCount === 1 ? 'button' : 'buttons'} but ` +
-          `${ctaCount} ${ctaCount === 1 ? 'was' : 'were'} labelled. Every one must carry the checkout link.`,
+          `only ${ctaCount} ${ctaCount === 1 ? 'was' : 'were'} labelled. Every one must carry the checkout link, ` +
+          "or the page ships a live link to the template owner's store.",
+      ),
+    );
+  } else if (input.originalCtaCount > 0 && ctaCount > input.originalCtaCount) {
+    findings.push(
+      warn(
+        'CTA_COUNT_EXTRA',
+        `${ctaCount} buy buttons were labelled where ${input.originalCtaCount} were detected. The extra ones ` +
+          "point at the seller's checkout, so this is worth a look but not a problem.",
       ),
     );
   }

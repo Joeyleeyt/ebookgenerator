@@ -830,6 +830,37 @@ describe('GenerateLandingPageUseCase — reference-driven layout', () => {
     expect(h.calls.filter((c) => c === 'landing-layout-review')).toHaveLength(2);
   });
 
+  /**
+   * The reviewer judges still images, and some of its complaints are not
+   * defects. A sticky bar appears at the top of every mid-page screenshot,
+   * sitting over whatever content is at that scroll offset — which is what a
+   * sticky bar does, and which it reported on every layout that had one. As a
+   * hard gate that burned all three attempts and dropped the page onto the
+   * built-in template, which follows the reference not at all.
+   */
+  it('ships a contract-valid layout even when the reviewer keeps complaining', async () => {
+    const h = buildWithReference([goodLayout(), goodLayout(), goodLayout()], {
+      canScreenshot: true,
+      reviews: [
+        JSON.stringify({ ok: false, problems: ['The sticky bar covers a heading.'] }),
+        JSON.stringify({ ok: false, problems: ['The sticky bar covers a heading.'] }),
+        JSON.stringify({ ok: false, problems: ['The sticky bar covers a heading.'] }),
+      ],
+    });
+
+    const result = await h.useCase.execute({ projectId: 'p1' });
+
+    if (result.isFail()) throw new Error(result.error);
+    // The reference-shaped page ships rather than the built-in one.
+    expect(result.value.layout).toBe('generated');
+    expect(h.counts().builtin).toBe(0);
+    // The complaints are reported rather than swallowed, so a real defect is
+    // still findable in the log.
+    expect(result.value.visualNotes?.join(' ')).toContain('sticky bar');
+    // It still tried to repair first — all three attempts were spent.
+    expect(h.calls.filter((c) => c === 'landing-layout')).toHaveLength(3);
+  });
+
   // Quality assurance, not a gate: a worker with no browser must still ship.
   it('accepts the layout when the page cannot be rendered for review', async () => {
     const h = buildWithReference([goodLayout()], { canScreenshot: false });

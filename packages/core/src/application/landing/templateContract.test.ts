@@ -49,13 +49,46 @@ describe('validateTemplate', () => {
     expect(rejected(result).map((f: Finding) => f.code)).toContain('MISSING_REQUIRED_PLACEHOLDER');
   });
 
-  // The direct answer to "some CTA buttons are missing": v1 had no minimum CTA
-  // count at all, so a template with five buy buttons could become a page with
-  // one and nothing would notice.
-  it('blocks when the template lost buy buttons during labelling', () => {
-    const result = validateTemplate(baseInput({ originalCtaCount: 4 }));
-    const finding = rejected(result).find((f: Finding) => f.code === 'CTA_COUNT_CHANGED');
-    expect(finding?.message).toContain('4 buy buttons');
+  /**
+   * The first real extraction failed on all three of these. Two were the same
+   * mistake the v1 contract made with {{COVER}}: demanding one specific
+   * placeholder when a multi-product template legitimately uses another, so
+   * there was no answer the model could give that would pass.
+   */
+  describe('requirements a multi-product template cannot meet literally', () => {
+    it('accepts covers living in the product repeater instead of a single BOOK_COVER', () => {
+      const html =
+        COMPLETE_HTML.replace('<img src="{{BOOK_COVER}}">', '') +
+        '<div><template data-repeat="OFFER_ITEMS"><img src="{{OFFER_ITEMS.coverSrc}}"></template></div>';
+      const result = validateTemplate(
+        baseInput({
+          html,
+          repeaters: [
+            { key: 'OFFER_ITEMS', containerTplId: 'n9', itemTplId: 'n10', originalCount: 3, flexibleCount: false, fields: ['coverSrc'] },
+          ],
+        }),
+      );
+      expect(result.isOk()).toBe(true);
+    });
+
+    it('still requires cover art when there is no product repeater either', () => {
+      const result = validateTemplate(baseInput({ html: COMPLETE_HTML.replace('<img src="{{BOOK_COVER}}">', '') }));
+      expect(rejected(result).map((f: Finding) => f.code)).toContain('MISSING_REQUIRED_PLACEHOLDER');
+    });
+
+    // Missing one is a live link to the owner's store. An extra one points at
+    // the seller's own checkout and costs nothing, so it must not be fatal.
+    it('warns rather than blocks when MORE buy buttons were labelled than detected', () => {
+      const html = `${COMPLETE_HTML}<a href="{{CHECKOUT_URL}}">Buy again</a>`;
+      const result = validateTemplate(baseInput({ html, originalCtaCount: 1 }));
+      expect(result.isOk()).toBe(true);
+    });
+
+    it('still blocks when FEWER were labelled than the template had', () => {
+      const result = validateTemplate(baseInput({ originalCtaCount: 4 }));
+      const finding = rejected(result).find((f: Finding) => f.code === 'CTA_COUNT_CHANGED');
+      expect(finding?.message).toContain('only 1');
+    });
   });
 
   it('blocks a link still pointing at the template owner', () => {

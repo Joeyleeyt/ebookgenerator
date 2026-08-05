@@ -35,19 +35,44 @@ import type { Clock } from '../ports/Clock.js';
  * third case, which is what makes "the AI cannot break the layout" a property
  * of the system rather than an instruction in a prompt.
  */
+const AnnotationEntry = z.object({
+  nodeId: z.string(),
+  placeholder: z.string(),
+  // `nullish`, not `optional`: the model returns an explicit null when it has
+  // no opinion, and `optional` rejects null. Four nulls in a fourteen-entry map
+  // failed the whole extraction — for a field that is ADVISORY, since
+  // `budgetFor` measures the real budget from the node's own text and only
+  // accepts this number when it agrees with the measurement.
+  maxChars: z.number().nullish(),
+});
+
+const AnnotationRepeater = z.object({ containerTplId: z.string(), key: z.string() });
+
+/**
+ * Drops entries that do not parse, rather than failing the whole response.
+ *
+ * One malformed row out of forty should not discard the other thirty-nine. It
+ * is safe to be lenient here because nothing downstream trusts this list: ids
+ * that name no node are dropped, the checkout guard runs regardless of what the
+ * model said, and `validateTemplate` still refuses a template that ends up
+ * missing a required placeholder. A dropped entry costs one unlabelled node,
+ * which is visible and fixable; a rejected response costs the entire run.
+ */
+function lenientArray<S extends z.ZodTypeAny>(item: S) {
+  return z
+    .array(z.unknown())
+    .default([])
+    .transform((rows) =>
+      rows
+        .map((row) => item.safeParse(row))
+        .filter((r): r is { success: true; data: z.output<S> } => r.success)
+        .map((r) => r.data),
+    );
+}
+
 const AnnotationSchema = z.object({
-  map: z
-    .array(
-      z.object({
-        nodeId: z.string(),
-        placeholder: z.string(),
-        maxChars: z.number().optional(),
-      }),
-    )
-    .default([]),
-  repeaters: z
-    .array(z.object({ containerTplId: z.string(), key: z.string() }))
-    .default([]),
+  map: lenientArray(AnnotationEntry),
+  repeaters: lenientArray(AnnotationRepeater),
 });
 
 /** Copy may run 15% longer than the words the template's CSS was tuned to. */
@@ -67,6 +92,12 @@ const MIN_MAX_CHARS = 12;
  */
 const MAX_CLEANING_LOSS = 0.2;
 
+/** A failed run, carrying whatever it managed to measure before stopping. */
+interface ExtractionFailure {
+  reason: string;
+  report: ExtractionReport | null;
+}
+
 export interface ExtractTemplateInput {
   ownerId: string;
   sourceUrl: string;
@@ -80,6 +111,15 @@ export interface ExtractTemplateInput {
   attestOwnership: boolean;
   /** Re-extract even when a template already exists at this pipeline version. */
   force?: boolean | undefined;
+  /**
+   * The id the row should take.
+   *
+   * Supplied by the API so the id it returns to the caller is the id the row
+   * actually gets. Without it the caller was handed an id that was never used —
+   * the use case minted its own — so polling for the template it had just
+   * queued always came back empty.
+   */
+  templateId?: string | undefined;
 }
 
 /**
@@ -116,7 +156,7 @@ export class ExtractTemplateUseCase {
       return Result.ok({ templateId: existing.id, report: existing.report ?? emptyReport() });
     }
 
-    const templateId = this.ids.uuid();
+    const templateId = input.templateId ?? this.ids.uuid();
     const revision = (existing?.revision ?? 0) + 1;
     const created = await this.templates.create({
       id: templateId,
@@ -132,9 +172,12 @@ export class ExtractTemplateUseCase {
       await this.templates.save({
         ...blank(templateId, input.ownerId, sourceUrl, revision),
         state: 'FAILED',
-        failureReason: outcome.error,
+        failureReason: outcome.error.reason,
+        // Keep the measurements. Without them a failed row says only that it
+        // failed, and the numbers that explain WHY are gone.
+        report: outcome.error.report,
       });
-      return Result.fail(outcome.error);
+      return Result.fail(outcome.error.reason);
     }
 
     const { template, report } = outcome.value;
@@ -154,14 +197,34 @@ export class ExtractTemplateUseCase {
     templateId: string,
     sourceUrl: string,
     previous: StoredLandingTemplate | null,
-  ): Promise<Result<{ template: StoredLandingTemplate; report: ExtractionReport }>> {
+  ): Promise<Result<{ template: StoredLandingTemplate; report: ExtractionReport }, ExtractionFailure>> {
     // ── STAGE 1–2: capture and clean ─────────────────────────────────────────
     const captured = await this.capturer.capture(sourceUrl);
-    if (captured.isFail()) return Result.fail(captured.error);
+    if (captured.isFail()) return Result.fail({ reason: captured.error, report: null });
     const page = captured.value;
 
     const findings: Finding[] = [];
     const notes = [...page.notes];
+
+    /**
+     * What was measured so far, for a run that does not reach the end.
+     *
+     * Written on failure as well as success. The first real extraction failed
+     * validation and reported `cleaningLoss: null` — the single most useful
+     * diagnostic, computed minutes earlier and then thrown away because the
+     * failure path stored a blank row. A failed extraction is exactly when
+     * those numbers are needed.
+     */
+    const partial = (): ExtractionReport => ({
+      findings,
+      cleaningLoss,
+      droppedImages: [],
+      fontFidelity: 'none',
+      lostFamilies: [],
+      assetBytes: 0,
+      sectionCount: page.sections.length,
+      notes,
+    });
 
     // What cleaning cost, measured rather than assumed.
     const cleaningLoss: ExtractionReport['cleaningLoss'] = [];
@@ -195,7 +258,7 @@ export class ExtractTemplateUseCase {
       baselineShots: page.baselineShots,
       typography: page.typography,
     });
-    if (stored.isFail()) return Result.fail(stored.error);
+    if (stored.isFail()) return Result.fail({ reason: stored.error, report: partial() });
     if (stored.value.unresolvedUrls.length > 0) {
       notes.push(
         `${stored.value.unresolvedUrls.length} stylesheet asset(s) could not be re-hosted; those decorations ` +
@@ -218,7 +281,7 @@ export class ExtractTemplateUseCase {
 
     // ── STAGE 3: label ───────────────────────────────────────────────────────
     const annotated = await this.annotate(templateId, page, previous);
-    if (annotated.isFail()) return Result.fail(annotated.error);
+    if (annotated.isFail()) return Result.fail({ reason: annotated.error, report: partial() });
 
     const placeholders = annotated.value.placeholders;
     const repeaters = annotated.value.repeaters;
@@ -230,7 +293,7 @@ export class ExtractTemplateUseCase {
       placeholders,
       repeaters,
     });
-    if (parameterised.isFail()) return Result.fail(parameterised.error);
+    if (parameterised.isFail()) return Result.fail({ reason: parameterised.error, report: partial() });
 
     if (parameterised.value.droppedIds.length > 0) {
       // The safety property, visible: an id that named nothing did nothing.
@@ -262,7 +325,7 @@ export class ExtractTemplateUseCase {
 
     const blockers = findings.filter((f) => f.severity === 'BLOCKER');
     if (blockers.length > 0) {
-      return Result.fail(blockers.map((f) => f.message).join(' · '));
+      return Result.fail({ reason: blockers.map((f) => f.message).join(' · '), report: partial() });
     }
 
     // Only assets the parameterised page still references are worth keeping —
@@ -280,7 +343,7 @@ export class ExtractTemplateUseCase {
       html: parameterised.value.html,
       css: stored.value.css,
     });
-    if (finalHtml.isFail()) return Result.fail(finalHtml.error);
+    if (finalHtml.isFail()) return Result.fail({ reason: finalHtml.error, report: partial() });
 
     const report: ExtractionReport = {
       findings,
@@ -463,7 +526,7 @@ function resolveAnnotation(
       tplId: entry.nodeId,
       placeholder: entry.placeholder,
       kind,
-      maxChars: budgetFor(entry.maxChars, originalText),
+      maxChars: budgetFor(entry.maxChars ?? undefined, originalText),
       originalText,
       hadInlineMarkup: node.hasInlineMarkup === true,
       ...(node.rect ? { rect: node.rect } : {}),

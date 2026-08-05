@@ -399,6 +399,13 @@ export class GenerateLandingPageUseCase {
    */
   private lastLayoutFailure: string[] | undefined;
 
+  /**
+   * Visual complaints on a layout that was ACCEPTED anyway — it passed every
+   * mechanical check, and the built-in template would have been worse. Reported
+   * rather than swallowed, so a real defect is still findable.
+   */
+  private lastVisualNotes: string[] | undefined;
+
   async execute(
     input: GenerateLandingPageInput,
   ): Promise<
@@ -412,6 +419,8 @@ export class GenerateLandingPageUseCase {
       screenshots?: number;
       /** Why the reference is thinner than expected, when it is. */
       referenceNote?: string;
+      /** Visual complaints on a layout that shipped anyway. */
+      visualNotes?: string[];
     }>
   > {
     const projectId = ProjectId.from(input.projectId);
@@ -735,6 +744,7 @@ export class GenerateLandingPageUseCase {
       screenshots: referenceShots.length,
       ...(referenceNote ? { referenceNote } : {}),
       ...(this.lastLayoutFailure ? { layoutFailure: this.lastLayoutFailure } : {}),
+      ...(this.lastVisualNotes ? { visualNotes: this.lastVisualNotes } : {}),
     });
   }
 
@@ -830,7 +840,13 @@ export class GenerateLandingPageUseCase {
     hasLogo: boolean;
   }): Promise<GeneratedPage | null> {
     this.lastLayoutFailure = undefined;
+    this.lastVisualNotes = undefined;
     let repairErrors: string[] | undefined;
+    /**
+     * The best candidate seen so far: one that passed every mechanical check
+     * but drew a visual complaint. See the note at the end of the loop.
+     */
+    let contractValid: GeneratedPage | null = null;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const prompt = LandingLayoutPrompt.build({
@@ -884,6 +900,7 @@ export class GenerateLandingPageUseCase {
 
       // Mechanically valid is not the same as usable. Render it and look —
       // with the same images the layout was told it would have.
+      contractValid = generated;
       const visual = await this.reviewRendered(generated, input.projectId, {
         authorPhoto: input.hasAuthorPhoto,
         logo: input.hasLogo,
@@ -891,6 +908,23 @@ export class GenerateLandingPageUseCase {
       if (visual.length === 0) return generated;
       repairErrors = visual;
     }
+    // A layout that satisfied every mechanical check but kept drawing visual
+    // complaints still ships.
+    //
+    // The alternative is the built-in template, which has no structural
+    // relationship to the reference at all — so rejecting here trades a page
+    // with a possible cosmetic flaw for one that is definitely the wrong page.
+    // The reviewer is also not infallible: it judges still images, and it
+    // reported the sticky bar overlapping mid-page content on every layout that
+    // had one, which is what a sticky bar does rather than a defect.
+    //
+    // The complaints ride out as notes so they are visible in the log and the
+    // response instead of being silently accepted.
+    if (contractValid) {
+      this.lastVisualNotes = repairErrors;
+      return contractValid;
+    }
+
     // The reasons ride back out so the worker can log them. Without this a
     // fallback is indistinguishable from success until someone compares the
     // page against the template by eye — which is exactly how a page that
