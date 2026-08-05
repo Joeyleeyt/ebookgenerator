@@ -131,6 +131,12 @@ export class Project extends AggregateRoot<ProjectProps, ProjectId> {
       landingCurrency?: string | undefined;
       landingGuaranteeDays?: number | undefined;
       landingTemplateUrl?: string | undefined;
+      landingMode?: 'single' | 'triple' | undefined;
+      landingSiblings?:
+        | Array<{ projectId: string; priceCents?: number | undefined; checkoutUrl?: string | undefined }>
+        | undefined;
+      landingBundlePriceCents?: number | undefined;
+      landingBundleCheckoutUrl?: string | undefined;
     },
     now: Date,
   ): void {

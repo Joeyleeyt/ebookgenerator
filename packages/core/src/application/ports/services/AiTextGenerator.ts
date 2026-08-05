@@ -2,9 +2,30 @@ import type { Result } from '../../../domain/shared/Result.js';
 
 export type ClaudeModel = 'claude-haiku-4-5' | 'claude-sonnet-4-6' | 'claude-opus-4-8';
 
+/**
+ * An image sent alongside the prompt — currently the screenshots of the
+ * reference sales page, which is the only way the model can see spacing,
+ * rhythm and visual weight. Markup alone conveys structure, not look.
+ */
+export interface AiImageBlock {
+  type: 'image';
+  /** e.g. "image/png". */
+  mediaType: string;
+  /** Base64 payload WITHOUT the `data:` URI prefix. */
+  dataBase64: string;
+}
+
+export interface AiTextBlock {
+  type: 'text';
+  text: string;
+}
+
+export type AiContentBlock = AiTextBlock | AiImageBlock;
+
 export interface AiMessage {
   role: 'user' | 'assistant';
-  content: string;
+  /** A plain string for text-only calls, or blocks when images are attached. */
+  content: string | AiContentBlock[];
 }
 
 export interface AiCompletion {

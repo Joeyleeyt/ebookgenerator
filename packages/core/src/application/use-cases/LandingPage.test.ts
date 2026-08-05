@@ -150,7 +150,9 @@ function buildGenerate(options: {
     { assemble: () => '<html>generated</html>' },
     // No reference URL is set on the default fixture, so this is never called.
     { fetch: async () => Result.fail('no reference') },
+    { capture: async () => Result.fail("no screenshots in tests") } as never,
     { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
+    { fetchDataUri: async () => Result.fail("no logo in tests") } as never,
     {
       getBytes: async () => Result.ok({ bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png' }),
       getDataUri: async () => Result.ok('data:image/png;base64,AQID'),
@@ -163,6 +165,188 @@ function buildGenerate(options: {
 
   return { useCase, pages, rendered, aiCalls: () => aiCalls, project };
 }
+
+const SIBLING_A = '22222222-2222-4222-8222-222222222222';
+const SIBLING_B = '33333333-3333-4333-8333-333333333333';
+
+/**
+ * A three-book page, with a lookup keyed by project id so each sibling can be
+ * made to exist, belong to someone else, or be unfinished independently.
+ */
+function buildTriple(opts: {
+  siblings?: Array<{ projectId: string; priceCents?: number; checkoutUrl?: string }>;
+  bundlePriceCents?: number;
+  bundleCheckoutUrl?: string;
+  /** Project ids that resolve to a project owned by somebody else. */
+  foreignIds?: string[];
+  /** Project ids whose book has no chapters yet. */
+  unfinishedIds?: string[];
+  /** Project ids that do not resolve at all. */
+  missingIds?: string[];
+} = {}) {
+  const siblings = opts.siblings ?? [
+    { projectId: SIBLING_A, priceCents: 3900, checkoutUrl: 'https://payhip.com/b/TWO' },
+    { projectId: SIBLING_B, priceCents: 2900, checkoutUrl: 'https://payhip.com/b/THREE' },
+  ];
+  const root = makeProject({
+    landingMode: 'triple',
+    landingCheckoutUrl: 'https://payhip.com/b/ONE',
+    landingPriceCents: 4700,
+    landingSiblings: siblings,
+    ...(opts.bundlePriceCents !== undefined ? { landingBundlePriceCents: opts.bundlePriceCents } : {}),
+    ...(opts.bundleCheckoutUrl ? { landingBundleCheckoutUrl: opts.bundleCheckoutUrl } : {}),
+  });
+  const pages = new FakeLandingRepo(null);
+  const rendered: LandingPageModel[] = [];
+
+  const projects = {
+    findById: async (id: ProjectId) => {
+      const raw = id.toString();
+      if (opts.missingIds?.includes(raw)) return null;
+      if (raw === root.id.toString()) return root;
+      const foreign = opts.foreignIds?.includes(raw);
+      return Project.create({
+        id: ProjectId.from(raw),
+        ownerId: foreign ? 'someone-else' : 'owner',
+        channelUrl: ChannelUrl.create('https://www.youtube.com/@example').value,
+        options: GenerationOptions.create({ bookTitle: `Sibling ${raw.slice(0, 1)}`, landingPage: true }),
+        now,
+      }).value;
+    },
+  };
+
+  const books = {
+    findByProject: async (id: ProjectId) => {
+      const raw = id.toString();
+      if (opts.unfinishedIds?.includes(raw)) {
+        return Book.create({ id: BookId.from(`book-${raw}`), projectId: raw, targetPages: 100 });
+      }
+      const book = makeBook();
+      if (raw !== root.id.toString()) book.setTitle(`Sibling Book ${raw.slice(0, 1)}`);
+      return book;
+    },
+  };
+
+  const useCase = new GenerateLandingPageUseCase(
+    projects as never,
+    books as never,
+    { getBookStrategy: async () => null } as never,
+    { getChannel: async () => null } as never,
+    { listByProject: async () => [] } as never,
+    pages,
+    {
+      generate: async () =>
+        Result.ok({ text: COPY_JSON, model: 'm', inputTokens: 1, outputTokens: 1, stopReason: 'end_turn' }),
+    } as never,
+    {
+      render: (m: LandingPageModel) => {
+        rendered.push(m);
+        return '<html>page</html>';
+      },
+    },
+    { assemble: () => '<html>generated</html>' },
+    { fetch: async () => Result.fail('no reference') },
+    { capture: async () => Result.fail("no screenshots in tests") } as never,
+    { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
+    { fetchDataUri: async () => Result.fail('no logo in tests') } as never,
+    {
+      getBytes: async () => Result.ok({ bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png' }),
+      getDataUri: async () => Result.ok('data:image/png;base64,AQID'),
+    } as never,
+    { uuid: () => 'lp-1' },
+    { now: () => now },
+    { hash: (input: unknown) => JSON.stringify(input) },
+  );
+
+  return { useCase, pages, rendered, root };
+}
+
+// ── three-book pages ─────────────────────────────────────────────────────────
+
+describe('GenerateLandingPageUseCase — three-book pages', () => {
+  const run = (b: ReturnType<typeof buildTriple>) =>
+    b.useCase.execute({ projectId: '11111111-1111-4111-8111-111111111111' });
+
+  it('sells all three books, each with its own price and link', async () => {
+    const b = buildTriple();
+    const result = await run(b);
+
+    expect(result.isOk()).toBe(true);
+    const products = b.rendered[0]!.products;
+    expect(products).toHaveLength(3);
+    expect(products.map((p) => p.checkoutUrl)).toEqual([
+      'https://payhip.com/b/ONE',
+      'https://payhip.com/b/TWO',
+      'https://payhip.com/b/THREE',
+    ]);
+    expect(products.map((p) => p.priceCents)).toEqual([4700, 3900, 2900]);
+  });
+
+  it('adds the bundle as a fourth product when the seller set one up', async () => {
+    const b = buildTriple({ bundlePriceCents: 6900, bundleCheckoutUrl: 'https://payhip.com/b/SET' });
+    await run(b);
+
+    const products = b.rendered[0]!.products;
+    expect(products).toHaveLength(4);
+    expect(products[3]?.kind).toBe('bundle');
+    expect(products[3]?.checkoutUrl).toBe('https://payhip.com/b/SET');
+  });
+
+  it('leaves the bundle out entirely when no bundle link or price was given', async () => {
+    const b = buildTriple();
+    await run(b);
+    expect(b.rendered[0]!.products.some((p) => p.kind === 'bundle')).toBe(false);
+  });
+
+  it('never lets the bundle become the hero — it has no cover of its own', async () => {
+    const b = buildTriple({ bundlePriceCents: 6900, bundleCheckoutUrl: 'https://payhip.com/b/SET' });
+    await run(b);
+
+    const featured = b.rendered[0]!.products.filter((p) => p.featured);
+    expect(featured).toHaveLength(1);
+    expect(featured[0]?.kind).toBe('book');
+  });
+
+  // The client's requirement is absolute: choosing 3 ebooks must produce a
+  // 3-ebook page or an error. Never a quietly-smaller page.
+  it('fails rather than dropping a book that no longer exists', async () => {
+    const b = buildTriple({ missingIds: [SIBLING_B] });
+    const result = await run(b);
+
+    if (result.isOk()) throw new Error('expected generation to fail');
+    expect(result.error).toContain('no longer exists');
+    expect(b.rendered).toHaveLength(0);
+    expect(b.pages.current()?.state).toBe('FAILED');
+  });
+
+  it('fails rather than dropping a book that is still generating', async () => {
+    const b = buildTriple({ unfinishedIds: [SIBLING_A] });
+    const result = await run(b);
+
+    if (result.isOk()) throw new Error('expected generation to fail');
+    expect(result.error).toContain('not finished');
+    expect(b.rendered).toHaveLength(0);
+  });
+
+  // Sibling ids arrive from the client; without this check anyone could put
+  // another account's book on their own sales page.
+  it('refuses a book belonging to a different account', async () => {
+    const b = buildTriple({ foreignIds: [SIBLING_B] });
+    const result = await run(b);
+
+    if (result.isOk()) throw new Error('expected generation to fail');
+    expect(result.error).toContain('different account');
+    expect(b.rendered).toHaveLength(0);
+  });
+
+  it('refuses to generate when the wrong number of books is selected', async () => {
+    const b = buildTriple({ siblings: [{ projectId: SIBLING_A, checkoutUrl: 'https://payhip.com/b/TWO' }] });
+    const result = await run(b);
+
+    if (result.isOk()) throw new Error('expected generation to fail');
+    expect(result.error).toContain('exactly 2');
+  });
+});
 
 // ── generation ───────────────────────────────────────────────────────────────
 
@@ -312,7 +496,9 @@ function buildWithReference(layoutResponses: string[]) {
       },
     },
     { fetch: async () => Result.ok(REFERENCE) },
+    { capture: async () => Result.fail('no screenshots in tests') } as never,
     { dominantColor: async () => Result.ok({ r: 30, g: 60, b: 120 }) },
+    { fetchDataUri: async () => Result.fail("no logo in tests") } as never,
     {
       getBytes: async () => Result.fail('none'),
       getDataUri: async () => Result.fail('none'),

@@ -10,6 +10,20 @@ export interface ProjectListItem {
   createdAt: string;
 }
 
+/**
+ * A finished book that could be sold alongside another on one landing page.
+ * Richer than ProjectListItem because a picker has to SHOW the book — a list of
+ * project UUIDs is not something anyone can choose from.
+ */
+export interface LandingCandidate {
+  projectId: string;
+  bookTitle: string;
+  /** Storage path of the cover, for the picker's thumbnail. */
+  coverImagePath: string | null;
+  channelUrl: string;
+  createdAt: string;
+}
+
 export interface ProjectRepository {
   findById(id: ProjectId): Promise<Project | null>;
   save(project: Project): Promise<void>;
@@ -31,4 +45,13 @@ export interface ProjectRepository {
   countRunningByOwner(ownerId: string): Promise<number>;
   /** A user's QUEUED projects, oldest first — the order they'll be started in. */
   listQueuedByOwner(ownerId: string): Promise<ProjectListItem[]>;
+  /**
+   * The user's other finished books, for the three-book page's picker.
+   *
+   * Scoped to one owner because putting another account's book on your sales
+   * page is not a thing we allow, and restricted to COMPLETED projects because
+   * an unfinished book has no cover, no outline and no page count — its card
+   * would render half-empty.
+   */
+  listLandingCandidates(ownerId: string, excludeProjectId: ProjectId): Promise<LandingCandidate[]>;
 }

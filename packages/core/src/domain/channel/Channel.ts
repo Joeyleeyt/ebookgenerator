@@ -26,4 +26,8 @@ export class Channel extends ValueObject<ChannelProps> {
   get subscriberCount() {
     return this.props.subscriberCount;
   }
+  /** The channel avatar — the landing page uses it as the brand mark. */
+  get thumbnailUrl() {
+    return this.props.thumbnailUrl;
+  }
 }

@@ -40,6 +40,8 @@ export class GeneratedPageAssembler implements LandingPageAssembler {
       paymentMarks: paymentMarkup(model),
       testimonials: testimonialsMarkup(model),
       legal: legalMarkup(model),
+      logo: logoMarkup(model),
+      offerGrid: offerGridMarkup(model),
     });
 
     return `<!doctype html>
@@ -127,7 +129,9 @@ const COMPONENT_CSS = `
     letter-spacing: .07em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px;
   }
 
-  .pay { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  /* A full-width row on its own line — inline-flex let it land BESIDE the
+     price in a flex parent, which is the mis-placement run 1489a338 shipped. */
+  .pay { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; width: 100%; justify-content: center; }
   .pay span { font-size: .72rem; color: var(--muted); border: 1px solid var(--border);
               border-radius: 4px; padding: 4px 9px; }
 
@@ -152,6 +156,40 @@ const COMPONENT_CSS = `
 
   .legal p { font-size: .76rem; color: var(--muted); margin: 0 0 .6em; }
   .legal .edition { letter-spacing: .2em; text-transform: uppercase; font-size: .72rem; }
+
+  /* ── offer grid ──
+     One card per product, each carrying its OWN price and buy link. Sized so
+     three cards sit in a row on desktop and stack cleanly on a phone. */
+  .offers { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+  .offer {
+    display: flex; flex-direction: column; gap: 12px; padding: 22px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  }
+  .offer-featured { border-color: var(--accent); border-width: 2px; }
+  .offer-flag {
+    align-self: flex-start; background: var(--accent); color: var(--accent-contrast);
+    font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    padding: 4px 10px; border-radius: 999px;
+  }
+  .offer-art { display: flex; justify-content: center; gap: 6px; }
+  .offer-art img, .offer-art .cover-fallback { width: min(150px, 45%); aspect-ratio: 2/3;
+    object-fit: cover; border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+  /* The bundle stacks its books; each cover overlaps the one before it. */
+  .offer-art-stack img, .offer-art-stack .cover-fallback { width: min(110px, 32%); }
+  .offer-art-stack > * + * { margin-left: -34px; }
+  .offer h3 { margin: 0; color: var(--heading); font-size: 1.12rem; }
+  .offer-sub { margin: 0; font-size: .88rem; color: var(--muted); }
+  .offer ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+  .offer li { padding-left: 18px; position: relative; font-size: .88rem; color: var(--muted); }
+  .offer li::before { content: "·"; position: absolute; left: 5px; color: var(--accent); }
+  /* Pins price + button to the card's bottom, so cards with different amounts
+     of text still line their buy buttons up across the row. */
+  .offer-buy { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .offer-buy .price-row { margin: 6px 0; }
+  .offer-buy .cta { width: 100%; white-space: normal; }
+  .offer-save { font-size: .78rem; font-weight: 700; color: var(--accent); margin: 0; }
+
+  .logo { height: 44px; width: 44px; border-radius: 50%; object-fit: cover; }
 `;
 
 // ── placeholder markup ───────────────────────────────────────────────────────
@@ -240,6 +278,81 @@ function testimonialsMarkup(model: LandingPageModel): string {
         `<blockquote><p>&ldquo;${esc(t.quote)}&rdquo;</p><cite>&mdash; ${esc(t.author)}</cite></blockquote>`,
     )
     .join('')}</div>`;
+}
+
+/** The channel's own avatar as a brand mark. Absent → nothing, not a gap. */
+function logoMarkup(model: LandingPageModel): string {
+  if (!model.logoDataUri) return '';
+  return `<img class="logo" src="${esc(model.logoDataUri)}" alt="${esc(model.siteName)}">`;
+}
+
+/**
+ * The complete offer section: one card per product, each with its own cover,
+ * price and checkout link.
+ *
+ * This is system-rendered for one reason. A three-book page carries up to four
+ * different buy links, and the model has no way to know which link sells which
+ * book — so it never gets to decide. Every field on a card is read from the
+ * SAME LandingProduct record in a single pass, which makes a link landing under
+ * the wrong cover structurally impossible rather than merely unlikely.
+ */
+function offerGridMarkup(model: LandingPageModel): string {
+  if (model.products.length === 0) return '';
+  return `<div class="offers stagger">${model.products.map((p) => offerCardMarkup(p, model)).join('')}</div>`;
+}
+
+function offerCardMarkup(p: LandingProduct, model: LandingPageModel): string {
+  const isBundle = p.kind === 'bundle';
+  // "Best value" belongs to the bundle — it is the cheapest way to get
+  // everything. A single book gets whatever category the copy gave it.
+  const flag = isBundle ? 'Best value' : p.categoryLabel;
+  // Features are the card's selling points; chapter titles stand in when the
+  // model gave none, since an empty card reads as a broken one.
+  const points = p.features.length > 0 ? p.features : p.contents.slice(0, 4);
+
+  return (
+    `<div class="offer${isBundle ? ' offer-featured' : ''}">` +
+    (flag ? `<span class="offer-flag">${esc(flag)}</span>` : '') +
+    offerArtMarkup(p, isBundle) +
+    `<h3>${esc(p.title)}</h3>` +
+    (p.subtitle ? `<p class="offer-sub">${esc(p.subtitle)}</p>` : '') +
+    (points.length > 0 ? `<ul>${points.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : '') +
+    '<div class="offer-buy">' +
+    priceMarkup(p, model) +
+    bundleSavingsMarkup(p, model) +
+    ctaMarkup(p, model) +
+    '</div></div>'
+  );
+}
+
+/** A book shows its cover; a bundle shows the covers of everything in it. */
+function offerArtMarkup(p: LandingProduct, isBundle: boolean): string {
+  if (isBundle) {
+    const covers = p.bundleCoverDataUris ?? [];
+    if (covers.length === 0) return '';
+    return (
+      `<div class="offer-art offer-art-stack">` +
+      covers.map((src) => `<img src="${esc(src)}" alt="">`).join('') +
+      '</div>'
+    );
+  }
+  if (!p.coverDataUri) return `<div class="offer-art"><span class="cover-fallback">${esc(p.title)}</span></div>`;
+  return `<div class="offer-art"><img src="${esc(p.coverDataUri)}" alt="${esc(p.title)} cover"></div>`;
+}
+
+/**
+ * What the bundle actually saves, computed from the real per-book prices on
+ * this very page — never a figure the model wrote. If the books' prices are
+ * unknown, or the bundle isn't cheaper, nothing is claimed.
+ */
+function bundleSavingsMarkup(p: LandingProduct, model: LandingPageModel): string {
+  if (p.kind !== 'bundle' || p.priceCents === null) return '';
+  const books = model.products.filter((o) => o.kind !== 'bundle');
+  if (books.length === 0 || books.some((o) => o.priceCents === null)) return '';
+  const sum = books.reduce((total, o) => total + (o.priceCents ?? 0), 0);
+  const saved = sum - p.priceCents;
+  if (saved <= 0) return '';
+  return `<p class="offer-save">Save ${money(saved, model.currency)} vs buying separately</p>`;
 }
 
 /**

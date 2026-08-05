@@ -12,6 +12,7 @@ import type { ExportArtifactRepository } from '../ports/repositories/ExportArtif
 import type { LandingPageRepository } from '../ports/repositories/LandingPageRepository.js';
 import type { AiTextGenerator } from '../ports/services/AiTextGenerator.js';
 import type { ImageColorSampler } from '../ports/services/ImageColorSampler.js';
+import type { RemoteImageFetcher } from '../ports/services/RemoteImageFetcher.js';
 import type { LandingPageRenderer, LandingProduct } from '../ports/services/LandingPageRenderer.js';
 import type { ObjectStorage } from '../ports/services/ObjectStorage.js';
 import type { IdGenerator } from '../ports/IdGenerator.js';
@@ -23,6 +24,8 @@ import { parseJsonCompletion } from '../prompts/parse.js';
 import { validateGeneratedPage, type GeneratedPage } from '../landing/pageContract.js';
 import type { LandingPageAssembler } from '../ports/services/LandingPageAssembler.js';
 import type { ReferencePage, ReferencePageFetcher } from '../ports/services/ReferencePageFetcher.js';
+import type { ReferenceScreenshotter, ReferenceShot } from '../ports/services/ReferenceScreenshotter.js';
+import { referenceUrlFor } from '../../domain/landing/LandingTemplate.js';
 
 const LayoutSchema = z.object({ css: z.string(), bodyHtml: z.string() });
 
@@ -133,7 +136,9 @@ export class GenerateLandingPageUseCase {
     private readonly renderer: LandingPageRenderer,
     private readonly assembler: LandingPageAssembler,
     private readonly references: ReferencePageFetcher,
+    private readonly screenshots: ReferenceScreenshotter,
     private readonly colors: ImageColorSampler,
+    private readonly images: RemoteImageFetcher,
     private readonly storage: ObjectStorage,
     private readonly ids: IdGenerator,
     private readonly clock: Clock,
@@ -147,6 +152,12 @@ export class GenerateLandingPageUseCase {
     const project = await this.projects.findById(projectId);
     if (!project) return Result.fail('Project not found');
     if (!project.options.landingPage) return Result.fail('Landing page is not enabled for this project');
+    // A 3-ebook page with the wrong number of books selected is a configuration
+    // error. Failing here is deliberate: the alternative is rendering a
+    // single-book page for someone who asked for three, which looks like the
+    // request was ignored rather than like an error.
+    const configError = project.options.landingConfigError();
+    if (configError) return Result.fail(configError);
 
     const book = await this.books.findByProject(projectId);
     if (!book) return Result.fail('Book not found');
@@ -177,7 +188,14 @@ export class GenerateLandingPageUseCase {
       checkout: project.options.landingCheckoutUrl ?? '',
       guarantee: project.options.landingGuaranteeDays,
       // Pointing the book at a different reference must rebuild the layout.
-      template: project.options.landingTemplateUrl ?? '',
+      template: referenceUrlFor(project.options.landingMode, project.options.landingTemplateUrl) ?? '',
+      // Mode and every sibling's price and link. Without these, changing a
+      // sibling's price would serve the cached page still advertising the old
+      // one — the same reason this book's own price is in the hash.
+      mode: project.options.landingMode,
+      siblings: project.options.landingSiblings,
+      bundlePrice: project.options.landingBundlePriceCents ?? null,
+      bundleCheckout: project.options.landingBundleCheckoutUrl ?? '',
     });
     if (!input.force && existing?.inputHash === inputHash && existing.html) {
       return Result.ok({ regenerated: false }); // idempotent — nothing has changed
@@ -187,12 +205,22 @@ export class GenerateLandingPageUseCase {
     await this.pages.save(page);
 
     // ── the reference page this book's layout should follow ──
+    // Which reference depends on the MODE, not on the project: a three-book
+    // page always follows the three-book template.
+    const referenceUrl = referenceUrlFor(project.options.landingMode, project.options.landingTemplateUrl);
+
     // Strictly best-effort: the reference is someone else's live site and may
     // be down, slow or blocking us. A book still gets a landing page.
     let reference: ReferencePage | null = null;
-    if (project.options.landingTemplateUrl) {
-      const fetched = await this.references.fetch(project.options.landingTemplateUrl);
+    let referenceShots: ReferenceShot[] = [];
+    if (referenceUrl) {
+      const fetched = await this.references.fetch(referenceUrl);
       if (fetched.isOk()) reference = fetched.value;
+      // The screenshots are what carry spacing and visual rhythm; the markup
+      // alone only carries structure. Also best-effort — a site that blocks
+      // automation costs fidelity, never the page itself.
+      const shot = await this.screenshots.capture(referenceUrl);
+      if (shot.isOk()) referenceShots = shot.value;
     }
 
     // ── palette, from the book's own cover ──
@@ -270,7 +298,28 @@ export class GenerateLandingPageUseCase {
       priceCents: project.options.landingPriceCents ?? null,
       compareAtCents: project.options.landingCompareAtCents ?? null,
       checkoutUrl: project.options.landingCheckoutUrl ?? null,
+      kind: 'book',
+      // The book the user came from leads the page and takes the emphasised card.
+      featured: true,
     };
+
+    // ── the other books on this page ──
+    // A triple page sells three products, each with its own cover, price and
+    // buy link. A sibling that can't be loaded fails the whole generation
+    // rather than silently reducing the page to fewer books.
+    const products: LandingProduct[] = [product];
+    for (const sibling of project.options.landingSiblings) {
+      const loaded = await this.loadSiblingProduct(sibling, project.ownerId);
+      if (loaded.isFail()) {
+        page.markFailed(loaded.error, this.clock.now());
+        await this.pages.save(page);
+        return Result.fail(loaded.error);
+      }
+      products.push(loaded.value);
+    }
+
+    const bundle = this.buildBundle(project.options, products);
+    if (bundle) products.push(bundle);
 
     const pageModel = {
       copy,
@@ -283,8 +332,12 @@ export class GenerateLandingPageUseCase {
       // Only ever real quotes, supplied by the user. None exist yet, so the
       // section is omitted rather than invented.
       testimonials: [],
-      products: [product],
-      siteName: title,
+      products,
+      // A three-book page is the creator's storefront, not one book's page, so
+      // it is named after the channel rather than after whichever book the user
+      // happened to generate from.
+      siteName: (project.options.isTripleLanding ? (channel?.title ?? title) : title),
+      logoDataUri: await this.loadLogo(channel?.thumbnailUrl ?? null),
       // Every stat is a fact the system already holds — never a figure the
       // model wrote. A fabricated "4,200 readers" is a false claim about real
       // people, so a stat with no source simply doesn't render.
@@ -320,6 +373,12 @@ export class GenerateLandingPageUseCase {
       bookTitle: title,
       pageCount,
       pageModel,
+      // Drives the contract's offer-grid rule: more than one product makes
+      // {{OFFER_GRID}} mandatory, because it is the only element that carries
+      // each book's own buy link.
+      productCount: products.length,
+      referenceShots,
+      otherTitles: products.slice(1).map((p) => p.title),
     });
 
     page.setDraft({ copy, palette, html: layout.html, inputHash }, this.clock.now());
@@ -347,6 +406,9 @@ export class GenerateLandingPageUseCase {
     bookTitle: string;
     pageCount: number | null;
     pageModel: Parameters<LandingPageRenderer['render']>[0];
+    productCount: number;
+    referenceShots: ReferenceShot[];
+    otherTitles: string[];
   }): Promise<{ html: string; source: 'generated' | 'builtin'; failure?: string[] }> {
     if (!input.reference) {
       return { html: this.renderer.render(input.pageModel), source: 'builtin' };
@@ -363,6 +425,9 @@ export class GenerateLandingPageUseCase {
         copy: input.copy,
         bookTitle: input.bookTitle,
         pageCount: input.pageCount,
+        productCount: input.productCount,
+        otherTitles: input.otherTitles,
+        referenceShots: input.referenceShots,
         ...(repairErrors ? { repairErrors } : {}),
       });
 
@@ -399,7 +464,7 @@ export class GenerateLandingPageUseCase {
       }
 
       const generated: GeneratedPage = parsed.value;
-      const check = validateGeneratedPage(generated, { requiredText });
+      const check = validateGeneratedPage(generated, { requiredText, productCount: input.productCount });
       if (check.isOk()) {
         return {
           html: this.assembler.assemble({ page: generated, model: input.pageModel }),
@@ -416,6 +481,108 @@ export class GenerateLandingPageUseCase {
       source: 'builtin',
       ...(repairErrors ? { failure: repairErrors } : {}),
     };
+  }
+
+  /**
+   * Loads one of the other books sold on this page, as its own product.
+   *
+   * Every failure here is fatal rather than skipped. The user asked for a page
+   * selling three specific books; silently publishing one that sells two would
+   * be wrong in a way nobody notices until a reader can't buy the book the page
+   * promised.
+   *
+   * The ownership check is a security boundary, not a sanity check: the sibling
+   * project id arrives from the client, so without it anyone could put someone
+   * else's book — cover, title and all — on their own sales page.
+   */
+  private async loadSiblingProduct(
+    sibling: { projectId: string; priceCents?: number | undefined; checkoutUrl?: string | undefined },
+    ownerId: string,
+  ): Promise<Result<LandingProduct>> {
+    const siblingId = ProjectId.from(sibling.projectId);
+    const siblingProject = await this.projects.findById(siblingId);
+    if (!siblingProject) return Result.fail(`Selected book ${sibling.projectId} no longer exists`);
+    if (siblingProject.ownerId !== ownerId) {
+      return Result.fail(`Selected book ${sibling.projectId} belongs to a different account`);
+    }
+
+    const siblingBook = await this.books.findByProject(siblingId);
+    if (!siblingBook || siblingBook.chapters.length === 0) {
+      return Result.fail(`Selected book ${sibling.projectId} is not finished yet`);
+    }
+
+    const siblingStrategy = await this.knowledge.getBookStrategy(siblingId);
+    const siblingTitle =
+      normalizeBookTitle(
+        siblingBook.title ?? siblingProject.options.bookTitle ?? siblingStrategy?.title ?? undefined,
+      ) ?? 'Untitled';
+    const siblingArtifacts = await this.artifacts.listByProject(siblingId);
+    // Its own cover, embedded on its own card — the covers must not be shared
+    // between products or every card would show the same book.
+    const siblingCover = await this.loadCover(siblingBook.coverImagePath);
+
+    return Result.ok({
+      title: siblingTitle,
+      subtitle: siblingStrategy?.subtitle ?? '',
+      coverDataUri: siblingCover.dataUri,
+      pageCount: siblingArtifacts.find((a) => a.pageCount > 0)?.pageCount ?? null,
+      // The copy model wrote card features for the primary book only, so a
+      // sibling's card is built from its own chapter titles instead.
+      categoryLabel: null,
+      features: [],
+      contents: siblingBook.chapters.map((c) => c.title).slice(0, 8),
+      sections: (siblingBook.outline?.entries ?? []).map((e) => ({
+        title: e.title,
+        items: e.keyPoints.slice(0, 6),
+      })),
+      // Price and link come from THIS sibling's own entry, never from the
+      // project it points at — the seller sets them per page.
+      priceCents: sibling.priceCents ?? null,
+      compareAtCents: null,
+      checkoutUrl: sibling.checkoutUrl ?? null,
+      kind: 'book',
+    });
+  }
+
+  /**
+   * The all-books bundle, when the seller has set one up. It is a real product
+   * on their store with its own link, so it exists only when that link or price
+   * was supplied — never synthesised to fill out the grid.
+   */
+  private buildBundle(
+    options: { landingBundlePriceCents?: number | undefined; landingBundleCheckoutUrl?: string | undefined },
+    books: LandingProduct[],
+  ): LandingProduct | null {
+    if (options.landingBundlePriceCents === undefined && !options.landingBundleCheckoutUrl) return null;
+    if (books.length < 2) return null; // a "bundle" of one book is just the book
+    return {
+      title: `The complete set — all ${books.length} books`,
+      subtitle: 'Every book above, in one purchase.',
+      coverDataUri: null,
+      pageCount: books.reduce((t, b) => t + (b.pageCount ?? 0), 0) || null,
+      categoryLabel: null,
+      features: books.map((b) => b.title),
+      contents: [],
+      sections: [],
+      priceCents: options.landingBundlePriceCents ?? null,
+      compareAtCents: null,
+      checkoutUrl: options.landingBundleCheckoutUrl ?? null,
+      kind: 'bundle',
+      // Deliberately NOT `featured`. Both renderers resolve the page's hero
+      // book as `products.find(p => p.featured)`, and a featured bundle — which
+      // has no cover of its own — would blank the hero image.
+      bundleCoverDataUris: books.map((b) => b.coverDataUri).filter((u): u is string => Boolean(u)),
+    };
+  }
+
+  /**
+   * The channel's avatar, used as the page's brand mark. Strictly best-effort,
+   * like the cover: a dead avatar URL must never cost the seller their page.
+   */
+  private async loadLogo(thumbnailUrl: string | null): Promise<string | null> {
+    if (!thumbnailUrl) return null;
+    const fetched = await this.images.fetchDataUri(thumbnailUrl);
+    return fetched.isOk() ? fetched.value : null;
   }
 
   /**

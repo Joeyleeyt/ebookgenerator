@@ -56,6 +56,7 @@ function model(overrides: Partial<LandingPageModel> = {}): LandingPageModel {
     testimonials: [],
     products: [product()],
     siteName: 'The Mechanic Bible',
+    logoDataUri: null,
     stats: [],
     heroImageDataUri: null,
     authorPhotoDataUri: null,
@@ -308,6 +309,97 @@ describe('LandingPageHtmlRenderer', () => {
 
     it('carries no inline event handlers', () => {
       expect(render(model())).not.toMatch(/\s\bon(click|load|error|mouse\w+)\s*=/i);
+    });
+  });
+
+  // The built-in template is the guaranteed fallback when a generated layout
+  // fails its contract. On a three-book page that makes these cases the last
+  // thing standing between the client and a page that sells the wrong book.
+  describe('multi-product pages', () => {
+    const three = () =>
+      model({
+        products: [
+          product({ title: 'Book One', checkoutUrl: 'https://payhip.com/b/ONE', priceCents: 4700, featured: true }),
+          product({ title: 'Book Two', checkoutUrl: 'https://payhip.com/b/TWO', priceCents: 3900 }),
+          product({ title: 'Book Three', checkoutUrl: 'https://payhip.com/b/THREE', priceCents: 2900 }),
+        ],
+      });
+
+    it('renders one card per book, not just the featured one', () => {
+      const html = render(three());
+      expect(html).toContain('Book One');
+      expect(html).toContain('Book Two');
+      expect(html).toContain('Book Three');
+    });
+
+    it('pairs every book with its OWN checkout link', () => {
+      const html = render(three());
+      // Each card is one `<div class="offer…">`; the link inside a card must be
+      // the link belonging to the title inside that same card. This is the
+      // whole reason the offer grid is system-rendered.
+      // Split on a card's opening tag only — `class="offer"` or
+      // `class="offer offer-featured"` — not on `offer-art`/`offer-flag`.
+      const cards = html.split(/<div class="offer[" ]/).slice(1);
+      expect(cards.length).toBeGreaterThanOrEqual(3);
+      const expected: Array<[string, string]> = [
+        ['Book One', 'ONE'],
+        ['Book Two', 'TWO'],
+        ['Book Three', 'THREE'],
+      ];
+      for (const [title, slug] of expected) {
+        const card = cards.find((c) => c.includes(title));
+        expect(card, `no card rendered for ${title}`).toBeDefined();
+        expect(card).toContain(`https://payhip.com/b/${slug}`);
+      }
+    });
+
+    it('still sells one book the plain way when there is only one', () => {
+      const html = render(model());
+      expect(html).toContain('Order the book');
+      expect(html).not.toContain('class="offers"');
+    });
+
+    it('computes the bundle saving from the real book prices', () => {
+      const html = render(
+        model({
+          products: [
+            product({ title: 'Book One', priceCents: 4700, featured: true }),
+            product({ title: 'Book Two', priceCents: 3900 }),
+            product({ title: 'The complete set', kind: 'bundle', priceCents: 6900 }),
+          ],
+        }),
+      );
+      expect(html).toContain('Save $17 vs buying separately'); // 4700 + 3900 - 6900
+    });
+
+    it('claims no saving when a book has no price to compare against', () => {
+      const html = render(
+        model({
+          products: [
+            product({ title: 'Book One', priceCents: null, featured: true }),
+            product({ title: 'The complete set', kind: 'bundle', priceCents: 6900 }),
+          ],
+        }),
+      );
+      expect(html).not.toContain('vs buying separately');
+    });
+
+    it('closes on the bundle rather than on one third of what it just sold', () => {
+      const html = render(
+        model({
+          products: [
+            product({ title: 'Book One', priceCents: 4700, checkoutUrl: 'https://payhip.com/b/ONE', featured: true }),
+            product({
+              title: 'The complete set',
+              kind: 'bundle',
+              priceCents: 6900,
+              checkoutUrl: 'https://payhip.com/b/SET',
+            }),
+          ],
+        }),
+      );
+      const lastLink = html.lastIndexOf('payhip.com/b/');
+      expect(html.slice(lastLink, lastLink + 20)).toContain('SET');
     });
   });
 });

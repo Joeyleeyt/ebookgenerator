@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { Result, type AiTextGenerator, type AiGenerateInput, type AiCompletion, type AiError, type Telemetry } from '@yeg/core';
+import { Result, type AiTextGenerator, type AiGenerateInput, type AiCompletion, type AiError, type AiContentBlock, type Telemetry } from '@yeg/core';
 import { keepAliveAgent } from '../../net/keepAliveAgent.js';
 
 /**
@@ -32,7 +32,10 @@ export class ClaudeTextGenerator implements AiTextGenerator {
           model: input.model,
           max_tokens: input.maxTokens,
           system,
-          messages: input.messages.map((m) => ({ role: m.role, content: m.content })),
+          messages: input.messages.map((m) => ({
+            role: m.role,
+            content: typeof m.content === 'string' ? m.content : m.content.map(toAnthropicBlock),
+          })),
           ...(input.metadata ? { metadata: { user_id: input.metadata.projectId } } : {}),
         })
         .finalMessage();
@@ -70,4 +73,23 @@ function mapError(err: unknown): AiError {
     if (err.status === 400) return { type: 'invalid_request', message: err.message };
   }
   return { type: 'unknown', message: err instanceof Error ? err.message : String(err) };
+}
+
+/**
+ * Maps a port content block to the SDK's shape. Images travel as base64
+ * source blocks; the port deliberately carries the payload without a `data:`
+ * prefix because that is what the API expects.
+ */
+function toAnthropicBlock(block: AiContentBlock): Anthropic.TextBlockParam | Anthropic.ImageBlockParam {
+  if (block.type === 'image') {
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: block.mediaType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+        data: block.dataBase64,
+      },
+    };
+  }
+  return { type: 'text', text: block.text };
 }

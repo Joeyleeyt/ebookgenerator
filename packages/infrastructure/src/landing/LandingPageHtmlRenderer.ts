@@ -195,6 +195,27 @@ ${primary?.coverDataUri ? `<meta property="og:image" content="${esc(primary.cove
     border: 1px solid var(--border); border-radius: 4px; padding: 4px 9px;
   }
 
+  /* One card per book when the page sells more than one. Each carries its own
+     price and buy link, so the row is the only place a purchase is made. */
+  .offers { display: grid; gap: 20px; margin-top: 30px; text-align: left;
+            grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); }
+  .offer { display: flex; flex-direction: column; gap: 12px; padding: 22px;
+           background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+  .offer-featured { border-color: var(--accent); border-width: 2px; }
+  .offer-flag { align-self: flex-start; background: var(--accent); color: var(--accent-contrast);
+                font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+                padding: 4px 10px; border-radius: 999px; }
+  .offer-art { display: flex; justify-content: center; }
+  .offer-art img, .offer-art span { width: min(140px, 45%); aspect-ratio: 2/3; object-fit: cover;
+    border-radius: 4px; box-shadow: 0 10px 26px -10px rgba(0,0,0,.4); }
+  .offer-art-stack img { width: min(104px, 32%); }
+  .offer-art-stack > * + * { margin-left: -32px; }
+  .offer h3 { margin: 0; font-size: 1.1rem; }
+  .offer-sub { margin: 0; font-size: .88rem; color: var(--muted); }
+  .offer-buy { margin-top: auto; text-align: center; }
+  .offer-buy .cta { width: 100%; padding: 13px 18px; font-size: .95rem; }
+  .offer-save { font-size: .78rem; font-weight: 700; color: var(--accent); margin: 0 0 10px; }
+
   details { border-bottom: 1px solid var(--border); }
   summary { cursor: pointer; padding: 17px 0; font-weight: 700; color: var(--heading);
             font-family: ${fonts.display}; list-style: none; }
@@ -464,17 +485,73 @@ function sectionAuthors(model: LandingPageModel): string {
   </section>`;
 }
 
+/**
+ * The order section. With one product this is a price and a button; with
+ * several it becomes the offer grid, because each book is bought separately and
+ * a single button could only ever buy one of them.
+ *
+ * This branch is not cosmetic. The built-in template is the guaranteed fallback
+ * when generated layout fails its contract, so a version that rendered only the
+ * primary product would quietly ship a three-book page selling one book.
+ */
 function sectionOrder(model: LandingPageModel, p: LandingProduct | undefined, n: () => string): string {
+  const multi = model.products.length > 1;
   return `  <section class="reveal center">
     <div class="wrap">
       <p class="mark">${n()}</p>
-      <h2>Order the book</h2>
-      ${priceBlock(p, model)}
-      ${ctaButton(p, model.copy.ctaLabel, model)}
+      <h2>${multi ? 'Choose your set' : 'Order the book'}</h2>
+      ${multi ? offerGrid(model) : `${priceBlock(p, model)}\n      ${ctaButton(p, model.copy.ctaLabel, model)}`}
       ${paymentMarks(model)}
       ${model.guaranteeDays > 0 ? `<p class="cta-note muted">${model.guaranteeDays}-day money-back guarantee — email and it is refunded in full.</p>` : ''}
     </div>
   </section>`;
+}
+
+/** One card per product; every field on a card comes from that same record. */
+function offerGrid(model: LandingPageModel): string {
+  return `<div class="offers">${model.products.map((p) => offerCard(p, model)).join('')}</div>`;
+}
+
+function offerCard(p: LandingProduct, model: LandingPageModel): string {
+  // See the assembler's twin: the bundle carries "Best value", never the hero
+  // book, whose `featured` flag exists to pick the page's cover image.
+  const flag = p.kind === 'bundle' ? 'Best value' : p.categoryLabel;
+  const points = p.features.length > 0 ? p.features : p.contents.slice(0, 4);
+  return (
+    `<div class="offer${p.kind === 'bundle' ? ' offer-featured' : ''}">` +
+    (flag ? `<span class="offer-flag">${esc(flag)}</span>` : '') +
+    offerArt(p) +
+    `<h3>${esc(p.title)}</h3>` +
+    (p.subtitle ? `<p class="offer-sub">${esc(p.subtitle)}</p>` : '') +
+    (points.length > 0 ? `<ul class="checks">${points.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : '') +
+    '<div class="offer-buy">' +
+    priceBlock(p, model) +
+    bundleSavings(p, model) +
+    ctaButton(p, model.copy.ctaLabel, model) +
+    '</div></div>'
+  );
+}
+
+function offerArt(p: LandingProduct): string {
+  if (p.kind === 'bundle') {
+    const covers = p.bundleCoverDataUris ?? [];
+    if (covers.length === 0) return '';
+    return `<div class="offer-art offer-art-stack">${covers
+      .map((src) => `<img src="${esc(src)}" alt="">`)
+      .join('')}</div>`;
+  }
+  if (!p.coverDataUri) return `<div class="offer-art"><span class="cover-fallback">${esc(p.title)}</span></div>`;
+  return `<div class="offer-art"><img src="${esc(p.coverDataUri)}" alt="${esc(p.title)} cover"></div>`;
+}
+
+/** Computed from the real per-book prices on this page — never model-written. */
+function bundleSavings(p: LandingProduct, model: LandingPageModel): string {
+  if (p.kind !== 'bundle' || p.priceCents === null) return '';
+  const books = model.products.filter((o) => o.kind !== 'bundle');
+  if (books.length === 0 || books.some((o) => o.priceCents === null)) return '';
+  const saved = books.reduce((t, o) => t + (o.priceCents ?? 0), 0) - p.priceCents;
+  if (saved <= 0) return '';
+  return `<p class="offer-save">Save ${money(saved, model.currency)} vs buying separately</p>`;
 }
 
 function sectionFaq(model: LandingPageModel, n: () => string): string {
@@ -491,11 +568,15 @@ function sectionFaq(model: LandingPageModel, n: () => string): string {
 }
 
 function sectionLastCall(model: LandingPageModel, p: LandingProduct | undefined): string {
+  // On a multi-book page the closing button should buy the whole set — that is
+  // what the bundle is. Falling back to the primary book would make the last
+  // thing a reader sees an offer for one third of what the page just sold.
+  const target = model.products.find((o) => o.kind === 'bundle') ?? p;
   return `  <section class="reveal center">
     <div class="wrap">
       <h2>${esc(model.copy.closingHeading)}</h2>
-      ${priceBlock(p, model)}
-      ${ctaButton(p, model.copy.ctaLabel, model)}
+      ${priceBlock(target, model)}
+      ${ctaButton(target, model.copy.ctaLabel, model)}
     </div>
   </section>`;
 }

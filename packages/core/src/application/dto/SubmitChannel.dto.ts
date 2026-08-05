@@ -16,6 +16,22 @@ const LandingOptionFields = {
   landingCompareAtCents: z.number().int().min(0).max(10_000_00).optional(),
   landingCurrency: z.string().trim().length(3).default('USD'),
   landingGuaranteeDays: z.number().int().min(0).max(365).default(30),
+  /** Which template: one book, or the client's three-book set. */
+  landingMode: z.enum(['single', 'triple']).default('single'),
+  /** Up to two other finished books sold on the same page, each with its own
+   * price and checkout link (the 3-ebook template). */
+  landingSiblings: z
+    .array(
+      z.object({
+        projectId: z.string().uuid(),
+        priceCents: z.number().int().min(0).max(10_000_00).optional(),
+        checkoutUrl: z.string().url().max(2000).optional().or(z.literal('')),
+      }),
+    )
+    .max(2)
+    .default([]),
+  landingBundlePriceCents: z.number().int().min(0).max(10_000_00).optional(),
+  landingBundleCheckoutUrl: z.string().url().max(2000).optional().or(z.literal('')),
   /** Reference sales page this book's layout should follow. */
   landingTemplateUrl: z.string().url().max(2000).optional().or(z.literal('')),
 };

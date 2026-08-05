@@ -32,6 +32,14 @@ export const GET = handle(async (_req: Request, { params }: { params: { id: stri
       compareAtCents: project.options.landingCompareAtCents ?? null,
       currency: project.options.landingCurrency,
       guaranteeDays: project.options.landingGuaranteeDays,
+      mode: project.options.landingMode,
+      siblings: project.options.landingSiblings.map((s) => ({
+        projectId: s.projectId,
+        priceCents: s.priceCents ?? null,
+        checkoutUrl: s.checkoutUrl ?? '',
+      })),
+      bundlePriceCents: project.options.landingBundlePriceCents ?? null,
+      bundleCheckoutUrl: project.options.landingBundleCheckoutUrl ?? '',
     },
     page: page
       ? {
@@ -44,7 +52,10 @@ export const GET = handle(async (_req: Request, { params }: { params: { id: stri
       : null,
     // Surfaced so the UI can explain a disabled Publish button instead of
     // failing the request after the user clicks it.
-    canPublish: c.sitePublisher.isConfigured() && project.options.hasCheckoutUrl,
+    canPublish: c.sitePublisher.isConfigured() && project.options.missingCheckoutPositions().length === 0,
+    // Which books still need a buy link, so the UI can name them rather than
+    // just greying the button out.
+    missingCheckoutPositions: project.options.missingCheckoutPositions(),
     publisherConfigured: c.sitePublisher.isConfigured(),
   });
 });
@@ -74,8 +85,14 @@ export const POST = handle(async (req: Request, { params }: { params: { id: stri
   }
 
   const publish = new URL(req.url).searchParams.get('publish') === 'true';
-  if (publish && !project.options.hasCheckoutUrl) {
-    return error('Add your checkout link before publishing', 422);
+  const missingCheckout = project.options.missingCheckoutPositions();
+  if (publish && missingCheckout.length > 0) {
+    return error(
+      project.options.isTripleLanding
+        ? `Add a checkout link for ${missingCheckout.length === 1 ? 'book' : 'books'} ${missingCheckout.join(', ')} before publishing`
+        : 'Add your checkout link before publishing',
+      422,
+    );
   }
 
   // Queued rather than run inline: an Opus call plus a Netlify deploy is well

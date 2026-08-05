@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SubmitChannelUseCase } from './SubmitChannelUseCase.js';
 import { StartQueuedProjectsUseCase } from './StartQueuedProjectsUseCase.js';
-import type { ProjectRepository, ProjectListItem } from '../ports/repositories/ProjectRepository.js';
+import type { ProjectRepository, ProjectListItem, LandingCandidate } from '../ports/repositories/ProjectRepository.js';
 import type { JobQueue, QueueName } from '../ports/services/JobQueue.js';
 import type { Project } from '../../domain/project/Project.js';
 import type { ProjectId } from '../../domain/project/ProjectId.js';
@@ -25,6 +25,8 @@ const dto: SubmitChannelDto = {
     landingPage: false,
     landingCurrency: 'USD',
     landingGuaranteeDays: 30,
+    landingMode: 'single',
+    landingSiblings: [],
   },
 };
 
@@ -60,6 +62,9 @@ class FakeProjectRepo implements ProjectRepository {
   }
   async listQueuedByOwner(): Promise<ProjectListItem[]> {
     return this.queued;
+  }
+  async listLandingCandidates(): Promise<LandingCandidate[]> {
+    return [];
   }
 }
 

@@ -8,6 +8,7 @@ import {
   NOT_RUNNING_STATES,
   type ProjectRepository,
   type ProjectListItem,
+  type LandingCandidate,
   type ProjectState,
   type Tone,
   type BookType,
@@ -35,6 +36,10 @@ interface ProjectRow {
     landingCurrency?: string;
     landingGuaranteeDays?: number;
     landingTemplateUrl?: string;
+    landingMode?: 'single' | 'triple';
+    landingSiblings?: Array<{ projectId: string; priceCents?: number; checkoutUrl?: string }>;
+    landingBundlePriceCents?: number;
+    landingBundleCheckoutUrl?: string;
   };
   pending_counts: Record<string, number>;
   version: number;
@@ -82,6 +87,14 @@ export class SupabaseProjectRepository implements ProjectRepository {
         landingCurrency: project.options.landingCurrency,
         landingGuaranteeDays: project.options.landingGuaranteeDays,
         ...(project.options.landingTemplateUrl ? { landingTemplateUrl: project.options.landingTemplateUrl } : {}),
+        landingMode: project.options.landingMode,
+        ...(project.options.landingSiblings.length > 0 ? { landingSiblings: project.options.landingSiblings } : {}),
+        ...(project.options.landingBundlePriceCents !== undefined
+          ? { landingBundlePriceCents: project.options.landingBundlePriceCents }
+          : {}),
+        ...(project.options.landingBundleCheckoutUrl
+          ? { landingBundleCheckoutUrl: project.options.landingBundleCheckoutUrl }
+          : {}),
       },
       pending_counts: project.pendingCounts,
       error: project.error ?? null,
@@ -132,6 +145,38 @@ export class SupabaseProjectRepository implements ProjectRepository {
       status: r.status as ProjectState,
       createdAt: r.created_at as string,
     }));
+  }
+
+  async listLandingCandidates(ownerId: string, excludeProjectId: ProjectId): Promise<LandingCandidate[]> {
+    // Joined against books because the picker needs a title and a cover — a
+    // list of UUIDs is not something a user can choose from. The inner join is
+    // deliberate: a COMPLETED project with no book row cannot be sold.
+    const { data, error } = await this.db
+      .from('projects')
+      .select('id, channel_url, created_at, options, books!inner(title, cover_image_path)')
+      .eq('owner_id', ownerId)
+      .eq('status', 'COMPLETED')
+      .neq('id', excludeProjectId.value)
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+
+    return (data ?? []).map((r) => {
+      // Supabase types an embedded join as an array even when it is to-one.
+      const rawBook = (r as { books: unknown }).books;
+      const book = (Array.isArray(rawBook) ? rawBook[0] : rawBook) as
+        | { title: string | null; cover_image_path: string | null }
+        | undefined;
+      const options = (r as { options?: { bookTitle?: string } }).options;
+      return {
+        projectId: r.id as string,
+        // The book's own title wins; the requested title is the fallback for
+        // older rows where it was never written back.
+        bookTitle: book?.title ?? options?.bookTitle ?? 'Untitled',
+        coverImagePath: book?.cover_image_path ?? null,
+        channelUrl: r.channel_url as string,
+        createdAt: r.created_at as string,
+      };
+    });
   }
 
   async decrementPending(id: ProjectId, stage: string): Promise<number> {

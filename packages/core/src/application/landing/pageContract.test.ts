@@ -182,6 +182,8 @@ describe('fillPlaceholders', () => {
       testimonials: '',
       contents: '<ul><li>One</li></ul>',
       legal: '<p>Disclaimer</p>',
+      logo: '<img src="data:image/png;base64,BB">',
+      offerGrid: '<div class="offers"></div>',
     });
 
     expect(out).not.toMatch(/\{\{[A-Z_]+\}\}/); // nothing left unsubstituted
@@ -192,6 +194,7 @@ describe('fillPlaceholders', () => {
   it('drops a placeholder whose content is empty', () => {
     const out = fillPlaceholders('<div>{{TESTIMONIALS}}</div>', {
       cta: '', price: '', cover: '', guarantee: '', paymentMarks: '', testimonials: '', contents: '', legal: '',
+      logo: '', offerGrid: '',
     });
     expect(out).toBe('<div></div>');
   });

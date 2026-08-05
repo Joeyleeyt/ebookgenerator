@@ -1,6 +1,8 @@
 import { PALETTE_VARS, PLACEHOLDERS } from '../landing/pageContract.js';
 import type { LandingCopy } from '../../domain/landing/LandingPage.js';
 import type { ReferencePage } from '../ports/services/ReferencePageFetcher.js';
+import type { ReferenceShot } from '../ports/services/ReferenceScreenshotter.js';
+import type { AiContentBlock } from '../ports/services/AiTextGenerator.js';
 
 /**
  * The layout call: arrange already-approved copy into a page shaped after the
@@ -18,6 +20,16 @@ export const LandingLayoutPrompt = {
     copy: LandingCopy;
     bookTitle: string;
     pageCount: number | null;
+    /**
+     * How many products the page sells. Above one, the offer grid replaces the
+     * single-product rules — the reference's own tier section is then a feature
+     * to copy rather than something to collapse down to one card.
+     */
+    productCount: number;
+    /** The other books on the page, so the copy block can name them. */
+    otherTitles?: string[];
+    /** Screenshots of the reference, attached to the user message as images. */
+    referenceShots?: ReferenceShot[];
     /** Errors from the previous attempt, when this is the repair round. */
     repairErrors?: string[];
   }) {
@@ -39,7 +51,8 @@ export const LandingLayoutPrompt = {
       '                        up to 6 times; each renders the same cover',
       `  ${PLACEHOLDERS.contents}       the chapter breakdown list`,
       `  ${PLACEHOLDERS.guarantee}      the guarantee panel (omit if not wanted)`,
-      `  ${PLACEHOLDERS.paymentMarks}   payment marks, near a buy button`,
+      `  ${PLACEHOLDERS.paymentMarks}   payment marks — a full-width row on its OWN line,`,
+      '                        directly beneath a buy button; never beside a price',
       `  ${PLACEHOLDERS.testimonials}   reader quotes — may render to nothing, so never`,
       '                        put a heading inside a section that has only this',
       `  ${PLACEHOLDERS.legal}   the footer disclaimer — exactly once, in the footer`,
@@ -49,11 +62,28 @@ export const LandingLayoutPrompt = {
       '.pay, .guarantee, .contents/.contents-item/.contents-count, .testimonials, .legal.',
       'They already look right; restyle them only to match the reference (your CSS wins).',
       '',
-      'THERE IS EXACTLY ONE PRODUCT — this book. Do not invent editions, tiers,',
-      'bundles or a "choose your level" grid. If the reference sells several products,',
-      'adapt its layout to selling ONE: a single offer card, stated once, repeated as',
-      'a closing call to action.',
-      '',
+      ...(input.productCount > 1
+        ? [
+            `THIS PAGE SELLS ${input.productCount} PRODUCTS. Place ${PLACEHOLDERS.offerGrid} exactly once,`,
+            'where the reference puts its "choose your level" / product-tier section.',
+            'That one placeholder expands into EVERY product card — each book\'s own',
+            'cover, title, price and buy link, plus the bundle. You do not build the',
+            'cards, count them, name the books or write any of their links: with several',
+            'different checkout URLs on one page, deciding which link belongs to which',
+            'book is the system\'s job, not yours. Give the grid a section to live in and',
+            'style .offers/.offer/.offer-flag/.offer-art/.offer-buy/.offer-save to match',
+            'the reference\'s card treatment.',
+            `Keep using ${PLACEHOLDERS.cta} and ${PLACEHOLDERS.price} for the HERO and`,
+            'CLOSING calls to action — those buy the featured product.',
+            '',
+          ]
+        : [
+            'THERE IS EXACTLY ONE PRODUCT — this book. Do not invent editions, tiers,',
+            'bundles or a "choose your level" grid. If the reference sells several products,',
+            'adapt its layout to selling ONE: a single offer card, stated once, repeated as',
+            'a closing call to action.',
+            '',
+          ]),
       'REQUIRED SECTIONS. Mark them so the structure can be checked:',
       '  <section data-section="hero">   <section data-section="inside">',
       '  <section data-section="order">  <section data-section="faq">',
@@ -106,6 +136,12 @@ export const LandingLayoutPrompt = {
       'compress: one shared rule per repeated component (cards, FAQ items, sections),',
       'never a copy per instance; collapse its utility-class styling into terse',
       'semantic classes; skip decorative wrappers that only exist for a framework.',
+      '',
+      'LAYOUT DISCIPLINE. Every grid or flex column must contain visible content at',
+      'every breakpoint — an empty column with a floating divider is a broken page.',
+      'Keep an image and its caption/text in normal document flow inside their card;',
+      'never absolute-position content out of a column. Text columns need a sane',
+      'minimum width (18ch+); if a split cannot hold both sides, stack them.',
       '',
       'RESPONSIVE. Mobile first; the page must not scroll sideways at 360px. Any',
       'table or wide block gets its own overflow-x: auto container.',
@@ -210,9 +246,20 @@ export const LandingLayoutPrompt = {
         ].join('\n');
 
     const copy = [
-      '=== THE BOOK ===',
+      input.productCount > 1 ? '=== THE FEATURED BOOK ===' : '=== THE BOOK ===',
       `Title: ${input.bookTitle}`,
       input.pageCount ? `Length: ${input.pageCount} pages` : '',
+      // Named only so the layout reads coherently around the grid. The cards
+      // themselves are system-rendered; the model never writes these titles.
+      ...(input.otherTitles && input.otherTitles.length > 0
+        ? [
+            '',
+            `Also sold on this page, inside ${PLACEHOLDERS.offerGrid} (do NOT write these`,
+            'as cards yourself — they are listed only so your headings and section',
+            'copy make sense on a multi-book page):',
+            ...input.otherTitles.map((t) => `  - ${t}`),
+          ]
+        : []),
       '',
       '=== APPROVED COPY — place verbatim ===',
       JSON.stringify(input.copy, null, 2),
@@ -230,6 +277,33 @@ export const LandingLayoutPrompt = {
           ].join('\n')
         : '';
 
-    return { system, user: `${reference}\n\n${copy}${repair}` };
+    const text = `${reference}\n\n${copy}${repair}`;
+
+    // With screenshots the user message becomes blocks: the images first, then
+    // the brief. The model sees what the page LOOKS like before it reads what
+    // the page is made of — which is the order the client described when he
+    // said to let the AI look at the reference and learn it.
+    const shots = input.referenceShots ?? [];
+    const user: string | AiContentBlock[] =
+      shots.length === 0
+        ? text
+        : [
+            {
+              type: 'text' as const,
+              text:
+                `These ${shots.length} screenshots are the reference page, captured top to bottom. ` +
+                'They are the ground truth for how it LOOKS — spacing, type scale, section rhythm, ' +
+                'card treatment, how much air sits around things. Match them. The markup below tells ' +
+                'you what the page is MADE OF; the images tell you what it should feel like.',
+            },
+            ...shots.map((shot) => ({
+              type: 'image' as const,
+              mediaType: shot.mediaType,
+              dataBase64: shot.dataBase64,
+            })),
+            { type: 'text' as const, text },
+          ];
+
+    return { system, user };
   },
 };

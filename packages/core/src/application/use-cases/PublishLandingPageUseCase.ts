@@ -31,9 +31,16 @@ export class PublishLandingPageUseCase {
       return Result.fail('Publishing is not configured — set NETLIFY_AUTH_TOKEN');
     }
     // The one hard gate: a live page whose buttons go nowhere is worse than no
-    // page at all.
-    if (!project.options.hasCheckoutUrl) {
-      return Result.fail('Add your checkout link before publishing — the buy buttons have nowhere to go');
+    // page at all. On a three-book page EVERY book is checked, not just the
+    // first — one link set would otherwise publish a page with two dead buttons
+    // that silently take no money.
+    const missing = project.options.missingCheckoutPositions();
+    if (missing.length > 0) {
+      return Result.fail(
+        missing.length === 1 && !project.options.isTripleLanding
+          ? 'Add your checkout link before publishing — the buy buttons have nowhere to go'
+          : `Add a checkout link for ${missing.length === 1 ? 'book' : 'books'} ${missing.join(', ')} before publishing — those buy buttons have nowhere to go`,
+      );
     }
 
     const page = await this.pages.findByProject(projectId);

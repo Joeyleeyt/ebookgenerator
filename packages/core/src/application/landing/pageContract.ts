@@ -27,6 +27,14 @@ export const PLACEHOLDERS = {
   testimonials: '{{TESTIMONIALS}}',
   contents: '{{CONTENTS}}',
   legal: '{{FOOTER_LEGAL}}',
+  /** The channel avatar as a small round brand mark. Optional. */
+  logo: '{{LOGO}}',
+  /**
+   * The complete offer section — one card per book plus the bundle, each with
+   * its OWN price and checkout link. System-rendered: with up to four different
+   * buy links on one page, the model never decides which link goes where.
+   */
+  offerGrid: '{{OFFER_GRID}}',
 } as const;
 
 /** A page without these is not a sales page. */
@@ -63,6 +71,11 @@ export interface ValidateOptions {
    * step.
    */
   requiredText?: string[];
+  /**
+   * How many products the page sells. More than one → the offer grid becomes
+   * mandatory: it is the only element that carries each book's own buy link.
+   */
+  productCount?: number;
 }
 
 export function validateGeneratedPage(page: GeneratedPage, options: ValidateOptions = {}): Result<void, string[]> {
@@ -89,6 +102,18 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   }
   if (occurrences(bodyHtml, PLACEHOLDERS.legal) > 1) {
     errors.push(`${PLACEHOLDERS.legal} must appear exactly once, in the footer.`);
+  }
+  if ((options.productCount ?? 1) > 1 && !bodyHtml.includes(PLACEHOLDERS.offerGrid)) {
+    errors.push(
+      `This page sells ${options.productCount} books; ${PLACEHOLDERS.offerGrid} is required — it is the only ` +
+        "element carrying each book's own buy link.",
+    );
+  }
+  if (occurrences(bodyHtml, PLACEHOLDERS.offerGrid) > 1) {
+    errors.push(`${PLACEHOLDERS.offerGrid} may appear at most once.`);
+  }
+  if (occurrences(bodyHtml, PLACEHOLDERS.logo) > 3) {
+    errors.push(`${PLACEHOLDERS.logo} may appear at most 3 times.`);
   }
   // Caps sized for template copying — a reference page legitimately repeats its
   // cover and buy button many times. The caps only stop true runaway repetition.

@@ -30,6 +30,17 @@ export interface LandingProduct {
   checkoutUrl: string | null;
   /** Marks the emphasised card when several products are offered. */
   featured?: boolean;
+  /**
+   * A bundle is a product like any other — its own price, its own checkout link
+   * — but it sells the whole set rather than one book, so it renders with every
+   * book's cover instead of one and never appears as "book 4".
+   */
+  kind?: 'book' | 'bundle';
+  /**
+   * Bundle only: the covers of the books it contains, for the stacked card.
+   * Derived from the other products, never supplied independently.
+   */
+  bundleCoverDataUris?: string[];
 }
 
 export interface LandingPageModel {
@@ -50,6 +61,11 @@ export interface LandingPageModel {
   products: LandingProduct[];
   /** Shown in the footer next to the copyright line. */
   siteName: string;
+  /**
+   * The brand mark — the YouTube channel's own avatar, or an upload that
+   * overrides it. Null renders the logo slots as nothing rather than as a gap.
+   */
+  logoDataUri: string | null;
 
   /**
    * The stat row under the hero. Every entry must be a fact the system already

@@ -4,7 +4,7 @@ import { Project } from '../../domain/project/Project.js';
 import { ProjectId } from '../../domain/project/ProjectId.js';
 import { GenerationOptions } from '../../domain/project/GenerationOptions.js';
 import { ChannelUrl } from '../../domain/channel/ChannelUrl.js';
-import type { ProjectRepository, ProjectListItem } from '../ports/repositories/ProjectRepository.js';
+import type { ProjectRepository, ProjectListItem, LandingCandidate } from '../ports/repositories/ProjectRepository.js';
 import type { ProjectState } from '../../domain/project/ProjectStatus.js';
 import type { JobQueue, QueueName } from '../ports/services/JobQueue.js';
 import type { Clock } from '../ports/Clock.js';
@@ -52,6 +52,9 @@ class FakeProjectRepo implements ProjectRepository {
     return 0;
   }
   async listQueuedByOwner(): Promise<ProjectListItem[]> {
+    return [];
+  }
+  async listLandingCandidates(): Promise<LandingCandidate[]> {
     return [];
   }
 }

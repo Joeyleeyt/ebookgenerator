@@ -94,6 +94,16 @@ export function normalizeBookTitle(raw: string | undefined): string | undefined 
 /** Default currency for the landing page price, when the user doesn't pick one. */
 export const DEFAULT_LANDING_CURRENCY = 'USD';
 
+/**
+ * Which landing page template a project uses. The client maintains a separate
+ * reference site per mode, and the two are not interchangeable: a `triple` page
+ * sells three books from one offer grid, a `single` page sells one.
+ */
+export type LandingMode = 'single' | 'triple';
+
+/** How many sibling books a `triple` page requires beyond the project's own. */
+export const TRIPLE_SIBLING_COUNT = 2;
+
 interface GenerationOptionsProps {
   /** User-provided book title. When set, it overrides the AI-generated title. */
   bookTitle?: string | undefined;
@@ -115,6 +125,16 @@ interface GenerationOptionsProps {
   /** Set when the user asks for a sales page on a finished book. */
   landingPage: boolean;
   /**
+   * Which sales page this is: one book, or the client's three-book set.
+   *
+   * Stored explicitly rather than inferred from `landingSiblings.length`,
+   * because the client's requirement is absolute — selecting the 3-ebook option
+   * must produce the 3-ebook template and nothing else. An inferred mode would
+   * silently degrade to the single-book layout the moment a sibling failed to
+   * load, which is the exact failure the requirement exists to prevent.
+   */
+  landingMode: LandingMode;
+  /**
    * The user's own checkout link (Payhip, Gumroad, Kajabi, Stripe — any URL).
    * Deliberately provider-agnostic: it is written into every CTA verbatim and
    * never composed or rewritten. Optional at submit time, because the product
@@ -129,6 +149,16 @@ interface GenerationOptionsProps {
   landingCurrency: string;
   /** Money-back guarantee window advertised on the page; 0 hides the section. */
   landingGuaranteeDays: number;
+  /**
+   * Other finished books sold on the SAME page (the client's 3-ebook template).
+   * Each entry names a sibling project plus that book's own price and checkout
+   * link — every card on the page buys a different product, so the links live
+   * with the books they sell.
+   */
+  landingSiblings: Array<{ projectId: string; priceCents?: number | undefined; checkoutUrl?: string | undefined }>;
+  /** The all-books bundle: its own store product, price and link. */
+  landingBundlePriceCents?: number | undefined;
+  landingBundleCheckoutUrl?: string | undefined;
   /**
    * A reference sales page for this book's landing page to follow — the client
    * supplies a different one per book. Its structure and visual treatment are
@@ -159,6 +189,7 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
       includeIllustrations: props.includeIllustrations ?? true,
       illustrationEveryPages: props.illustrationEveryPages ?? 5,
       landingPage: props.landingPage ?? false,
+      landingMode: props.landingMode === 'triple' ? 'triple' : 'single',
       // Blank strings arrive from empty form fields; treat them as "not set" so
       // `hasCheckoutUrl` stays a single honest check everywhere downstream.
       ...(props.landingCheckoutUrl?.trim() ? { landingCheckoutUrl: props.landingCheckoutUrl.trim() } : {}),
@@ -170,6 +201,22 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
         : {}),
       landingCurrency: (props.landingCurrency ?? DEFAULT_LANDING_CURRENCY).toUpperCase(),
       landingGuaranteeDays: props.landingGuaranteeDays ?? 30,
+      landingSiblings: (props.landingSiblings ?? [])
+        .filter((sib) => Boolean(sib?.projectId))
+        .slice(0, 2)
+        .map((sib) => ({
+          projectId: sib.projectId,
+          ...(typeof sib.priceCents === 'number' && Number.isFinite(sib.priceCents)
+            ? { priceCents: Math.max(0, Math.round(sib.priceCents)) }
+            : {}),
+          ...(sib.checkoutUrl?.trim() ? { checkoutUrl: sib.checkoutUrl.trim() } : {}),
+        })),
+      ...(typeof props.landingBundlePriceCents === 'number' && Number.isFinite(props.landingBundlePriceCents)
+        ? { landingBundlePriceCents: Math.max(0, Math.round(props.landingBundlePriceCents)) }
+        : {}),
+      ...(props.landingBundleCheckoutUrl?.trim()
+        ? { landingBundleCheckoutUrl: props.landingBundleCheckoutUrl.trim() }
+        : {}),
       ...(props.landingTemplateUrl?.trim() ? { landingTemplateUrl: props.landingTemplateUrl.trim() } : {}),
     });
   }
@@ -230,8 +277,62 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
   get landingTemplateUrl() {
     return this.props.landingTemplateUrl;
   }
+  get landingSiblings() {
+    return this.props.landingSiblings;
+  }
+  get landingBundlePriceCents() {
+    return this.props.landingBundlePriceCents;
+  }
+  get landingBundleCheckoutUrl() {
+    return this.props.landingBundleCheckoutUrl;
+  }
+  get landingMode(): LandingMode {
+    return this.props.landingMode;
+  }
+  /** True when this page sells the three-book set rather than one book. */
+  get isTripleLanding(): boolean {
+    return this.props.landingMode === 'triple';
+  }
+  /** Publishing needs SOMEWHERE for a buyer to go — any product's link will do. */
+  get hasAnyCheckoutUrl(): boolean {
+    return (
+      this.hasCheckoutUrl ||
+      Boolean(this.props.landingBundleCheckoutUrl) ||
+      this.props.landingSiblings.some((s) => Boolean(s.checkoutUrl))
+    );
+  }
   /** A page can be generated without a checkout link, but never published without one. */
   get hasCheckoutUrl(): boolean {
     return Boolean(this.props.landingCheckoutUrl);
+  }
+
+  /**
+   * Which books on this page have no buy link yet, as 1-based positions.
+   *
+   * Publishing is blocked while any is missing. `hasAnyCheckoutUrl` is not a
+   * sufficient gate for a three-book page: it passes with one link set, which
+   * would ship a live page with two dead buttons taking no money. The bundle is
+   * excluded on purpose — no bundle link simply means no bundle card renders.
+   */
+  missingCheckoutPositions(): number[] {
+    if (!this.isTripleLanding) return this.hasCheckoutUrl ? [] : [1];
+    const positions = this.hasCheckoutUrl ? [] : [1];
+    this.props.landingSiblings.forEach((sib, i) => {
+      if (!sib.checkoutUrl) positions.push(i + 2);
+    });
+    return positions;
+  }
+
+  /**
+   * Why this project can't generate the page it asked for, or null when it can.
+   * A `triple` page with the wrong number of siblings is a configuration error,
+   * not something to quietly render as a single-book page.
+   */
+  landingConfigError(): string | null {
+    if (!this.props.landingPage) return null;
+    if (this.isTripleLanding && this.props.landingSiblings.length !== TRIPLE_SIBLING_COUNT) {
+      return `A 3-ebook landing page needs exactly ${TRIPLE_SIBLING_COUNT} other finished books; ${this.props.landingSiblings.length} selected.`;
+    }
+    return null;
   }
 }

@@ -8,6 +8,17 @@ import { Badge } from '../ui/badge.js';
 
 type State = 'GENERATING' | 'DRAFT' | 'PUBLISHING' | 'PUBLISHED' | 'FAILED';
 
+type LandingMode = 'single' | 'triple';
+
+/** How many other finished books a three-book page needs. */
+const SIBLING_SLOTS = 2;
+
+interface SiblingSetting {
+  projectId: string;
+  priceCents: number | null;
+  checkoutUrl: string;
+}
+
 interface Payload {
   settings: {
     enabled: boolean;
@@ -15,11 +26,33 @@ interface Payload {
     templateUrl: string;
     priceCents: number | null;
     currency: string;
+    mode: LandingMode;
+    siblings: SiblingSetting[];
+    bundlePriceCents: number | null;
+    bundleCheckoutUrl: string;
   };
   page: { state: State; url: string | null; error: string | null; hasDraft: boolean; updatedAt: string } | null;
   canPublish: boolean;
+  /** 1-based positions of books with no buy link yet. */
+  missingCheckoutPositions: number[];
   publisherConfigured: boolean;
 }
+
+/** A finished book of the user's that could be sold alongside this one. */
+interface Candidate {
+  projectId: string;
+  title: string;
+  sameChannel: boolean;
+}
+
+/** One sibling row's editable state. */
+interface SiblingDraft {
+  projectId: string;
+  price: string;
+  checkoutUrl: string;
+}
+
+const EMPTY_SIBLING: SiblingDraft = { projectId: '', price: '', checkoutUrl: '' };
 
 const BUSY_STATES: State[] = ['GENERATING', 'PUBLISHING'];
 
@@ -60,6 +93,11 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
   const [checkoutUrl, setCheckoutUrl] = useState('');
   const [templateUrl, setTemplateUrl] = useState('');
   const [price, setPrice] = useState('');
+  const [mode, setMode] = useState<LandingMode>('single');
+  const [siblings, setSiblings] = useState<SiblingDraft[]>([EMPTY_SIBLING, EMPTY_SIBLING]);
+  const [bundlePrice, setBundlePrice] = useState('');
+  const [bundleUrl, setBundleUrl] = useState('');
+  const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -81,6 +119,19 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
         setCheckoutUrl(payload.settings.checkoutUrl);
         setTemplateUrl(payload.settings.templateUrl);
         setPrice(centsToInput(payload.settings.priceCents));
+        setMode(payload.settings.mode);
+        setBundlePrice(centsToInput(payload.settings.bundlePriceCents));
+        setBundleUrl(payload.settings.bundleCheckoutUrl);
+        // Always render both slots, filling whichever are already saved, so the
+        // picker's shape doesn't change as the user completes it.
+        setSiblings(
+          Array.from({ length: SIBLING_SLOTS }, (_, i) => {
+            const saved = payload.settings.siblings[i];
+            return saved
+              ? { projectId: saved.projectId, price: centsToInput(saved.priceCents), checkoutUrl: saved.checkoutUrl }
+              : EMPTY_SIBLING;
+          }),
+        );
       }
     },
     [projectId],
@@ -89,6 +140,24 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The user's other finished books. Fetched once: without at least two, the
+  // 3-ebook option cannot be offered at all.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/projects/${projectId}/landing-page/candidates`);
+      if (!res.ok) {
+        if (!cancelled) setCandidates([]);
+        return;
+      }
+      const body = (await res.json()) as { candidates: Candidate[] };
+      if (!cancelled) setCandidates(body.candidates);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const state = data?.page?.state ?? null;
   const updatedAt = data?.page?.updatedAt ?? null;
@@ -120,6 +189,9 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
 
   const page = data?.page ?? null;
   const working = busy || (state !== null && BUSY_STATES.includes(state));
+  // Server-computed, so the button and its explanation agree with the gate
+  // that will actually run.
+  const missingLinks = data?.missingCheckoutPositions ?? [];
 
   /** Persists the settings, and turns the feature on for this project. */
   async function save(): Promise<boolean> {
@@ -136,6 +208,39 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
       setProblem('The reference page must be a full URL, e.g. https://eliasyoder.com.');
       return false;
     }
+
+    // A three-book page needs all three books chosen before it can be saved as
+    // one — the domain rejects a `triple` project with the wrong count, and
+    // failing here says so in terms of the picker rather than at generation.
+    const chosen = mode === 'triple' ? siblings.filter((s) => s.projectId) : [];
+    if (mode === 'triple' && chosen.length < SIBLING_SLOTS) {
+      setProblem('Pick both of the other books before saving the 3-ebook page.');
+      return false;
+    }
+    if (new Set(chosen.map((s) => s.projectId)).size !== chosen.length) {
+      setProblem('Pick two different books — the same book cannot be sold twice on one page.');
+      return false;
+    }
+    for (const [i, s] of chosen.entries()) {
+      if (s.price.trim() && parsePrice(s.price) === null) {
+        setProblem(`Enter book ${i + 2}'s price as a number, e.g. 27 or 27.00.`);
+        return false;
+      }
+      if (s.checkoutUrl.trim() && !isHttpUrl(s.checkoutUrl.trim())) {
+        setProblem(`Book ${i + 2}'s checkout link must be a full URL.`);
+        return false;
+      }
+    }
+    if (bundlePrice.trim() && parsePrice(bundlePrice) === null) {
+      setProblem('Enter the bundle price as a number, e.g. 47 or 47.00.');
+      return false;
+    }
+    if (bundleUrl.trim() && !isHttpUrl(bundleUrl.trim())) {
+      setProblem('The bundle checkout link must be a full URL.');
+      return false;
+    }
+
+    const bundleCents = parsePrice(bundlePrice);
     const res = await fetch(`/api/projects/${projectId}/landing-page`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -144,6 +249,17 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
         landingCheckoutUrl: checkoutUrl.trim(),
         landingTemplateUrl: templateUrl.trim(),
         ...(cents !== null ? { landingPriceCents: cents } : {}),
+        landingMode: mode,
+        landingSiblings: chosen.map((s) => {
+          const sibCents = parsePrice(s.price);
+          return {
+            projectId: s.projectId,
+            ...(sibCents !== null ? { priceCents: sibCents } : {}),
+            checkoutUrl: s.checkoutUrl.trim(),
+          };
+        }),
+        ...(mode === 'triple' && bundleCents !== null ? { landingBundlePriceCents: bundleCents } : {}),
+        ...(mode === 'triple' ? { landingBundleCheckoutUrl: bundleUrl.trim() } : {}),
       }),
     });
     if (!res.ok) {
@@ -211,6 +327,152 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
           </p>
         )}
 
+        {/* How many books this page sells. The choice picks the template, and
+            a 3-ebook page only ever uses the 3-ebook template. */}
+        <div>
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">What this page sells</span>
+          <div className="flex gap-2">
+            {(
+              [
+                ['single', 'This book', null],
+                [
+                  'triple',
+                  '3 ebooks',
+                  candidates !== null && candidates.length < SIBLING_SLOTS
+                    ? 'Needs 2 other finished books'
+                    : null,
+                ],
+              ] as const
+            ).map(([value, label, blocked]) => (
+              <button
+                key={value}
+                type="button"
+                disabled={Boolean(blocked)}
+                title={blocked ?? undefined}
+                onClick={() => {
+                  setMode(value);
+                  setProblem(null);
+                }}
+                className={`h-9 flex-1 rounded-md border px-3 text-sm transition-colors ${
+                  mode === value
+                    ? 'border-primary bg-primary-soft text-primary'
+                    : 'border-border bg-canvas text-muted-foreground hover:border-primary/40'
+                } disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {candidates !== null && candidates.length < SIBLING_SLOTS && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              A 3-ebook page needs two other finished books. Generate more books to unlock it.
+            </p>
+          )}
+        </div>
+
+        {mode === 'triple' && (
+          <div className="flex flex-col gap-4 rounded-md border border-border p-4">
+            <p className="text-xs text-muted-foreground">
+              This book is sold first. Pick the other two and give each its own price and checkout link — every buy
+              button goes to the book it sits under.
+            </p>
+
+            {siblings.map((sibling, i) => (
+              <div key={i} className="flex flex-col gap-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-muted-foreground">Book {i + 2}</span>
+                  <select
+                    value={sibling.projectId}
+                    onChange={(e) => {
+                      const next = [...siblings];
+                      next[i] = { ...sibling, projectId: e.target.value };
+                      setSiblings(next);
+                    }}
+                    onBlur={() => void save()}
+                    className={INPUT}
+                  >
+                    <option value="">Choose a finished book…</option>
+                    {(candidates ?? [])
+                      // Can't sell the same book twice on one page.
+                      .filter((c) => c.projectId === sibling.projectId || !siblings.some((s) => s.projectId === c.projectId))
+                      .map((c) => (
+                        <option key={c.projectId} value={c.projectId}>
+                          {c.title}
+                          {c.sameChannel ? '' : ' (different channel)'}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <label className="flex-1">
+                    <span className="mb-1 block text-xs font-medium text-muted-foreground">Checkout link</span>
+                    <input
+                      value={sibling.checkoutUrl}
+                      onChange={(e) => {
+                        const next = [...siblings];
+                        next[i] = { ...sibling, checkoutUrl: e.target.value };
+                        setSiblings(next);
+                      }}
+                      onBlur={() => void save()}
+                      placeholder="https://payhip.com/b/…"
+                      inputMode="url"
+                      className={INPUT}
+                    />
+                  </label>
+                  <label className="sm:w-32">
+                    <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                      Price ({data?.settings.currency ?? 'USD'})
+                    </span>
+                    <input
+                      value={sibling.price}
+                      onChange={(e) => {
+                        const next = [...siblings];
+                        next[i] = { ...sibling, price: e.target.value };
+                        setSiblings(next);
+                      }}
+                      onBlur={() => void save()}
+                      placeholder="27"
+                      inputMode="decimal"
+                      className={INPUT}
+                    />
+                  </label>
+                </div>
+              </div>
+            ))}
+
+            <div className="flex flex-col gap-2 border-t border-border pt-4 sm:flex-row">
+              <label className="flex-1">
+                <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                  Bundle checkout link (optional)
+                </span>
+                <input
+                  value={bundleUrl}
+                  onChange={(e) => setBundleUrl(e.target.value)}
+                  onBlur={() => void save()}
+                  placeholder="https://payhip.com/b/…"
+                  inputMode="url"
+                  className={INPUT}
+                />
+              </label>
+              <label className="sm:w-32">
+                <span className="mb-1 block text-xs font-medium text-muted-foreground">Bundle price</span>
+                <input
+                  value={bundlePrice}
+                  onChange={(e) => setBundlePrice(e.target.value)}
+                  onBlur={() => void save()}
+                  placeholder="47"
+                  inputMode="decimal"
+                  className={INPUT}
+                />
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Leave the bundle empty to sell the books individually only. The saving shown is calculated from the
+              three prices above.
+            </p>
+          </div>
+        )}
+
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-muted-foreground">
             Reference page to copy the layout from
@@ -227,7 +489,9 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
 
         <div className="flex flex-col gap-2 sm:flex-row">
           <label className="flex-1">
-            <span className="mb-1 block text-xs font-medium text-muted-foreground">Checkout link</span>
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">
+              {mode === 'triple' ? 'Book 1 checkout link (this book)' : 'Checkout link'}
+            </span>
             <input
               value={checkoutUrl}
               onChange={(e) => setCheckoutUrl(e.target.value)}
@@ -257,6 +521,14 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
           button exactly as you enter it. You can write the page first and add the link before publishing.
         </p>
 
+        {page?.hasDraft && missingLinks.length > 0 && (
+          <p className="text-sm text-warning">
+            {missingLinks.length === 1 ? 'Book' : 'Books'} {missingLinks.join(', ')}{' '}
+            {missingLinks.length === 1 ? 'has' : 'have'} no checkout link yet — the page can be previewed but not
+            published until {missingLinks.length === 1 ? 'it does' : 'they do'}.
+          </p>
+        )}
+
         {page?.error && <p className="text-sm text-error">{page.error}</p>}
         {problem && <p className="text-sm text-error">{problem}</p>}
         {note && !problem && <p className="text-sm text-muted-foreground">{note}</p>}
@@ -284,14 +556,14 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
           {page?.hasDraft && (
             <Button
               onClick={() => void run('publish')}
-              disabled={working || !checkoutUrl.trim() || !data?.publisherConfigured}
+              disabled={working || !data?.canPublish}
               variant="secondary"
               size="sm"
               title={
                 !data?.publisherConfigured
                   ? 'Netlify is not configured on the server'
-                  : !checkoutUrl.trim()
-                    ? 'Add your checkout link first'
+                  : missingLinks.length > 0
+                    ? `Add a checkout link for ${missingLinks.length === 1 ? 'book' : 'books'} ${missingLinks.join(', ')} first`
                     : 'Deploy this page to Netlify'
               }
             >

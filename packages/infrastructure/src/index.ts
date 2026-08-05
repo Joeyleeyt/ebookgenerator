@@ -19,6 +19,8 @@ export * from './image/SharpColorSampler.js';
 export * from './net/ProxyRotator.js';
 export * from './net/NetlifyDeployer.js';
 export * from './net/HttpReferencePageFetcher.js';
+export * from './net/HttpImageFetcher.js';
+export * from './net/PuppeteerReferenceScreenshotter.js';
 
 // ── Landing page (sales page renderer) ──────────────────────────────────────
 export * from './landing/LandingPageHtmlRenderer.js';

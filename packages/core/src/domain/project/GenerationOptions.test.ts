@@ -76,3 +76,60 @@ describe('landing page options', () => {
     expect(restored.landingPriceCents).toBe(2700);
   });
 });
+
+describe('three-book landing options', () => {
+  const triple = (over: Parameters<typeof GenerationOptions.create>[0] = {}) =>
+    GenerationOptions.create({
+      landingPage: true,
+      landingMode: 'triple',
+      landingCheckoutUrl: 'https://payhip.com/b/ONE',
+      landingSiblings: [
+        { projectId: 'a', checkoutUrl: 'https://payhip.com/b/TWO' },
+        { projectId: 'b', checkoutUrl: 'https://payhip.com/b/THREE' },
+      ],
+      ...over,
+    });
+
+  it('defaults to a single-book page', () => {
+    expect(GenerationOptions.create({}).landingMode).toBe('single');
+    expect(GenerationOptions.create({}).isTripleLanding).toBe(false);
+  });
+
+  it('keeps the mode, siblings and bundle through a round trip', () => {
+    const restored = GenerationOptions.create(
+      triple({ landingBundlePriceCents: 4700, landingBundleCheckoutUrl: 'https://payhip.com/b/SET' }).toJSON(),
+    );
+    expect(restored.landingMode).toBe('triple');
+    expect(restored.landingSiblings).toHaveLength(2);
+    expect(restored.landingBundlePriceCents).toBe(4700);
+    expect(restored.landingBundleCheckoutUrl).toBe('https://payhip.com/b/SET');
+  });
+
+  it('rejects a three-book page that does not have three books', () => {
+    expect(triple({ landingSiblings: [{ projectId: 'a' }] }).landingConfigError()).toContain('exactly 2');
+    expect(triple().landingConfigError()).toBeNull();
+  });
+
+  // A live page with dead buy buttons is the failure this gate exists for.
+  it('names every book still missing a checkout link', () => {
+    expect(triple().missingCheckoutPositions()).toEqual([]);
+    expect(triple({ landingCheckoutUrl: '' }).missingCheckoutPositions()).toEqual([1]);
+    expect(
+      triple({
+        landingSiblings: [{ projectId: 'a' }, { projectId: 'b', checkoutUrl: 'https://payhip.com/b/THREE' }],
+      }).missingCheckoutPositions(),
+    ).toEqual([2]);
+  });
+
+  it('does not let one link stand in for all three', () => {
+    const partial = triple({ landingSiblings: [{ projectId: 'a' }, { projectId: 'b' }] });
+    // The older "any link will do" check passes here — which is exactly why
+    // publishing uses missingCheckoutPositions instead.
+    expect(partial.hasAnyCheckoutUrl).toBe(true);
+    expect(partial.missingCheckoutPositions()).toEqual([2, 3]);
+  });
+
+  it('leaves a single-book page reporting only its own missing link', () => {
+    expect(GenerationOptions.create({ landingPage: true }).missingCheckoutPositions()).toEqual([1]);
+  });
+});

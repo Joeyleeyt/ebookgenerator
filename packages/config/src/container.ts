@@ -47,6 +47,8 @@ import {
   LandingPageHtmlRenderer,
   GeneratedPageAssembler,
   HttpReferencePageFetcher,
+  HttpImageFetcher,
+  PuppeteerReferenceScreenshotter,
   labs69ProxyRotator,
   YouTubeDataApiProvider,
   YouTubeTranscriptProvider,
@@ -113,6 +115,11 @@ export function buildContainer(env: Env = loadEnv()) {
   const landingAssembler = new GeneratedPageAssembler();
   // Reads the reference sales page a book's layout should follow.
   const referencePages = new HttpReferencePageFetcher();
+  // Pulls the YouTube channel avatar in as the landing page's brand mark.
+  const imageFetcher = new HttpImageFetcher();
+  // Screenshots the reference so the layout model can see how it looks, not
+  // just how it is structured.
+  const referenceShots = new PuppeteerReferenceScreenshotter();
   const sitePublisher = new NetlifyDeployer(env.NETLIFY_AUTH_TOKEN ?? '', env.NETLIFY_ACCOUNT_SLUG);
   const youtube = new YouTubeDataApiProvider(env.YOUTUBE_API_KEY);
   const transcripts = new YouTubeTranscriptProvider();
@@ -176,7 +183,9 @@ export function buildContainer(env: Env = loadEnv()) {
       landingRenderer,
       landingAssembler,
       referencePages,
+      referenceShots,
       colorSampler,
+      imageFetcher,
       storage,
       ids,
       clock,

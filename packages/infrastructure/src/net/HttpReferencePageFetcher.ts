@@ -117,7 +117,7 @@ function isPrivateAddress(ip: string): boolean {
   return false;
 }
 
-async function assertPublicUrl(raw: string): Promise<Result<void>> {
+export async function assertPublicUrl(raw: string): Promise<Result<void>> {
   let parsed: URL;
   try {
     parsed = new URL(raw);
