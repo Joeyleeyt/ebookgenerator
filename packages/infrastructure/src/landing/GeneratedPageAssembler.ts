@@ -31,7 +31,7 @@ export class GeneratedPageAssembler implements LandingPageAssembler {
       .map((part, i) => (i === 0 ? part : `${i === 1 ? coverMarkup(primary) : coverCopyMarkup(primary)}${part}`))
       .join('');
 
-    const body = fillPlaceholders(bodyWithCovers, {
+    const body = fillPlaceholders(dropPriceBesideCta(bodyWithCovers), {
       cta: ctaMarkup(primary, model),
       price: priceMarkup(primary, model),
       cover: '',
@@ -85,6 +85,8 @@ export class GeneratedPageAssembler implements LandingPageAssembler {
 ${COMPONENT_CSS}
 /* ── generated layout ─────────────────────────────────────────────────── */
 ${page.css}
+/* ── structural guard ─────────────────────────────────────────────────── */
+${STRUCTURAL_CSS}
 /* ── system behaviour ─────────────────────────────────────────────────── */
 ${REVEAL_CSS}
 </style>
@@ -104,6 +106,38 @@ ${body}
  * bare inline text: the injected markup carries classes the model has never
  * heard of, so unless WE style them, nobody does.
  */
+/**
+ * The geometry of system-rendered components, re-asserted AFTER the model's CSS.
+ *
+ * COMPONENT_CSS deliberately loses to the layout — a generated page should be
+ * able to theme these components rather than wear bolted-on defaults. But
+ * "restyle" and "reflow into something broken" are not the same freedom, and
+ * nothing separated them: the model styles blocks it never sees the markup of,
+ * so a selector that happens to match ours reflows a component it cannot
+ * picture. That shipped one book's block as a wide two-column card and the
+ * next as a column of two-word lines beside a floating cover.
+ *
+ * Only geometry is pinned here. Colour, type, spacing, borders and radius —
+ * everything that makes the page look like its template — stay the model's.
+ */
+const STRUCTURAL_CSS = `
+  /* Every book block is the same shape. These are one render of one loop, so
+     any difference between them came from a selector that caught some and not
+     others. */
+  .book { grid-template-columns: minmax(120px, 180px) minmax(22ch, 1fr); }
+  .book > * { order: 0; grid-column: auto; grid-row: auto; }
+  .book-body { min-width: 0; }
+  @media (max-width: 620px) { .book { grid-template-columns: 1fr; } }
+
+  /* Page-sized images stay page-sized. The contract keeps these out of the top
+     bar, but it can only see the markup ABOVE the first <section> — a header
+     nested inside one slips past it, and then only a cap stands between a
+     portrait and the whole viewport. */
+  .logo { max-width: 72px; max-height: 72px; }
+  .author-photo { max-width: 100%; max-height: min(60vh, 520px); }
+  .cover { max-width: min(280px, 60vw); }
+`;
+
 const COMPONENT_CSS = `
   .cta {
     display: inline-block; background: var(--accent); color: var(--accent-contrast);
@@ -289,6 +323,24 @@ function priceMarkup(p: LandingProduct | undefined, model: LandingPageModel): st
       : '') +
     '</span>'
   );
+}
+
+/**
+ * Drops a {{PRICE}} that sits directly on top of a {{CTA}}.
+ *
+ * The button's label already ends with the price, so the two together render the
+ * amount twice — which is how the order block shipped a large "$10" stacked on a
+ * button reading "Get the Complete 3-Book Set — $10". Only adjacent pairs are
+ * touched: a price elsewhere on the page is the page doing its job, and the
+ * layout is free to put one wherever a buyer needs to see it.
+ */
+function dropPriceBesideCta(bodyHtml: string): string {
+  // Nothing but whitespace and markup may sit between them — anything else means
+  // they belong to different parts of the block and both are wanted.
+  const gap = '(?:\\s|<[^>]*>)*';
+  const price = PLACEHOLDERS.price.replace(/[{}]/g, '\\$&');
+  const cta = PLACEHOLDERS.cta.replace(/[{}]/g, '\\$&');
+  return bodyHtml.replace(new RegExp(`${price}(${gap})${cta}`, 'g'), `$1${PLACEHOLDERS.cta}`);
 }
 
 /** A later cover slot: no data URI of its own; the page script fills it. */

@@ -116,6 +116,8 @@ function buildGenerate(options: {
   renderer?: LandingPageRenderer;
   /** Simulate the completion hitting the output ceiling. */
   truncated?: boolean;
+  /** A previously captured layout for this template, as the cache would hold it. */
+  storedLayout?: { inputHash: string | null };
 }) {
   const project = options.project ?? makeProject();
   const book = makeBook();
@@ -157,7 +159,13 @@ function buildGenerate(options: {
     } as never,
     { listByProject: async () => [] } as never,
     pages,
-    { find: async () => null, save: async () => Result.ok() } as never,
+    {
+      find: async () =>
+        options.storedLayout
+          ? { referenceUrl: 'https://example.com/reference', mode: 'single', css: '', bodyHtml: '<section></section>', slots: [], ...options.storedLayout }
+          : null,
+      save: async () => Result.ok(),
+    } as never,
     {
       generate: async () => {
         aiCalls++;
@@ -407,6 +415,45 @@ describe('GenerateLandingPageUseCase', () => {
     await useCase.execute({ projectId: 'p1' });
     // Shrunk on the way in — the page model never carries the source bytes.
     expect(rendered[0]?.authorPhotoDataUri).toBe(SHRUNK_URI);
+  });
+
+  // The layout cache was keyed on the reference URL alone, so a layout captured
+  // for a one-book page was handed to a three-book page unchanged. The rules
+  // that would have caught it ({{COVER}} capped at 2, {{COVER_STACK}} required)
+  // only run when a layout is derived — so the page shipped the featured book's
+  // cover three times, and no edit to the prompt or the contract could reach it.
+  const TEMPLATE = 'https://example.com/reference';
+  const templated = () => makeProject({ landingTemplateUrl: TEMPLATE });
+  const layoutHash = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({ url: TEMPLATE, mode: 'single', products: 1, photo: false, logo: false, ...over });
+
+  // The reuse-on-match half is covered by the reference-driven suite below,
+  // which has a layout fixture complete enough to actually render.
+  it('refuses a layout captured for a different book count', async () => {
+    const { useCase, pages } = buildGenerate({
+      project: templated(),
+      storedLayout: { inputHash: layoutHash({ products: 3 }) },
+    });
+    await useCase.execute({ projectId: 'p1' });
+    // Falls through to the built-in template, which is correct at any count.
+    expect(pages.current()?.html).toBe('<html>page</html>');
+  });
+
+  it('refuses a layout captured when no author photo existed', async () => {
+    const { useCase, pages } = buildGenerate({
+      project: makeProject({ landingTemplateUrl: TEMPLATE, landingAuthorPhotoPath: 'p1/landing/author.jpg' }),
+      storedLayout: { inputHash: layoutHash() },
+    });
+    await useCase.execute({ projectId: 'p1' });
+    expect(pages.current()?.html).toBe('<html>page</html>');
+  });
+
+  // Everything cached before the hash was checked is exactly the population that
+  // may carry these defects, so it must not be trusted.
+  it('treats a layout stored without a hash as stale', async () => {
+    const { useCase, pages } = buildGenerate({ project: templated(), storedLayout: { inputHash: null } });
+    await useCase.execute({ projectId: 'p1' });
+    expect(pages.current()?.html).toBe('<html>page</html>');
   });
 
   // The page carries its images inside its own HTML, and that HTML is one
@@ -782,7 +829,15 @@ describe('GenerateLandingPageUseCase — reference-driven layout', () => {
           '<section data-section="hero"><h1>{{COPY:hero.headline}}</h1>{{COVER}}{{PRICE}}{{CTA_BUTTON}}</section>' +
           '<footer>{{FOOTER_LEGAL}}</footer>',
         slots: [{ key: 'hero.headline', purpose: 'Headline', maxChars: 120 }],
-        inputHash: 'h',
+        // Must be the hash of the inputs this generation runs with; a layout
+        // captured under any other is rebuilt rather than reused.
+        inputHash: JSON.stringify({
+          url: 'https://eliasyoder.com/',
+          mode: 'single',
+          products: 1,
+          photo: false,
+          logo: false,
+        }),
       },
     });
 

@@ -238,7 +238,7 @@ function previewModel(): Parameters<LandingPageRenderer['render']>[0] {
     rating: null,
     valueStack: [],
     costComparison: null,
-    paymentMethods: ['Visa', 'Mastercard'],
+    paymentMethods: [],
     edition: 'MMXXVI · No. I',
   };
 }
@@ -658,7 +658,13 @@ export class GenerateLandingPageUseCase {
       rating: null,
       valueStack: [],
       costComparison: null,
-      paymentMethods: ['Visa', 'Mastercard', 'PayPal', 'Apple Pay'],
+      // Empty for the same reason as the four fields above it, which it used to
+      // contradict: nothing in the system knows what the seller's checkout
+      // accepts. Naming four card brands under a buy button is a claim about
+      // someone else's payment processor, and a buyer who picks the page's word
+      // over their own store's finds out at the worst moment. Renders nothing
+      // while empty; both renderers already omit the row.
+      paymentMethods: [],
       edition: `${romanYear(this.clock.now().getFullYear())} · No. I`,
     };
 
@@ -705,11 +711,41 @@ export class GenerateLandingPageUseCase {
     hasLogo: boolean;
     rebuild: boolean;
   }): Promise<StoredLandingLayout | null> {
+    // The inputs the LAYOUT depends on. Not the book — two books on the same
+    // template share a layout, which is the entire point of the cache — but the
+    // things the contract branches on when the layout is validated.
+    const inputHash = this.hasher.hash({
+      url: input.referenceUrl,
+      mode: input.mode,
+      products: input.productCount,
+      photo: input.hasAuthorPhoto,
+      logo: input.hasLogo,
+    });
+
+    // Reuse only a layout captured under the SAME inputs.
+    //
+    // Keying on the URL alone silently reused a one-book layout for a three-book
+    // page, and the rules that would have caught it are conditional on exactly
+    // these inputs — {{COVER}} is capped at 2 and {{COVER_STACK}} is required
+    // only when productCount > 1, and {{AUTHOR_PHOTO}} is only placeable when a
+    // photo exists. Those checks run when a layout is DERIVED, so a layout
+    // captured under different inputs was never checked against them: the page
+    // came back showing the featured book's cover three times, and the author
+    // portrait in the top bar. This mismatch is also why edits to the prompt or
+    // the contract appeared to do nothing — a cached layout returns before
+    // either one is reached.
+    //
+    // A null hash is a layout stored before this check existed; treat it as
+    // stale, since it is exactly the population that may carry those defects.
     if (!input.rebuild) {
       const stored = await this.layouts.find(input.referenceUrl, input.mode);
       // The whole point: every book after the first pays nothing for layout.
-      if (stored) return stored;
+      if (stored && stored.inputHash === inputHash) return stored;
     }
+    // A mismatched layout is not reused even as a fallback. It was validated
+    // against a different product count, so it is the specific thing that
+    // renders one cover three times; the built-in template is plainer but
+    // correct at any count, which is the better of the two failures.
     if (!input.reference) return null; // nothing to copy from
 
     const derived = await this.deriveLayout(input);
@@ -726,13 +762,7 @@ export class GenerateLandingPageUseCase {
       css: fontCss + derived.css,
       bodyHtml: derived.bodyHtml,
       slots: derived.slots ?? [],
-      inputHash: this.hasher.hash({
-        url: input.referenceUrl,
-        mode: input.mode,
-        products: input.productCount,
-        photo: input.hasAuthorPhoto,
-        logo: input.hasLogo,
-      }),
+      inputHash,
     };
     // A store failure costs the cache, not the page — this generation already
     // has its layout in hand.

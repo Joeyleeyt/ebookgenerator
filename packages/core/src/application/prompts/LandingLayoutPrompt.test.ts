@@ -145,6 +145,26 @@ describe('LandingLayoutPrompt', () => {
     expect(text).not.toContain('The Mechanic Bible');
   });
 
+  // The offer grid was the only system-rendered block whose classes the model
+  // was given. It styled that one correctly and the book breakdown blind, which
+  // is how one book rendered as a wide card and the next as a squeezed column.
+  it('shows the markup the book breakdown expands into', () => {
+    const { system } = LandingLayoutPrompt.build({ ...base, productCount: 3 });
+    for (const cls of ['.books', '.book', '.book-cover', '.book-body', '.book-index']) {
+      expect(system, `${cls} not disclosed`).toContain(cls);
+    }
+  });
+
+  it('forbids positional selectors on the repeated book blocks', () => {
+    const { system } = LandingLayoutPrompt.build({ ...base, productCount: 3 });
+    expect(system).toContain(':nth-child');
+  });
+
+  it('shows the markup the cover stack expands into', () => {
+    const { system } = LandingLayoutPrompt.build({ ...base, productCount: 3 });
+    expect(system).toContain('cover-stack-item');
+  });
+
   // A layout with one book's words baked in would print that book's headline
   // on every other book that reuses the template.
   it('demands copy slots rather than prose', () => {

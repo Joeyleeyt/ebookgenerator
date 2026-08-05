@@ -147,6 +147,73 @@ describe('GeneratedPageAssembler — per-book elements', () => {
     for (let i = 1; i <= 3; i++) expect(html).toContain(`https://example.com/book-${i}`);
   });
 
+  // The order block shipped a large "$10" stacked directly on a button already
+  // labelled "… — $10".
+  it('drops a price that sits directly on top of a buy button', () => {
+    const html = assemble('<section>{{PRICE}}{{CTA_BUTTON}}</section>', [product({ priceCents: 1000 })]);
+    expect(html).not.toContain('class="price-row"');
+    expect(html).toContain('$10');
+  });
+
+  it('still drops it through the markup a layout wraps them in', () => {
+    const html = assemble('<section><p>{{PRICE}}</p>\n  <div>{{CTA_BUTTON}}</div></section>', [product({ priceCents: 1000 })]);
+    expect(html).not.toContain('class="price-row"');
+  });
+
+  // Only the adjacent pair is redundant; a price elsewhere is the page working.
+  it('keeps a price that stands on its own', () => {
+    const html = assemble('<section>{{PRICE}}<p>Some copy</p>{{CTA_BUTTON}}</section>', [product({ priceCents: 1000 })]);
+    expect(html).toContain('class="price-row"');
+  });
+
+  it('renders no payment marks when none are supplied', () => {
+    const html = assemble('<section>{{PAYMENT_MARKS}}</section>', [product()]);
+    expect(html).not.toContain('class="pay"');
+  });
+
+  // The model styles blocks it never sees the markup of, so a selector that
+  // happens to catch some .book elements and not others reflowed one book into a
+  // wide card and the next into a squeezed column beside a floating cover.
+  describe('structural guard', () => {
+    const withCss = (css: string) =>
+      new GeneratedPageAssembler().assemble({
+        page: { css, bodyHtml: '<section>{{BOOK_BREAKDOWN}}</section>' },
+        model: model(THREE),
+      });
+
+    const guardIndex = (html: string) => html.indexOf('structural guard');
+
+    it('re-asserts book geometry after the layout stylesheet', () => {
+      const html = withCss('.book { grid-template-columns: 1fr 1fr; }');
+      const modelRule = html.indexOf('grid-template-columns: 1fr 1fr');
+      expect(modelRule).toBeGreaterThan(-1); // the model keeps its say on everything else
+      // Later in the cascade wins, so ours must come after theirs.
+      expect(guardIndex(html)).toBeGreaterThan(modelRule);
+      expect(html.slice(guardIndex(html))).toContain('minmax(120px, 180px) minmax(22ch, 1fr)');
+    });
+
+    it('undoes a rule that reorders one block but not the others', () => {
+      const guard = withCss('.book:nth-child(even) > * { order: 2; }').slice(guardIndex(withCss('')));
+      expect(guard).toContain('order: 0');
+      expect(guard).toContain('grid-column: auto');
+    });
+
+    it('caps page-sized images the top-bar check cannot see', () => {
+      const guard = withCss('.author-photo { max-height: none; }').slice(guardIndex(withCss('')));
+      expect(guard).toContain('.author-photo');
+      expect(guard).toContain('min(60vh, 520px)');
+      expect(guard).toContain('.logo');
+    });
+
+    // Colour and type are what make the page look like its template.
+    it('leaves everything but geometry to the model', () => {
+      const guard = withCss('').slice(guardIndex(withCss('')));
+      for (const prop of ['color:', 'background:', 'font-family', 'font-size']) {
+        expect(guard, `guard should not pin ${prop}`).not.toContain(prop);
+      }
+    });
+  });
+
   it('falls back to a typographic tile when a book has no cover', () => {
     const html = assemble('<section>{{BOOK_BREAKDOWN}}</section>', [product({ title: 'Coverless', coverDataUri: null })]);
     expect(html).toContain('cover-fallback');
