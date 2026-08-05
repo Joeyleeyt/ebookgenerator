@@ -384,7 +384,18 @@ export function buildWorkers(connection: Redis, container: Container): Worker[] 
           container.logger.info('🛒 landing page draft ready', {
             projectId: p.projectId,
             layout: generated.value.layout ?? 'builtin',
+            // Screenshots are what carry the reference's spacing and rhythm.
+            // A run with 0 of them worked from markup alone and will look
+            // measurably less like the template — invisible without this.
+            reference: generated.value.referenceUrl ?? 'none',
+            screenshots: generated.value.screenshots ?? 0,
           });
+          if (generated.value.referenceNote) {
+            container.logger.warn('reference was degraded — layout fidelity will suffer', {
+              projectId: p.projectId,
+              detail: generated.value.referenceNote,
+            });
+          }
           // A fallback is invisible on the page itself — it just looks plainer
           // than the reference. Put the exact rejections in the log so a
           // 'builtin' result is diagnosable instead of a mystery.

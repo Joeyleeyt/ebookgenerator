@@ -40,6 +40,7 @@ export const GET = handle(async (_req: Request, { params }: { params: { id: stri
       })),
       bundlePriceCents: project.options.landingBundlePriceCents ?? null,
       bundleCheckoutUrl: project.options.landingBundleCheckoutUrl ?? '',
+      authorPhotoPath: project.options.landingAuthorPhotoPath ?? '',
     },
     page: page
       ? {

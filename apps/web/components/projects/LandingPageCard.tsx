@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ExternalLink, Eye, Loader2, RotateCcw, Rocket, Store } from 'lucide-react';
+import { ExternalLink, Eye, Loader2, RotateCcw, Rocket, Store, Upload } from 'lucide-react';
 import { Card } from '../ui/card.js';
 import { Button } from '../ui/button.js';
 import { Badge } from '../ui/badge.js';
@@ -30,6 +30,8 @@ interface Payload {
     siblings: SiblingSetting[];
     bundlePriceCents: number | null;
     bundleCheckoutUrl: string;
+    /** Storage path of the uploaded author photo, or '' when there is none. */
+    authorPhotoPath: string;
   };
   page: { state: State; url: string | null; error: string | null; hasDraft: boolean; updatedAt: string } | null;
   canPublish: boolean;
@@ -98,6 +100,7 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
   const [bundlePrice, setBundlePrice] = useState('');
   const [bundleUrl, setBundleUrl] = useState('');
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -269,6 +272,37 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
     setProblem(null);
     await load({ keepEdits: true });
     return true;
+  }
+
+  /**
+   * The author's photograph. Uploaded separately from the settings form because
+   * it is a file, and stored rather than embedded so it survives regeneration.
+   */
+  async function uploadPhoto(file: File) {
+    setUploading(true);
+    setProblem(null);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`/api/projects/${projectId}/landing-page/avatar`, { method: 'POST', body: form });
+      if (!res.ok) {
+        setProblem((await res.json()).error ?? 'Could not upload that image');
+        return;
+      }
+      await load({ keepEdits: true });
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removePhoto() {
+    setUploading(true);
+    try {
+      await fetch(`/api/projects/${projectId}/landing-page/avatar`, { method: 'DELETE' });
+      await load({ keepEdits: true });
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function run(action: 'generate' | 'publish') {
@@ -472,6 +506,44 @@ export function LandingPageCard({ projectId, projectCompleted }: { projectId: st
             </p>
           </div>
         )}
+
+        {/* Optional. The reference pages put a real portrait in the hero; with
+            no photo the layout falls back to the cover. */}
+        <div>
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">
+            Author photo <span className="font-normal">(optional)</span>
+          </span>
+          <div className="flex items-center gap-3">
+            <label
+              className={`inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-border bg-canvas px-3 text-sm text-muted-foreground hover:border-primary/40 ${
+                uploading ? 'pointer-events-none opacity-60' : ''
+              }`}
+            >
+              {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+              {data?.settings.authorPhotoPath ? 'Replace photo' : 'Upload photo'}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  // Cleared so picking the same file twice still fires onChange.
+                  e.target.value = '';
+                  if (file) void uploadPhoto(file);
+                }}
+              />
+            </label>
+            {data?.settings.authorPhotoPath && (
+              <Button variant="ghost" size="sm" onClick={() => void removePhoto()} disabled={uploading}>
+                Remove
+              </Button>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            A photo of the author, used in the hero and beside the bio. PNG, JPEG or WebP, up to 5MB. Your channel
+            avatar is used as the small logo either way.
+          </p>
+        </div>
 
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-muted-foreground">

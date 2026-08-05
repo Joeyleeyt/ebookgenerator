@@ -366,6 +366,22 @@ describe('GenerateLandingPageUseCase', () => {
     expect(rendered[0]?.products[0]?.title).toBe('The Mechanic Bible');
   });
 
+  // Without this the layout has no image but the cover, which is why generated
+  // heroes showed the book where the reference shows a face.
+  it('puts an uploaded author photo into the page model', async () => {
+    const { useCase, rendered } = buildGenerate({
+      project: makeProject({ landingAuthorPhotoPath: 'p1/landing/author.jpg' }),
+    });
+    await useCase.execute({ projectId: 'p1' });
+    expect(rendered[0]?.authorPhotoDataUri).toBe('data:image/png;base64,AQID');
+  });
+
+  it('leaves the portrait absent when nothing was uploaded', async () => {
+    const { useCase, rendered } = buildGenerate({});
+    await useCase.execute({ projectId: 'p1' });
+    expect(rendered[0]?.authorPhotoDataUri).toBeNull();
+  });
+
   it('never invents testimonials', async () => {
     const { useCase, rendered } = buildGenerate({});
     await useCase.execute({ projectId: 'p1' });

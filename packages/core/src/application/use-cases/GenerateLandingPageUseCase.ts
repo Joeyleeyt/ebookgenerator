@@ -63,6 +63,37 @@ function compactCount(n: number): string {
   return `${Math.round(n / 1000)}K`;
 }
 
+/**
+ * The reference's structure as headings plus a sample of what sits under each.
+ *
+ * The heading alone says too little — "The Math" or "Choose Your Level" does not
+ * tell the copywriter what belongs there. The text beneath it does, which is why
+ * each entry carries an excerpt: the copy call is being asked to cover the same
+ * GROUND for our book, not to reproduce the words.
+ *
+ * Top-level headings only. A reference's h3s are usually the items inside a
+ * section (individual cards, individual FAQs), and treating those as sections
+ * would produce dozens of one-line stubs.
+ */
+function outlineOf(reference: ReferencePage): Array<{ heading: string; excerpt: string }> {
+  const structural = reference.headings.filter((h) => h.level <= 2);
+  const headings = structural.length >= 3 ? structural : reference.headings;
+  const text = reference.text;
+
+  return headings.slice(0, 14).map((h, i) => {
+    const start = text.indexOf(h.text);
+    if (start === -1) return { heading: h.text, excerpt: '(no visible text captured)' };
+    const after = start + h.text.length;
+    // Up to the next heading, so an excerpt never bleeds into the following
+    // section and mislabels what this one is for.
+    const nextHeading = headings[i + 1]?.text;
+    const nextAt = nextHeading ? text.indexOf(nextHeading, after) : -1;
+    const end = nextAt === -1 ? after + 320 : Math.min(nextAt, after + 320);
+    const excerpt = text.slice(after, end).trim();
+    return { heading: h.text, excerpt: excerpt || '(heading only)' };
+  });
+}
+
 /** Roman numeral year for the footer's edition line, e.g. 2026 → "MMXXVI". */
 function romanYear(year: number): string {
   const table: Array<[number, string]> = [
@@ -108,6 +139,32 @@ const CopySchema = z.object({
   closingHeading: z.string(),
   closingBody: z.string(),
   fontFamily: z.enum(['serif', 'sans']).default('sans'),
+  // One entry per reference section, so the page can follow the whole template
+  // rather than only the parts the fixed fields above happen to cover.
+  templateSections: z
+    .array(
+      z.object({
+        heading: z.string(),
+        eyebrow: z.string().default(''),
+        intro: z.string().default(''),
+        kind: z.enum(['prose', 'cards', 'list', 'steps', 'comparison', 'table']).default('prose'),
+        items: z.array(z.object({ title: z.string(), body: z.string() })).default([]),
+        table: z
+          .object({
+            leftHeading: z.string(),
+            rightHeading: z.string(),
+            rows: z.array(z.object({ label: z.string(), left: z.string(), right: z.string() })),
+            leftTotal: z.string().default(''),
+            rightTotal: z.string().default(''),
+            // Required by the schema, not optional: a figure table with no
+            // stated origin is the riskiest thing that can go on this page.
+            source: z.string(),
+          })
+          .nullable()
+          .default(null),
+      }),
+    )
+    .default([]),
 });
 
 export interface GenerateLandingPageInput {
@@ -147,7 +204,19 @@ export class GenerateLandingPageUseCase {
 
   async execute(
     input: GenerateLandingPageInput,
-  ): Promise<Result<{ regenerated: boolean; layout?: 'generated' | 'builtin'; layoutFailure?: string[] }>> {
+  ): Promise<
+    Result<{
+      regenerated: boolean;
+      layout?: 'generated' | 'builtin';
+      layoutFailure?: string[];
+      /** The reference actually used, after mode routing. */
+      referenceUrl?: string | null;
+      /** How many reference screenshots reached the layout call. 0 = markup only. */
+      screenshots?: number;
+      /** Why the reference is thinner than expected, when it is. */
+      referenceNote?: string;
+    }>
+  > {
     const projectId = ProjectId.from(input.projectId);
     const project = await this.projects.findById(projectId);
     if (!project) return Result.fail('Project not found');
@@ -213,14 +282,22 @@ export class GenerateLandingPageUseCase {
     // be down, slow or blocking us. A book still gets a landing page.
     let reference: ReferencePage | null = null;
     let referenceShots: ReferenceShot[] = [];
+    // Why the reference ended up as it did. Both steps degrade silently by
+    // design, which means without this nobody can tell a high-fidelity run from
+    // one that quietly worked off markup alone — the difference that decides
+    // whether the output is worth showing anyone.
+    let referenceNote: string | undefined;
     if (referenceUrl) {
       const fetched = await this.references.fetch(referenceUrl);
       if (fetched.isOk()) reference = fetched.value;
+      else referenceNote = `reference fetch failed: ${fetched.error}`;
+
       // The screenshots are what carry spacing and visual rhythm; the markup
       // alone only carries structure. Also best-effort — a site that blocks
       // automation costs fidelity, never the page itself.
       const shot = await this.screenshots.capture(referenceUrl);
       if (shot.isOk()) referenceShots = shot.value;
+      else referenceNote = [referenceNote, `screenshots failed: ${shot.error}`].filter(Boolean).join('; ');
     }
 
     // ── palette, from the book's own cover ──
@@ -251,6 +328,9 @@ export class GenerateLandingPageUseCase {
       pageCount,
       tone: project.options.tone,
       hasRealTestimonials: false,
+      ...(reference
+        ? { referenceSections: outlineOf(reference), referenceTitle: reference.title }
+        : {}),
     });
 
     const completion = await this.ai.generate({
@@ -321,6 +401,10 @@ export class GenerateLandingPageUseCase {
     const bundle = this.buildBundle(project.options, products);
     if (bundle) products.push(bundle);
 
+    // The seller's own photograph, if they uploaded one. Best-effort like every
+    // other image: a page is still a page without a portrait.
+    const authorPhoto = await this.loadAuthorPhoto(project.options.landingAuthorPhotoPath);
+
     const pageModel = {
       copy,
       palette,
@@ -346,9 +430,10 @@ export class GenerateLandingPageUseCase {
         subscriberCount: channel?.subscriberCount ?? null,
         guaranteeDays: project.options.landingGuaranteeDays,
       }),
-      // No UI supplies these yet; the layout adapts when they are absent.
+      // Still no UI for a separate hero image; the portrait doubles as one when
+      // the layout wants a photographic hero.
       heroImageDataUri: null,
-      authorPhotoDataUri: null,
+      authorPhotoDataUri: authorPhoto,
       authorCredential: buildCredential(strategy?.author, channel?.title ?? null),
       // The commercial furniture the reference page carries. Every one of these
       // is a factual claim — a real deadline, real reviewers, products that
@@ -379,6 +464,8 @@ export class GenerateLandingPageUseCase {
       productCount: products.length,
       referenceShots,
       otherTitles: products.slice(1).map((p) => p.title),
+      hasAuthorPhoto: authorPhoto !== null,
+      edition: pageModel.edition,
     });
 
     page.setDraft({ copy, palette, html: layout.html, inputHash }, this.clock.now());
@@ -386,6 +473,9 @@ export class GenerateLandingPageUseCase {
     return Result.ok({
       regenerated: true,
       layout: layout.source,
+      referenceUrl,
+      screenshots: referenceShots.length,
+      ...(referenceNote ? { referenceNote } : {}),
       ...(layout.failure ? { layoutFailure: layout.failure } : {}),
     });
   }
@@ -409,6 +499,8 @@ export class GenerateLandingPageUseCase {
     productCount: number;
     referenceShots: ReferenceShot[];
     otherTitles: string[];
+    hasAuthorPhoto: boolean;
+    edition: string | null;
   }): Promise<{ html: string; source: 'generated' | 'builtin'; failure?: string[] }> {
     if (!input.reference) {
       return { html: this.renderer.render(input.pageModel), source: 'builtin' };
@@ -416,7 +508,16 @@ export class GenerateLandingPageUseCase {
 
     // The copy was already written and validated; the layout call may place it
     // but not rewrite it, and this is what proves it didn't.
-    const requiredText = [input.copy.headline, input.copy.subheadline, ...input.copy.faqs.map((f) => f.question)];
+    // Every template section's heading is required verbatim. This is what turns
+    // "build every section the reference has" from an instruction into a
+    // mechanical check: a layout that quietly skipped one fails and gets told
+    // exactly which heading is missing.
+    const requiredText = [
+      input.copy.headline,
+      input.copy.subheadline,
+      ...input.copy.faqs.map((f) => f.question),
+      ...(input.copy.templateSections ?? []).map((s) => s.heading),
+    ];
 
     let repairErrors: string[] | undefined;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -428,6 +529,8 @@ export class GenerateLandingPageUseCase {
         productCount: input.productCount,
         otherTitles: input.otherTitles,
         referenceShots: input.referenceShots,
+        hasAuthorPhoto: input.hasAuthorPhoto,
+        edition: input.edition,
         ...(repairErrors ? { repairErrors } : {}),
       });
 
@@ -579,6 +682,18 @@ export class GenerateLandingPageUseCase {
    * The channel's avatar, used as the page's brand mark. Strictly best-effort,
    * like the cover: a dead avatar URL must never cost the seller their page.
    */
+  /**
+   * The seller's uploaded author portrait. Optional by design and never
+   * substituted with the channel avatar: an avatar is usually a logo or a small
+   * crop, and enlarging it into the hero portrait the reference pages use looks
+   * worse than showing the cover there.
+   */
+  private async loadAuthorPhoto(path: string | undefined): Promise<string | null> {
+    if (!path) return null;
+    const dataUri = await this.storage.getDataUri(EXPORTS_BUCKET, path);
+    return dataUri.isOk() ? dataUri.value : null;
+  }
+
   private async loadLogo(thumbnailUrl: string | null): Promise<string | null> {
     if (!thumbnailUrl) return null;
     const fetched = await this.images.fetchDataUri(thumbnailUrl);

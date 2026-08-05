@@ -40,6 +40,7 @@ interface ProjectRow {
     landingSiblings?: Array<{ projectId: string; priceCents?: number; checkoutUrl?: string }>;
     landingBundlePriceCents?: number;
     landingBundleCheckoutUrl?: string;
+    landingAuthorPhotoPath?: string;
   };
   pending_counts: Record<string, number>;
   version: number;
@@ -94,6 +95,9 @@ export class SupabaseProjectRepository implements ProjectRepository {
           : {}),
         ...(project.options.landingBundleCheckoutUrl
           ? { landingBundleCheckoutUrl: project.options.landingBundleCheckoutUrl }
+          : {}),
+        ...(project.options.landingAuthorPhotoPath
+          ? { landingAuthorPhotoPath: project.options.landingAuthorPhotoPath }
           : {}),
       },
       pending_counts: project.pendingCounts,

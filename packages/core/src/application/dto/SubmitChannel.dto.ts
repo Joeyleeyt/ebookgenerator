@@ -32,6 +32,8 @@ const LandingOptionFields = {
     .default([]),
   landingBundlePriceCents: z.number().int().min(0).max(10_000_00).optional(),
   landingBundleCheckoutUrl: z.string().url().max(2000).optional().or(z.literal('')),
+  /** Storage path of an uploaded author photograph; set by the upload route. */
+  landingAuthorPhotoPath: z.string().max(400).optional().or(z.literal('')),
   /** Reference sales page this book's layout should follow. */
   landingTemplateUrl: z.string().url().max(2000).optional().or(z.literal('')),
 };

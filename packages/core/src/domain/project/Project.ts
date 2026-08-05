@@ -137,6 +137,7 @@ export class Project extends AggregateRoot<ProjectProps, ProjectId> {
         | undefined;
       landingBundlePriceCents?: number | undefined;
       landingBundleCheckoutUrl?: string | undefined;
+      landingAuthorPhotoPath?: string | undefined;
     },
     now: Date,
   ): void {

@@ -1,4 +1,9 @@
-import type { LandingPageModel, LandingPageRenderer, LandingProduct } from '@yeg/core';
+import type {
+  LandingPageModel,
+  LandingPageRenderer,
+  LandingProduct,
+  LandingTemplateSection,
+} from '@yeg/core';
 
 /**
  * Renders the sales page. The LAYOUT is fixed and hand-written here — the model
@@ -46,6 +51,10 @@ export class LandingPageHtmlRenderer implements LandingPageRenderer {
     const body = [
       sectionTheBook(model, primary, numeral),
       sectionTheMath(model, numeral),
+      // The reference's own sections, written from this book. They sit after
+      // the book intro and before the fixed blocks so a fallback page still
+      // carries the template's material rather than dropping it silently.
+      ...(model.copy.templateSections ?? []).map((s) => templateSection(s, numeral)),
       sectionWhatsInside(model, primary, numeral),
       sectionReaderResults(model, numeral),
       sectionAuthors(model),
@@ -215,6 +224,24 @@ ${primary?.coverDataUri ? `<meta property="og:image" content="${esc(primary.cove
   .offer-buy { margin-top: auto; text-align: center; }
   .offer-buy .cta { width: 100%; padding: 13px 18px; font-size: .95rem; }
   .offer-save { font-size: .78rem; font-weight: 700; color: var(--accent); margin: 0 0 10px; }
+
+  /* ── sections copied from the reference's structure ───────────────────── */
+  .tmpl-cards { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+  .tmpl-card { padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+  .tmpl-card h3, .tmpl-compare h3, .tmpl-steps h3 { margin: 0 0 .35em; font-size: 1.02rem; color: var(--heading); }
+  .tmpl-card p, .tmpl-compare p, .tmpl-steps p { margin: 0; font-size: .93rem; color: var(--muted); }
+  .tmpl-compare { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+  .tmpl-compare > div { padding: 18px 20px; border-left: 2px solid var(--accent); background: var(--surface); }
+  .tmpl-steps { list-style: decimal; padding-left: 1.3em; display: grid; gap: 16px; }
+  /* Wide tables scroll inside their own container rather than the page. */
+  .tmpl-table-wrap { overflow-x: auto; }
+  .tmpl-table { border-collapse: collapse; width: 100%; font-size: .94rem; }
+  .tmpl-table th, .tmpl-table td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--border); }
+  .tmpl-table th { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .tmpl-table td:not(:first-child), .tmpl-table th:not(:first-child) { text-align: right; }
+  .tmpl-table tfoot td { font-family: ${fonts.display}; color: var(--heading); border-bottom: 0;
+                         border-top: 2px solid var(--border); }
+  .tmpl-source { margin-top: 10px; font-size: .74rem; color: var(--muted); }
 
   details { border-bottom: 1px solid var(--border); }
   summary { cursor: pointer; padding: 17px 0; font-weight: 700; color: var(--heading);
@@ -552,6 +579,61 @@ function bundleSavings(p: LandingProduct, model: LandingPageModel): string {
   const saved = books.reduce((t, o) => t + (o.priceCents ?? 0), 0) - p.priceCents;
   if (saved <= 0) return '';
   return `<p class="offer-save">Save ${money(saved, model.currency)} vs buying separately</p>`;
+}
+
+/**
+ * One section copied from the reference's structure. Shape follows `kind`, so
+ * the same payload renders a card grid, a numbered method list or a two-column
+ * figure table without the renderer knowing which template it came from.
+ */
+function templateSection(s: LandingTemplateSection, n: () => string): string {
+  if (!s.heading) return '';
+  const body =
+    s.table && s.table.rows.length > 0
+      ? templateTable(s.table)
+      : s.items.length === 0
+        ? ''
+        : s.kind === 'comparison'
+          ? `<div class="tmpl-compare">${s.items
+              .map((i) => `<div><h3>${esc(i.title)}</h3><p>${esc(i.body)}</p></div>`)
+              .join('')}</div>`
+          : s.kind === 'steps'
+            ? `<ol class="tmpl-steps">${s.items
+                .map((i) => `<li><h3>${esc(i.title)}</h3><p>${esc(i.body)}</p></li>`)
+                .join('')}</ol>`
+            : s.kind === 'list'
+              ? `<ul class="checks">${s.items
+                  .map((i) => `<li><strong>${esc(i.title)}</strong> — ${esc(i.body)}</li>`)
+                  .join('')}</ul>`
+              : `<div class="tmpl-cards stagger">${s.items
+                  .map((i) => `<div class="tmpl-card"><h3>${esc(i.title)}</h3><p>${esc(i.body)}</p></div>`)
+                  .join('')}</div>`;
+
+  return `  <section class="reveal">
+    <div class="wrap">
+      <p class="mark">${n()}</p>
+      ${s.eyebrow ? `<p class="eyebrow">${esc(s.eyebrow)}</p>` : ''}
+      <h2>${esc(s.heading)}</h2>
+      ${s.intro ? `<p class="lede">${esc(s.intro)}</p>` : ''}
+      ${body}
+    </div>
+  </section>`;
+}
+
+/** The two-column figure table. The source line is never omitted. */
+function templateTable(t: NonNullable<LandingTemplateSection['table']>): string {
+  return `<div class="tmpl-table-wrap"><table class="tmpl-table">
+        <thead><tr><th></th><th>${esc(t.leftHeading)}</th><th>${esc(t.rightHeading)}</th></tr></thead>
+        <tbody>${t.rows
+          .map((r) => `<tr><td>${esc(r.label)}</td><td>${esc(r.left)}</td><td>${esc(r.right)}</td></tr>`)
+          .join('')}</tbody>
+        ${
+          t.leftTotal || t.rightTotal
+            ? `<tfoot><tr><td>Total</td><td>${esc(t.leftTotal)}</td><td>${esc(t.rightTotal)}</td></tr></tfoot>`
+            : ''
+        }
+      </table></div>
+      <p class="tmpl-source">${esc(t.source)}</p>`;
 }
 
 function sectionFaq(model: LandingPageModel, n: () => string): string {

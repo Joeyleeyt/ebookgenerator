@@ -29,6 +29,44 @@ export interface LandingFaq {
  * field: invented social proof is a fabricated endorsement, so the section is
  * rendered only from real quotes the user supplies, never generated.
  */
+/**
+ * One section of the reference page, rewritten for this book.
+ *
+ * The fixed fields below (hero, bullets, FAQs…) exist because every sales page
+ * has them. This is the other half: whatever sections a PARTICULAR template
+ * happens to have — "Where the money goes", "Choose your level", "The method" —
+ * written from the book's own material so the page can follow the template's
+ * full structure instead of only the parts our schema anticipated.
+ *
+ * Deliberately shape-agnostic: the same payload describes a card grid, a
+ * numbered method list or a two-column figure table, because the whole point is
+ * that we do not know in advance what a template contains.
+ */
+export interface LandingTemplateSection {
+  /** This section's heading, in the book's own terms. */
+  heading: string;
+  /** Small label above the heading, when the reference uses one. */
+  eyebrow: string;
+  /** Lead paragraph beneath the heading. */
+  intro: string;
+  /** How the reference presents this section, so the layout can match it. */
+  kind: 'prose' | 'cards' | 'list' | 'steps' | 'comparison' | 'table';
+  items: Array<{ title: string; body: string }>;
+  /**
+   * A two-column figure table, when the reference runs one (a cost comparison,
+   * a before/after). `source` is required and is normally the book itself —
+   * an unsourced savings figure is the riskiest thing on a page taking money.
+   */
+  table: {
+    leftHeading: string;
+    rightHeading: string;
+    rows: Array<{ label: string; left: string; right: string }>;
+    leftTotal: string;
+    rightTotal: string;
+    source: string;
+  } | null;
+}
+
 export interface LandingCopy {
   /** Problem-led hero headline. */
   headline: string;
@@ -57,6 +95,12 @@ export interface LandingCopy {
   closingBody: string;
   /** Serif suits narrative//lifestyle subjects; sans suits technical ones. */
   fontFamily: 'serif' | 'sans';
+  /**
+   * The reference's own sections, in its order, written from this book. Empty
+   * when there is no reference page — then the fixed fields above carry the
+   * whole page, as they always did.
+   */
+  templateSections: LandingTemplateSection[];
 }
 
 interface LandingPageProps {

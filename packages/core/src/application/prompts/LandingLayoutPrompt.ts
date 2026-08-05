@@ -26,6 +26,14 @@ export const LandingLayoutPrompt = {
      * to copy rather than something to collapse down to one card.
      */
     productCount: number;
+    /**
+     * Whether a real author photograph exists. Told explicitly either way: a
+     * layout that places {{AUTHOR_PHOTO}} when none was uploaded leaves a hole
+     * where the reference has a portrait.
+     */
+    hasAuthorPhoto?: boolean;
+    /** e.g. "MMXXVI · No. I", for a masthead slot the reference has. */
+    edition?: string | null;
     /** The other books on the page, so the copy block can name them. */
     otherTitles?: string[];
     /** Screenshots of the reference, attached to the user message as images. */
@@ -55,6 +63,17 @@ export const LandingLayoutPrompt = {
       '                        directly beneath a buy button; never beside a price',
       `  ${PLACEHOLDERS.testimonials}   reader quotes — may render to nothing, so never`,
       '                        put a heading inside a section that has only this',
+      ...(input.hasAuthorPhoto
+        ? [
+            `  ${PLACEHOLDERS.authorPhoto}   a real photograph of the author — put it where the`,
+            '                        reference puts its portrait (typically the hero, and again',
+            '                        beside the author bio). At most twice.',
+          ]
+        : [
+            `  ${PLACEHOLDERS.authorPhoto}   NOT AVAILABLE for this page — no photo was supplied.`,
+            `                        Do not place it. Where the reference shows a portrait, use`,
+            `                        ${PLACEHOLDERS.cover} or let the text hold the space.`,
+          ]),
       `  ${PLACEHOLDERS.legal}   the footer disclaimer — exactly once, in the footer`,
       '',
       'The substituted markup arrives PRE-STYLED by a system stylesheet loaded before',
@@ -105,12 +124,39 @@ export const LandingLayoutPrompt = {
       '',
       'COPY. The prose below is final and approved. Place it verbatim — do not',
       'rewrite, shorten, extend or "improve" a single sentence, and do not invent',
-      'any new claim, statistic, review, rating or subscriber count. You may choose',
-      'the order of sections and which copy goes where. You MAY wrap words of the',
-      'approved copy in styling tags — e.g. an accent-coloured <span> around a key',
-      'phrase inside the headline, matching the template — as long as the words',
-      'themselves are untouched.',
+      'any new claim, statistic, review, rating or subscriber count. You MAY wrap',
+      'words of the approved copy in styling tags — e.g. an accent-coloured <span>',
+      'around a key phrase inside the headline, matching the template — as long as',
+      'the words themselves are untouched.',
       '',
+      // Section order used to be free here, which directly contradicted the
+      // reference block's "mirror this sequence" and is why generated pages
+      // opened on the problem section where the template opens on the offer.
+      ...(input.reference
+        ? [
+            'SECTION ORDER IS NOT YOURS TO CHOOSE. Follow the reference\'s sequence',
+            'exactly — its Nth section is your Nth section. Never reorder, and never',
+            'promote a later section to the top because it seems stronger.',
+            '',
+            'BUILD EVERY SECTION THE REFERENCE HAS. The approved copy includes a',
+            '"templateSections" array written specifically to fill them, one entry per',
+            'reference section, already in order. Render every entry, giving each the',
+            'same treatment the reference gives that section — its heading, its eyebrow,',
+            'its intro, then its items in the shape named by "kind":',
+            '  prose      — the intro carries it; no list',
+            '  cards      — items as a card grid, matching the reference\'s card design',
+            '  list       — items as a plain list with the reference\'s markers',
+            '  steps      — items numbered, in the reference\'s numbering style',
+            '  comparison — items as two facing columns (before/after, with/without)',
+            '  table      — render "table": rows of label + two values, both column',
+            '               headings, both totals, and the source line beneath in small',
+            '               muted type. The source line is mandatory; never drop it.',
+            'A section whose entry is missing is a hole in the page. The only sections',
+            'you may leave out are ones needing customer reviews, a promotional deadline',
+            'or bonus products — the system renders those, and only when they are real.',
+            '',
+          ]
+        : ['You may choose the order of sections and which copy goes where.', '']),
       'TOP BAR. If the page has a sticky bar, build it like a professional brand',
       'header, not a text row:',
       '  - a single slim row, vertically centered, padding-block 10-12px',
@@ -122,6 +168,20 @@ export const LandingLayoutPrompt = {
       '  - optionally a separate 1-line announcement strip ABOVE it with a short',
       '    plain-text offer line such as "Instant download · 30-day money-back',
       '    guarantee" — never a price, the button already carries the price',
+      '  - if the reference ends its bar with an edition or issue marker, mirror it',
+      '    with the edition line given below, set in the same small letter-spaced caps',
+      '',
+      'DETAIL WORK. These are the touches that separate a copied template from a',
+      'generic page. Apply each ONLY where the reference actually does it:',
+      '  - a drop cap on the opening body paragraph: the first letter enlarged to',
+      '    ~3 lines, float: left, in the accent or heading colour, with the rest of',
+      '    the paragraph flowing around it',
+      '  - a secondary action beside the primary button rendered as an OUTLINED box',
+      '    — same height and padding as the CTA, transparent ground, 1px border,',
+      '    never as bare inline text',
+      '  - the headline set at the reference\'s optical weight and measure: on a',
+      '    two-column hero it should run close to the full width of its column',
+      '    rather than sitting small inside it',
       '',
       'SCROLL ANIMATION. The system animates the page as the reader scrolls: every',
       '<section> fades and rises when it enters the viewport, automatically. Add the',
@@ -142,6 +202,21 @@ export const LandingLayoutPrompt = {
       'Keep an image and its caption/text in normal document flow inside their card;',
       'never absolute-position content out of a column. Text columns need a sane',
       'minimum width (18ch+); if a split cannot hold both sides, stack them.',
+      '',
+      'ONE COLUMN PER SECTION. Every block inside a section — eyebrow, heading,',
+      'body, card grid, table, button — shares ONE centred content column and ONE',
+      'left edge. A heading indented further than the grid beneath it reads as a',
+      'broken page, so set the measure once on a section wrapper and let everything',
+      'inherit it rather than giving blocks their own widths or padding.',
+      'A decorative section numeral ("I.", "01") hangs in the column\'s left margin',
+      'and does NOT get a grid column of its own — a numeral with an empty column',
+      'beside it is the single most common way this goes wrong.',
+      '',
+      'CONSISTENT SETS. Items that form one set are typeset identically: every',
+      'figure in a stat row shares one face, size, weight and colour treatment, as',
+      'do every card title, every FAQ question and every price. Vary them only where',
+      'the reference visibly varies them. One stat in italic serif beside another in',
+      'plain sans looks like a mistake, because it is.',
       '',
       'RESPONSIVE. Mobile first; the page must not scroll sideways at 360px. Any',
       'table or wide block gets its own overflow-x: auto container.',
@@ -249,6 +324,7 @@ export const LandingLayoutPrompt = {
       input.productCount > 1 ? '=== THE FEATURED BOOK ===' : '=== THE BOOK ===',
       `Title: ${input.bookTitle}`,
       input.pageCount ? `Length: ${input.pageCount} pages` : '',
+      input.edition ? `Edition line (for a masthead or top-bar slot): ${input.edition}` : '',
       // Named only so the layout reads coherently around the grid. The cards
       // themselves are system-rendered; the model never writes these titles.
       ...(input.otherTitles && input.otherTitles.length > 0
@@ -262,6 +338,11 @@ export const LandingLayoutPrompt = {
         : []),
       '',
       '=== APPROVED COPY — place verbatim ===',
+      // templateSections is the bulk of a template-driven page, so it is called
+      // out rather than left to be noticed inside a large JSON blob.
+      input.copy.templateSections?.length
+        ? `(templateSections has ${input.copy.templateSections.length} entries — render every one, in order.)`
+        : '',
       JSON.stringify(input.copy, null, 2),
     ]
       .filter(Boolean)

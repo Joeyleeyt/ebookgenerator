@@ -42,6 +42,7 @@ export class GeneratedPageAssembler implements LandingPageAssembler {
       legal: legalMarkup(model),
       logo: logoMarkup(model),
       offerGrid: offerGridMarkup(model),
+      authorPhoto: authorPhotoMarkup(model),
     });
 
     return `<!doctype html>
@@ -190,6 +191,11 @@ const COMPONENT_CSS = `
   .offer-save { font-size: .78rem; font-weight: 700; color: var(--accent); margin: 0; }
 
   .logo { height: 44px; width: 44px; border-radius: 50%; object-fit: cover; }
+
+  /* Sized to the slot it lands in rather than fixed: the reference pages use
+     the same portrait large in the hero and small beside the author bio. */
+  .author-photo { display: block; width: 100%; max-width: 460px; aspect-ratio: 4/5;
+                  object-fit: cover; border-radius: 6px; }
 `;
 
 // ── placeholder markup ───────────────────────────────────────────────────────
@@ -284,6 +290,16 @@ function testimonialsMarkup(model: LandingPageModel): string {
 function logoMarkup(model: LandingPageModel): string {
   if (!model.logoDataUri) return '';
   return `<img class="logo" src="${esc(model.logoDataUri)}" alt="${esc(model.siteName)}">`;
+}
+
+/**
+ * The author's photograph. Optional, and silently absent when the seller has
+ * not uploaded one — which is why the prompt forbids wrapping it in a heading
+ * or frame that would otherwise be left standing empty.
+ */
+function authorPhotoMarkup(model: LandingPageModel): string {
+  if (!model.authorPhotoDataUri) return '';
+  return `<img class="author-photo" src="${esc(model.authorPhotoDataUri)}" alt="${esc(model.author ?? 'The author')}">`;
 }
 
 /**

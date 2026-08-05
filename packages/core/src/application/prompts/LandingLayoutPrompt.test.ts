@@ -23,6 +23,7 @@ const copy = {
   closingHeading: 'Fix it yourself',
   closingBody: 'One repair pays for the book.',
   fontFamily: 'sans',
+  templateSections: [],
 } as LandingCopy;
 
 const base = { reference: null, copy, bookTitle: 'The Mechanic Bible', pageCount: 120 };
@@ -63,6 +64,55 @@ describe('LandingLayoutPrompt', () => {
     // A framing line, then both images, then the brief — the model should see
     // what the page looks like before reading what it is made of.
     expect(blocks.map((b) => b.type)).toEqual(['text', 'image', 'image', 'text']);
+  });
+
+  // Section order was previously free here AND "mirror this sequence" in the
+  // reference block — the contradiction that opened generated pages on the
+  // problem section where the template opens on the offer.
+  it('does not let the model reorder sections when it has a reference', () => {
+    const reference = {
+      url: 'https://eliasyoder.com',
+      title: 'An Almanac',
+      headings: [{ level: 1, text: 'The old methods' }],
+      text: 'body text',
+      markup: '<main><h1>The old methods</h1></main>',
+      style: {
+        serifHeadings: true,
+        headingFont: null,
+        grounds: [],
+        accent: null,
+        numberedSections: true,
+        imageDensity: 2,
+        measurePx: 1080,
+      },
+    };
+    const { system } = LandingLayoutPrompt.build({ ...base, reference, productCount: 1 });
+
+    expect(system).toContain('SECTION ORDER IS NOT YOURS TO CHOOSE');
+    expect(system).not.toContain('You may choose the order of sections');
+  });
+
+  it('keeps the freedom when there is no reference to follow', () => {
+    const { system } = LandingLayoutPrompt.build({ ...base, productCount: 1 });
+    expect(system).toContain('You may choose the order of sections');
+    expect(system).not.toContain('SECTION ORDER IS NOT YOURS TO CHOOSE');
+  });
+
+  // Placing the portrait placeholder with no photo uploaded leaves a hole
+  // exactly where the reference has a face.
+  it('offers the author photo only when one was actually uploaded', () => {
+    const withPhoto = LandingLayoutPrompt.build({ ...base, productCount: 1, hasAuthorPhoto: true }).system;
+    expect(withPhoto).toContain('a real photograph of the author');
+    expect(withPhoto).not.toContain('NOT AVAILABLE for this page');
+
+    const without = LandingLayoutPrompt.build({ ...base, productCount: 1, hasAuthorPhoto: false }).system;
+    expect(without).toContain('NOT AVAILABLE for this page');
+    expect(without).toContain('Do not place it');
+  });
+
+  it('passes the edition line through for a masthead slot', () => {
+    const { user } = LandingLayoutPrompt.build({ ...base, productCount: 1, edition: 'MMXXVI · No. I' });
+    expect(user as string).toContain('MMXXVI · No. I');
   });
 
   it('names the other books without asking the model to render them', () => {

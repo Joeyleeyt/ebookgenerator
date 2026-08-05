@@ -22,6 +22,7 @@ const copy: LandingCopy = {
   closingHeading: 'Fix it yourself',
   closingBody: 'One repair pays for the book.',
   fontFamily: 'serif',
+  templateSections: [],
 };
 
 function product(overrides: Partial<LandingProduct> = {}): LandingProduct {
@@ -160,6 +161,74 @@ describe('LandingPageHtmlRenderer', () => {
       );
       const fullMarks = [...full.matchAll(/<p class="mark">([IVX]+)<\/p>/g)].map((m) => m[1]);
       expect(fullMarks).toEqual(['I', 'II', 'III', 'IV', 'V', 'VI']);
+    });
+  });
+
+  // The reference's own sections, written from the book. The fallback renderer
+  // must carry them too, or a rejected layout silently loses most of the page.
+  describe('template-driven sections', () => {
+    const withSections = (sections: LandingCopy['templateSections']) =>
+      render(model({ copy: { ...copy, templateSections: sections } }));
+
+    it('renders each section in the order the reference had them', () => {
+      const html = withSections([
+        { heading: 'Where the money goes', eyebrow: 'THE MATH', intro: 'Your bills.', kind: 'prose', items: [], table: null },
+        { heading: 'Choose your level', eyebrow: '', intro: '', kind: 'cards', items: [], table: null },
+      ]);
+      expect(html.indexOf('Where the money goes')).toBeLessThan(html.indexOf('Choose your level'));
+      expect(html).toContain('THE MATH');
+    });
+
+    it('renders a figure table with its source line', () => {
+      const html = withSections([
+        {
+          heading: 'What a shop charges',
+          eyebrow: '',
+          intro: '',
+          kind: 'table',
+          items: [],
+          table: {
+            leftHeading: 'At the shop',
+            rightHeading: 'Doing it yourself',
+            rows: [{ label: 'Diagnostic scan', left: '$150', right: '$22' }],
+            leftTotal: '$150',
+            rightTotal: '$22',
+            source: 'Costs quoted in Chapter 3 of the book.',
+          },
+        },
+      ]);
+      expect(html).toContain('Diagnostic scan');
+      expect(html).toContain('At the shop');
+      // An unsourced savings table is the riskiest thing on a page taking money.
+      expect(html).toContain('Costs quoted in Chapter 3 of the book.');
+    });
+
+    it('gives each kind its own shape', () => {
+      const items = [{ title: 'One', body: 'Body.' }];
+      expect(withSections([{ heading: 'A', eyebrow: '', intro: '', kind: 'steps', items, table: null }])).toContain(
+        'tmpl-steps',
+      );
+      expect(
+        withSections([{ heading: 'B', eyebrow: '', intro: '', kind: 'comparison', items, table: null }]),
+      ).toContain('tmpl-compare');
+      expect(withSections([{ heading: 'C', eyebrow: '', intro: '', kind: 'cards', items, table: null }])).toContain(
+        'tmpl-card',
+      );
+    });
+
+    it('keeps the numbering continuous across them', () => {
+      const html = withSections([
+        { heading: 'Extra one', eyebrow: '', intro: '', kind: 'prose', items: [], table: null },
+      ]);
+      const marks = [...html.matchAll(/<p class="mark">([IVX]+)<\/p>/g)].map((m) => m[1]);
+      expect(marks).toEqual(['I', 'II', 'III', 'IV', 'V']);
+    });
+
+    it('escapes section content like everything else', () => {
+      const html = withSections([
+        { heading: '<script>alert(1)</script>', eyebrow: '', intro: '', kind: 'prose', items: [], table: null },
+      ]);
+      expect(html).not.toContain('<script>alert(1)</script>');
     });
   });
 

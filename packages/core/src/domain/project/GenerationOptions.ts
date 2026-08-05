@@ -160,6 +160,15 @@ interface GenerationOptionsProps {
   landingBundlePriceCents?: number | undefined;
   landingBundleCheckoutUrl?: string | undefined;
   /**
+   * Storage path of a photograph of the author, uploaded by the seller.
+   *
+   * Optional, and deliberately not derived from the YouTube avatar: a channel
+   * avatar is usually a logo or a low-resolution crop, and blowing it up into
+   * the hero portrait the reference pages use looks worse than showing the
+   * cover. The avatar becomes the small round brand mark instead.
+   */
+  landingAuthorPhotoPath?: string | undefined;
+  /**
    * A reference sales page for this book's landing page to follow — the client
    * supplies a different one per book. Its structure and visual treatment are
    * read at generation time and used to steer the layout. Unset falls back to
@@ -216,6 +225,9 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
         : {}),
       ...(props.landingBundleCheckoutUrl?.trim()
         ? { landingBundleCheckoutUrl: props.landingBundleCheckoutUrl.trim() }
+        : {}),
+      ...(props.landingAuthorPhotoPath?.trim()
+        ? { landingAuthorPhotoPath: props.landingAuthorPhotoPath.trim() }
         : {}),
       ...(props.landingTemplateUrl?.trim() ? { landingTemplateUrl: props.landingTemplateUrl.trim() } : {}),
     });
@@ -285,6 +297,9 @@ export class GenerationOptions extends ValueObject<GenerationOptionsProps> {
   }
   get landingBundleCheckoutUrl() {
     return this.props.landingBundleCheckoutUrl;
+  }
+  get landingAuthorPhotoPath() {
+    return this.props.landingAuthorPhotoPath;
   }
   get landingMode(): LandingMode {
     return this.props.landingMode;

@@ -30,6 +30,16 @@ export const PLACEHOLDERS = {
   /** The channel avatar as a small round brand mark. Optional. */
   logo: '{{LOGO}}',
   /**
+   * A photograph of the author, uploaded by the seller. The reference pages put
+   * a real portrait in the hero and again beside the author bio; without this
+   * placeholder a generated layout has no image to place there but the cover,
+   * which is why those pages came back showing the book twice.
+   *
+   * Renders to nothing when no photo was uploaded, so a layout must never put a
+   * heading or frame around it that would be left empty.
+   */
+  authorPhoto: '{{AUTHOR_PHOTO}}',
+  /**
    * The complete offer section — one card per book plus the bundle, each with
    * its OWN price and checkout link. System-rendered: with up to four different
    * buy links on one page, the model never decides which link goes where.
@@ -114,6 +124,11 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   }
   if (occurrences(bodyHtml, PLACEHOLDERS.logo) > 3) {
     errors.push(`${PLACEHOLDERS.logo} may appear at most 3 times.`);
+  }
+  // The hero portrait and the author-bio portrait; more than that and the same
+  // face is repeating down the page.
+  if (occurrences(bodyHtml, PLACEHOLDERS.authorPhoto) > 2) {
+    errors.push(`${PLACEHOLDERS.authorPhoto} may appear at most 2 times.`);
   }
   // Caps sized for template copying — a reference page legitimately repeats its
   // cover and buy button many times. The caps only stop true runaway repetition.
