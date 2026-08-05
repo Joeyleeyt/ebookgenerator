@@ -411,6 +411,19 @@ function coverMarkup(p: LandingProduct | undefined): string {
   return `<span class="cover cover-fallback">${esc(p.title)}</span>`;
 }
 
+/**
+ * The table of contents: what each chapter is called, and how much is in it.
+ *
+ * The chapter's key points are DELIBERATELY not printed. They are the book's
+ * substance — "Buy the $22 Topdon ArtiLink 200", "Disconnect the negative
+ * terminal 45 minutes with the brake pedal held" — and a fourteen-chapter book
+ * put roughly seventy of them on a free public page. That is the product being
+ * given away by the page selling it, and it buried the CTA under a wall of text
+ * the reference template never had.
+ *
+ * The count stays, because "14 chapters, 70 methods" is the persuasive part and
+ * costs the seller nothing.
+ */
 function contentsMarkup(p: LandingProduct | undefined): string {
   const sections = p?.sections ?? [];
   if (sections.length === 0) return '';
@@ -419,8 +432,7 @@ function contentsMarkup(p: LandingProduct | undefined): string {
       (s) =>
         `<div class="contents-item"><h3>${esc(s.title)}</h3>` +
         (s.items.length > 0
-          ? `<p class="contents-count">${s.items.length} ${s.items.length === 1 ? 'method' : 'methods'}</p>` +
-            `<ul>${s.items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>`
+          ? `<p class="contents-count">${s.items.length} ${s.items.length === 1 ? 'method' : 'methods'}</p>`
           : '') +
         '</div>',
     )

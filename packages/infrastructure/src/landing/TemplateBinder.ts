@@ -1,5 +1,6 @@
 import { bindTemplate, Result, type BindValues } from '@yeg/core';
 import { esc } from './shared.js';
+import { DISCLOSURE_CSS } from './restoreDisclosure.js';
 
 /**
  * Assembles a parameterised template into the finished, self-contained page.
@@ -54,7 +55,7 @@ export class TemplateBinder {
       `<meta property="og:title" content="${esc(input.documentTitle)}">` +
       `<meta property="og:description" content="${esc(input.metaDescription)}">` +
       `<meta property="og:type" content="website">` +
-      `<style>\n${input.css}\n${input.themeOverrideCss}${accentCss}</style>`;
+      `<style>\n${input.css}\n${input.themeOverrideCss}${accentCss}${DISCLOSURE_CSS}</style>`;
 
     // The identity cleaning removed, rebuilt for the new product. Injected at
     // the END of <head> so the bundled stylesheet still wins over anything the

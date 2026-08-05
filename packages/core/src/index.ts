@@ -45,6 +45,7 @@ export * from './domain/landing/PlaceholderVocabulary.js';
 export * from './domain/landing/TemplateManifest.js';
 export * from './domain/landing/ThemeAdaptation.js';
 export * from './domain/landing/fontStacks.js';
+export * from './domain/landing/fontFallback.js';
 
 // ── Application: ports ──────────────────────────────────────────────────────
 export * from './application/ports/Clock.js';

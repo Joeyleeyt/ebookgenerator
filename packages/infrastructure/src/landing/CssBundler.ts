@@ -14,6 +14,8 @@
  * the mistake.
  */
 
+import { repairFontStacks, type TypographyTokens } from '@yeg/core';
+
 /** Matches a `url(...)` reference, capturing the quote style and the target. */
 const URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi;
 
@@ -74,10 +76,37 @@ export function rewriteCssUrls(css: string, map: Map<string, string>, baseUrl: s
  * merely not deployed.
  */
 export function stripRemoteRules(css: string): string {
-  return css
+  return stripFontFaces(css)
     .replace(/@import\s+[^;]+;/gi, '')
-    .replace(/@font-face\s*\{[^}]*\}/gi, '')
     .replace(/@charset\s+[^;]+;/gi, '');
+}
+
+/**
+ * Removes `@font-face` blocks by balancing braces rather than by `[^}]*`.
+ *
+ * The naive pattern cannot span a nested `}`, so a face inside `@media` or
+ * `@supports` had its own closing brace consumed and the enclosing at-rule left
+ * orphaned — which silently corrupted every rule after it in the bundle.
+ */
+function stripFontFaces(css: string): string {
+  let out = '';
+  let last = 0;
+  const re = /@font-face\s*\{/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(css))) {
+    let depth = 1;
+    let i = match.index + match[0].length;
+    while (i < css.length && depth > 0) {
+      const ch = css[i];
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+      i++;
+    }
+    out += css.slice(last, match.index);
+    last = i;
+    re.lastIndex = i;
+  }
+  return out + css.slice(last);
 }
 
 /**
@@ -106,6 +135,8 @@ export interface BundleResult {
   breakpoints: number[];
   /** URLs the stylesheet wanted that had no local copy. */
   unresolved: string[];
+  /** Families the page asks for that no embedded face provides. */
+  lostFamilies: string[];
 }
 
 /**
@@ -119,15 +150,31 @@ export function bundleCss(input: {
   assetMap: Map<string, string>;
   /** `@font-face` rules with their payload already inlined as data: URIs. */
   fontFaceCss: string;
+  /** Families those rules provide. Declarations naming anything else fall back. */
+  embeddedFamilies?: string[] | undefined;
+  /** The measured typography, for choosing serif vs sans fallbacks. */
+  typography?: TypographyTokens | undefined;
 }): BundleResult {
   const stripped = stripRemoteRules(input.css);
   const wanted = extractCssUrls(stripped, input.baseUrl);
   const unresolved = wanted.filter((url) => !input.assetMap.has(url));
   const rewritten = rewriteCssUrls(stripped, input.assetMap, input.baseUrl);
 
+  // Repaired AFTER stripping, so the declarations judged are the ones that
+  // actually ship: a face whose @font-face was just removed must now fall back,
+  // and one that embedded must not be touched.
+  const repaired = repairFontStacks({
+    css: rewritten,
+    embeddedFamilies: input.embeddedFamilies ?? [],
+    typography: input.typography ?? EMPTY_TYPOGRAPHY,
+  });
+
   return {
-    css: input.fontFaceCss ? `${input.fontFaceCss}\n${rewritten}` : rewritten,
+    css: input.fontFaceCss ? `${input.fontFaceCss}\n${repaired.css}` : repaired.css,
     breakpoints: breakpointsOf(input.css),
     unresolved,
+    lostFamilies: repaired.lostFamilies,
   };
 }
+
+const EMPTY_TYPOGRAPHY: TypographyTokens = { heading: null, body: null, familiesUsed: [] };

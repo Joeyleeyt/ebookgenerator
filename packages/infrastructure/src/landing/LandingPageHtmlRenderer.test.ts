@@ -314,7 +314,17 @@ describe('LandingPageHtmlRenderer', () => {
     expect(html).toContain('Reading the dashboard');
     expect(html).toContain('2 methods');
     expect(html).toContain('1 method'); // singular, not "1 methods"
-    expect(html).toContain('Amber vs red');
+  });
+
+  // The key points are the book's substance — "Buy the $22 Topdon ArtiLink
+  // 200", "Disconnect the negative terminal 45 minutes with the brake pedal
+  // held". A fourteen-chapter book put roughly seventy of them on a free public
+  // page, which is the product being given away by the page selling it.
+  it('lists the chapters without printing what is in them', () => {
+    const html = render(model());
+    expect(html).not.toContain('Amber vs red');
+    expect(html).not.toContain('When to stop now');
+    expect(html).not.toContain('Parts vs labour');
   });
 
   it('falls back to the model’s bullets when the outline is empty', () => {

@@ -4,6 +4,7 @@ import type {
   RepeaterEntry,
   SectionGeometry,
   ThemeTokens,
+  TypographyTokens,
 } from '../../../domain/landing/TemplateManifest.js';
 
 /**
@@ -98,6 +99,8 @@ export interface CapturedTemplate {
    */
   ctaIds: string[];
   theme: ThemeTokens;
+  /** The typefaces the browser actually resolved, per role. */
+  typography: TypographyTokens;
   sections: SectionGeometry[];
   /** Of the ORIGINAL page — the fidelity target. */
   baselineShots: Shot[];

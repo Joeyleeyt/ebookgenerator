@@ -188,6 +188,116 @@ export const CLEAN = `(function () {
 })()`;
 
 /**
+ * Gives collapsed content back its open/close behaviour, without a script.
+ *
+ * Cleaning removes every `<script>`, which is not negotiable — a cloned page
+ * must not run the template owner's code. But an accordion driven by that
+ * script becomes dead rows: the answers are in the markup, they get filled with
+ * the seller's copy, and no click can ever reveal them. That is a FAQ section
+ * that looks complete and shows nothing, which is exactly what shipped.
+ *
+ * `<details>`/`<summary>` is the one native disclosure primitive. The original
+ * nodes are re-parented rather than rebuilt, so the template's own styling —
+ * the row background, the chevron, the padding — comes along untouched.
+ *
+ * Runs AFTER cleaning, so the scripts whose absence it compensates for are
+ * already gone, and before stamping, so every moved node still gets an id.
+ */
+export const RESTORE_DISCLOSURE = `(function () {
+  const DISCLOSURE = /(accordion|faq|collapse|collapsible|disclosure|toggle)/i;
+  const MENU_LIKE = /(nav|menu|drawer|modal|dialog|popup|overlay|tooltip|dropdown|offcanvas)/i;
+  const nameOf = (el) => String(el.className || '') + ' ' + String(el.id || '');
+
+  const isHidden = (el) => {
+    const style = getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return true;
+    if (el.hasAttribute('hidden')) return true;
+    if (el.getAttribute('aria-hidden') === 'true') return true;
+    if (el.getAttribute('data-state') === 'closed') return true;
+    // A max-height:0 clip is the other common accordion mechanism.
+    return (style.maxHeight === '0px' || parseFloat(style.maxHeight) === 0) && style.overflow !== 'visible';
+  };
+
+  // The template may already do this natively, in which case there is nothing
+  // to repair and touching it would only risk breaking what works.
+  if (document.querySelector('details')) return { restored: 0, native: true };
+
+  let restored = 0;
+  const rows = document.querySelectorAll('div, li, article, section');
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row.isConnected) continue;
+    if (restored >= 40) break;
+
+    // Scoped to regions that name themselves a disclosure — on the row or on an
+    // ancestor, since the item class is often generic ("item", "card") while
+    // the wrapper is "faq-list". A hidden div in the hero is not an accordion.
+    let named = false;
+    for (let n = row; n && n !== document.body; n = n.parentElement) {
+      if (MENU_LIKE.test(nameOf(n))) { named = false; break; }
+      if (DISCLOSURE.test(nameOf(n))) { named = true; break; }
+    }
+    if (!named) continue;
+
+    // A row is a trigger followed by a hidden body. Both must be direct
+    // children, which is what distinguishes a row from the list around it.
+    const kids = Array.prototype.slice.call(row.children);
+    if (kids.length < 2) continue;
+
+    let triggerIdx = -1;
+    for (let k = 0; k < kids.length; k++) {
+      const kid = kids[k];
+      if (isHidden(kid)) continue;
+      if (!(kid.textContent || '').trim()) continue;
+      triggerIdx = k;
+      break;
+    }
+    if (triggerIdx < 0) continue;
+
+    let bodyIdx = -1;
+    for (let k = triggerIdx + 1; k < kids.length; k++) {
+      if (isHidden(kids[k]) && (kids[k].textContent || '').trim()) { bodyIdx = k; break; }
+    }
+    if (bodyIdx < 0) continue;
+
+    const trigger = kids[triggerIdx];
+    const body = kids[bodyIdx];
+
+    // The inline hiding goes with the script that managed it: <details> now
+    // owns the state, and a leftover display:none keeps the answer invisible
+    // even when the row is open.
+    body.removeAttribute('hidden');
+    body.removeAttribute('aria-hidden');
+    if (body.getAttribute('data-state') === 'closed') body.setAttribute('data-state', 'open');
+    if (body.style) {
+      body.style.removeProperty('display');
+      body.style.removeProperty('visibility');
+      body.style.removeProperty('max-height');
+      body.style.removeProperty('overflow');
+    }
+    // A stylesheet rule can re-hide it, which inline styles are needed to beat.
+    if (isHidden(body)) {
+      body.style.setProperty('display', 'block', 'important');
+      body.style.setProperty('visibility', 'visible', 'important');
+      body.style.setProperty('max-height', 'none', 'important');
+    }
+    // aria-expanded on the trigger would now contradict the real state.
+    trigger.removeAttribute('aria-expanded');
+
+    const details = document.createElement('details');
+    details.setAttribute('data-restored', '');
+    const summary = document.createElement('summary');
+    row.insertBefore(details, trigger);
+    summary.appendChild(trigger);
+    details.appendChild(summary);
+    details.appendChild(body);
+    restored++;
+  }
+
+  return { restored: restored, native: false };
+})()`;
+
+/**
  * Stamps every element with a stable address.
  *
  * Monotonic in document order over the cleaned tree, so an id means the same
@@ -246,6 +356,35 @@ const HELPERS = `
     }
     return out.replace(/\\s+/g, ' ').trim();
   };
+  /**
+   * Whether a hidden node is COLLAPSED content rather than a separate UI state.
+   *
+   * The distinction decides whether the text is part of the page. An FAQ answer
+   * in a shut accordion is; a closed mobile menu, a modal and an off-screen
+   * carousel slide are not — the menu duplicates the nav, and inventorying it
+   * gives the annotation model two copies of every link to choose between.
+   *
+   * Recognised by the disclosure patterns the web actually uses: a <details>
+   * that is not open, an aria-expanded/aria-hidden pairing, or a container
+   * whose own name says accordion/faq/collapse. Deliberately narrow — a node
+   * that merely happens to be hidden is still skipped.
+   */
+  const DISCLOSURE = /(accordion|faq|collapse|collapsible|disclosure|expand|toggle|answer)/i;
+  const MENU_LIKE = /(nav|menu|drawer|modal|dialog|popup|overlay|tooltip|dropdown|offcanvas|slide)/i;
+  const isCollapsedContent = (el) => {
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      const name = String(n.className || '') + ' ' + String(n.id || '');
+      // A menu or modal wrapper anywhere above disqualifies it, even if some
+      // inner element is also called "expand".
+      if (MENU_LIKE.test(name)) return false;
+      if (n.tagName === 'DETAILS') return !n.hasAttribute('open');
+      if (n.getAttribute('aria-expanded') === 'false') return true;
+      if (n.getAttribute('aria-hidden') === 'true' && DISCLOSURE.test(name)) return true;
+      if (n.hasAttribute('data-state') && n.getAttribute('data-state') === 'closed') return true;
+      if (DISCLOSURE.test(name)) return true;
+    }
+    return false;
+  };
 `;
 
 /**
@@ -271,7 +410,13 @@ export const INVENTORY = `(function () {
     if (!tplId) continue;
 
     const style = getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden') continue;
+    // Hidden nodes are skipped — a closed mobile menu duplicates the whole nav,
+    // and a modal's copy is not page content — EXCEPT where the hiding is a
+    // collapse. An FAQ answer inside a shut accordion is the page's real
+    // content, and dropping it produced exactly the visible defect: a cloned
+    // page with six question rows and nothing behind any of them, because the
+    // answers were never inventoried, never labelled, and never filled.
+    if ((style.display === 'none' || style.visibility === 'hidden') && !isCollapsedContent(el)) continue;
 
     const rect = el.getBoundingClientRect();
     const isImage = tag === 'img';
@@ -304,14 +449,21 @@ export const INVENTORY = `(function () {
     const section = sectionOf(el);
     if (section) node.sectionId = section;
     if (text && el.children.length > 0) node.hasInlineMarkup = true;
+    // Collapsed content measures 0x0, so the annotation model would otherwise
+    // read it as an empty node. Flagged rather than dropped: an FAQ answer is
+    // the most important text in its section.
+    if (style.display === 'none' || style.visibility === 'hidden') node.collapsed = true;
     out.push(node);
   }
 
   if (out.length <= MAX) return out;
-  // Keep images and links unconditionally — they carry the commerce — then the
-  // longest text nodes, which are the ones that read as content.
-  const priority = out.filter((n) => n.tag === 'img' || n.tag === 'a' || n.tag === 'button');
-  const rest = out.filter((n) => !(n.tag === 'img' || n.tag === 'a' || n.tag === 'button'))
+  // Keep images and links unconditionally — they carry the commerce — plus
+  // collapsed content, which is a whole section's answers and would otherwise
+  // be cut first for having no measured size. Then the longest text nodes,
+  // which are the ones that read as content.
+  const isPriority = (n) => n.tag === 'img' || n.tag === 'a' || n.tag === 'button' || n.collapsed;
+  const priority = out.filter(isPriority);
+  const rest = out.filter((n) => !isPriority(n))
                   .sort((a, b) => (b.chars || 0) - (a.chars || 0))
                   .slice(0, Math.max(0, MAX - priority.length));
   const keep = new Set(priority.concat(rest).map((n) => n.tplId));
@@ -474,6 +626,72 @@ export const MEASURE = `(function () {
   const bodyBg = getComputedStyle(document.body).backgroundColor;
   const isDark = luminance(bodyBg) < 0.4;
 
+  // ── typography, as the browser resolved it ──
+  // Asked of the live page for the same reason the accent is: a stylesheet says
+  // \`font-family: var(--font-display)\`, and only the browser knows that resolves
+  // to DM Serif Display. Reading the declaration would repeat v1's mistake of
+  // calling a serif page sans-serif because the token name contained no "serif".
+  const firstFamily = (value) => {
+    const first = String(value || '').split(',')[0] || '';
+    return first.replace(/["']/g, '').trim();
+  };
+  // A generic keyword means the template never named a real face for this role,
+  // so there is nothing to substitute and no fidelity to lose.
+  const GENERIC = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-[a-z]+|-apple-system|inherit|initial)$/i;
+
+  const roleFamily = (selectors) => {
+    for (const selector of selectors) {
+      const nodes = document.querySelectorAll(selector);
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        const rect = node.getBoundingClientRect();
+        // Skip hidden nodes: a display:none heading in a closed mobile menu
+        // still computes a family, and it is often not the one on the page.
+        if (rect.width < 1 || rect.height < 1) continue;
+        if (!(node.textContent || '').trim()) continue;
+        const style = getComputedStyle(node);
+        const family = firstFamily(style.fontFamily);
+        if (!family || GENERIC.test(family)) continue;
+        return {
+          family: family,
+          stack: style.fontFamily,
+          weight: String(style.fontWeight || '400'),
+          // Whether the RESOLVED face is a serif — measured, not guessed from
+          // the name. Used to pick the fallback bucket when the face is lost.
+          serif: /(^|,)\\s*["']?[^,]*serif/i.test(style.fontFamily) &&
+                 !/sans-serif/i.test(String(style.fontFamily).split(',').pop() || ''),
+        };
+      }
+    }
+    return null;
+  };
+
+  const headingFont = roleFamily(['h1', 'h2', 'header h1', '[class*=title]', '[class*=heading]']);
+  const bodyStyle = getComputedStyle(document.body);
+  const bodyFamily = firstFamily(bodyStyle.fontFamily);
+  const bodyFont = bodyFamily && !GENERIC.test(bodyFamily)
+    ? { family: bodyFamily, stack: bodyStyle.fontFamily, weight: String(bodyStyle.fontWeight || '400'),
+        serif: /serif/i.test(bodyStyle.fontFamily) && !/sans-serif/i.test(bodyStyle.fontFamily) }
+    : roleFamily(['p', 'main p', 'li', 'body *']);
+
+  // Every distinct real family the page paints, so the report can say which
+  // ones were lost rather than only that "typography degraded".
+  const familiesUsed = [];
+  const seenFamily = new Set();
+  const painted = document.querySelectorAll('body *');
+  for (let i = 0; i < painted.length && familiesUsed.length < 12; i++) {
+    const node = painted[i];
+    if (!(node.textContent || '').trim()) continue;
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) continue;
+    const family = firstFamily(getComputedStyle(node).fontFamily);
+    if (!family || GENERIC.test(family)) continue;
+    const key = family.toLowerCase();
+    if (seenFamily.has(key)) continue;
+    seenFamily.add(key);
+    familiesUsed.push(family);
+  }
+
   // ── sections ──
   const sections = [];
   const blocks = document.querySelectorAll('body > *, main > *, body > * > section, section, header, footer');
@@ -519,6 +737,7 @@ export const MEASURE = `(function () {
     accentToken: accentToken,
     isDark: isDark,
     rootTokens: rootTokens,
+    typography: { heading: headingFont, body: bodyFont, familiesUsed: familiesUsed },
     sections: sections,
     contentImages: contentImages,
     title: document.title || '',

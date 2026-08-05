@@ -470,10 +470,13 @@ function sectionWhatsInside(model: LandingPageModel, p: LandingProduct | undefin
           ? `<div class="stagger">
         ${cats
           .map(
-            (c) => `<div class="cat">
+            // Chapter title and how much is in it — NOT the key points
+          // themselves. Those are the book's substance, and printing every one
+          // put the product on the free page selling it. See contentsMarkup in
+          // GeneratedPageAssembler for the same reasoning on the other path.
+          (c) => `<div class="cat">
           <h3>${esc(c.title)}</h3>
-          ${c.items.length > 0 ? `<p class="cat-count">${c.items.length} ${c.items.length === 1 ? 'method' : 'methods'}</p>
-          <ul class="items">${c.items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}
+          ${c.items.length > 0 ? `<p class="cat-count">${c.items.length} ${c.items.length === 1 ? 'method' : 'methods'}</p>` : ''}
         </div>`,
           )
           .join('\n        ')}

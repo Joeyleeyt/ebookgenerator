@@ -142,7 +142,14 @@ export function validateTemplate(input: TemplateValidationInput): Result<void, F
 
 export interface BoundValidationInput {
   html: string;
-  checkoutUrl: string | null;
+  /**
+   * Every checkout URL this page must carry — one per product.
+   *
+   * A list rather than a single link because a multi-book page sells several
+   * products with different links, and a check that only looked at the featured
+   * book's would happily pass a page whose other two buttons go nowhere.
+   */
+  checkoutUrls: string[];
   sourceHost: string;
   /** From the template — how many buy buttons this page must have. */
   expectedCtaCount: number;
@@ -164,17 +171,35 @@ export function validateBoundPage(input: BoundValidationInput): Finding[] {
     findings.push(blocker('RESIDUAL_TOKEN', `${residual[0]} would ship to a buyer as literal braces.`));
   }
 
-  if (input.checkoutUrl) {
-    const hits = occurrences(html, input.checkoutUrl);
-    if (hits === 0) {
-      findings.push(blocker('CHECKOUT_MISSING', 'No buy button on the finished page points at the checkout URL.'));
-    } else if (input.expectedCtaCount > 0 && hits !== input.expectedCtaCount) {
+  const urls = input.checkoutUrls.filter(Boolean);
+  if (urls.length > 0) {
+    const missing = urls.filter((url) => !html.includes(url));
+    if (missing.length === urls.length) {
+      findings.push(blocker('CHECKOUT_MISSING', 'No buy button on the finished page points at a checkout URL.'));
+    } else if (missing.length > 0) {
+      // The specific defect this catches: a three-book page where one card's
+      // link never got bound, so that book has a button a buyer can press and
+      // nothing happens.
       findings.push(
-        warn(
-          'CHECKOUT_COUNT_DRIFT',
-          `The template has ${input.expectedCtaCount} buy buttons but the page carries ${hits} checkout links.`,
+        blocker(
+          'CHECKOUT_INCOMPLETE',
+          `${missing.length} of ${urls.length} products have no buy link on the finished page.`,
         ),
       );
+    }
+
+    // Only meaningful when every button carries the SAME link. On a multi-book
+    // page the count per link is one per card by construction.
+    if (urls.length === 1 && input.expectedCtaCount > 0) {
+      const hits = occurrences(html, urls[0] as string);
+      if (hits !== input.expectedCtaCount) {
+        findings.push(
+          warn(
+            'CHECKOUT_COUNT_DRIFT',
+            `The template has ${input.expectedCtaCount} buy buttons but the page carries ${hits} checkout links.`,
+          ),
+        );
+      }
     }
   }
 

@@ -11,7 +11,12 @@ import {
 } from '../../domain/landing/LandingPage.js';
 import { normalizeBookTitle } from '../../domain/project/GenerationOptions.js';
 import { adaptTheme } from '../../domain/landing/ThemeAdaptation.js';
-import { REQUIRED_PLACEHOLDERS, isCopyKey, splitRepeaterField } from '../../domain/landing/PlaceholderVocabulary.js';
+import {
+  REPEATER_PLACEHOLDERS,
+  REQUIRED_PLACEHOLDERS,
+  isCopyKey,
+  splitRepeaterField,
+} from '../../domain/landing/PlaceholderVocabulary.js';
 import type { Finding, PlaceholderEntry, Rect, StoredLandingTemplate } from '../../domain/landing/TemplateManifest.js';
 import { validateBoundPage } from '../landing/templateContract.js';
 import { TemplateCopyPrompt } from '../prompts/TemplateCopyPrompt.js';
@@ -66,6 +71,23 @@ const CopyResponseSchema = z.object({
 const IMAGE_WIDTHS = { cover: 720, authorPhoto: 400, logo: 240 } as const;
 const IMAGE_QUALITY = 72;
 
+/** One product on the page: a book, or the all-books bundle. */
+interface CloneProduct {
+  /** Position in the offer grid; also names its cover file. */
+  index: number;
+  title: string;
+  subtitle: string;
+  priceCents: number | null;
+  checkoutUrl: string | null;
+  /** Storage path of its cover in the exports bucket. */
+  coverPath: string | null;
+  /** Deployed path once the cover has been re-encoded, e.g. `assets/cover-1.webp`. */
+  coverSitePath: string | null;
+  chapterTitles: string[];
+  kind: 'book' | 'bundle';
+  featured: boolean;
+}
+
 export interface GenerateClonedLandingPageInput {
   projectId: string;
   force?: boolean | undefined;
@@ -112,6 +134,12 @@ export class GenerateClonedLandingPageUseCase {
     const project = await this.projects.findById(projectId);
     if (!project) return Result.fail('Project not found');
     if (!project.options.landingPage) return Result.fail('Landing page is not enabled for this project');
+    // A 3-book page with the wrong number of books selected is a configuration
+    // error. Failing here is deliberate: the alternative is rendering a
+    // one-book page for someone who asked for three, which looks like the
+    // request was ignored rather than like an error.
+    const configError = project.options.landingConfigError();
+    if (configError) return Result.fail(configError);
 
     const templateId = project.options.landingTemplateId;
     if (!templateId) return Result.fail('This project has no template selected');
@@ -156,6 +184,13 @@ export class GenerateClonedLandingPageUseCase {
       // Both the template AND its revision: a re-extraction produces different
       // markup, and serving the cached page would silently ignore it.
       template: `${template.id}:${template.revision}`,
+      // Every sibling's price and link. Without these, changing a sibling's
+      // price would serve the cached page still advertising the old one — the
+      // same reason this book's own price is in the hash.
+      mode: project.options.landingMode,
+      siblings: project.options.landingSiblings,
+      bundlePrice: project.options.landingBundlePriceCents ?? null,
+      bundleCheckout: project.options.landingBundleCheckoutUrl ?? '',
     });
     if (!input.force && existing?.inputHash === inputHash && existing.html) {
       return Result.ok({ regenerated: false, fidelity: existing.fidelity ?? emptyFidelity() });
@@ -216,7 +251,11 @@ export class GenerateClonedLandingPageUseCase {
     // ── STAGE 5: copy ────────────────────────────────────────────────────────
     const copySlots = template.placeholders.filter((p) => isCopyKey(p.placeholder) && !splitRepeaterField(p.placeholder));
     const repeaterBriefs = template.repeaters
-      .filter((r) => r.fields.length > 0)
+      // System-rendered regions are excluded. The offer grid is built from the
+      // product records below — with several different buy links on one page,
+      // the model never decides which link sells which book — and testimonials
+      // render only from real quotes the seller supplied.
+      .filter((r) => r.fields.length > 0 && REPEATER_PLACEHOLDERS[r.key]?.source === 'copy')
       .map((r) => ({
         key: r.key,
         // The template's own count unless its container provably reflows.
@@ -226,6 +265,14 @@ export class GenerateClonedLandingPageUseCase {
           return { name: field, maxChars: entry?.maxChars ?? 120, originalText: entry?.originalText ?? '' };
         }),
       }));
+
+    // The other books on this page, loaded BEFORE the copy is written. A
+    // copywriter given only the featured book's chapters writes about that book
+    // three times over — which is how a "what's inside" section came back as
+    // chapter ranges 1-5, 6-10, 11-14 of one title where the template shows one
+    // block per book.
+    const products = await this.loadProducts({ project, book, strategy, title, projectId: input.projectId });
+    if (products.isFail()) return Result.fail(products.error);
 
     // Audience psychology from phase 6. The landing copy has never seen it —
     // it only ever received the book strategy — and it is the one input that
@@ -248,13 +295,27 @@ export class GenerateClonedLandingPageUseCase {
       audienceObjections: audienceObjections.length > 0 ? audienceObjections : undefined,
       slots: copySlots,
       repeaters: repeaterBriefs,
+      otherBooks: products.value
+        .filter((p) => !p.featured && p.kind === 'book')
+        .map((p) => ({ title: p.title, chapterTitles: p.chapterTitles })),
     });
     if (written.isFail()) return Result.fail(written.error);
 
     // ── images become deployed files, not base64 in the row ──────────────────
+    // Every book gets its OWN cover file. Sharing one between products is how a
+    // page selling three books came back showing the first book three times.
     const assets: Array<{ sitePath: string; bytes: Uint8Array; contentType: string; storagePath: string }> = [];
-    const cover = await this.loadImage(book.coverImagePath, IMAGE_WIDTHS.cover);
-    if (cover) assets.push({ ...cover, sitePath: 'assets/cover.webp', storagePath: '' });
+    for (const product of products.value) {
+      if (!product.coverPath) continue;
+      const art = await this.loadImage(product.coverPath, IMAGE_WIDTHS.cover);
+      if (!art) continue;
+      product.coverSitePath = product.featured ? 'assets/cover.webp' : `assets/cover-${product.index}.webp`;
+      assets.push({ ...art, sitePath: product.coverSitePath, storagePath: '' });
+    }
+    // {{BOOK_COVER}} always shows the FEATURED book — the one the user
+    // generated from. The other books appear through the offer grid, each with
+    // its own file.
+    const featuredCover = products.value.find((p) => p.featured)?.coverSitePath ?? null;
     const authorPhoto = await this.loadImage(project.options.landingAuthorPhotoPath ?? null, IMAGE_WIDTHS.authorPhoto);
     if (authorPhoto) assets.push({ ...authorPhoto, sitePath: 'assets/author.webp', storagePath: '' });
     const logo = await this.loadRemoteImage(channel?.thumbnailUrl ?? null, IMAGE_WIDTHS.logo);
@@ -271,13 +332,41 @@ export class GenerateClonedLandingPageUseCase {
       PRICE: formatMoney(project.options.landingPriceCents, project.options.landingCurrency),
       COMPARE_AT_PRICE: formatMoney(project.options.landingCompareAtCents, project.options.landingCurrency),
       GUARANTEE_DAYS: String(project.options.landingGuaranteeDays),
-      ...(cover ? { BOOK_COVER: 'assets/cover.webp', BOOK_COVER_ALT: `${title} cover` } : {}),
+      ...(featuredCover ? { BOOK_COVER: featuredCover, BOOK_COVER_ALT: `${title} cover` } : {}),
       ...(authorPhoto ? { AUTHOR_IMAGE: 'assets/author.webp' } : {}),
       ...(logo ? { BRAND_LOGO: 'assets/logo.webp' } : {}),
       ...(project.options.landingCheckoutUrl ? { CHECKOUT_URL: project.options.landingCheckoutUrl } : {}),
     };
 
-    const binding: LandingBinding = { scalars, repeats: written.value.repeats };
+    // One card per product, each field read from ONE product record in a single
+    // pass. That is what makes a buy link landing under the wrong cover
+    // structurally impossible rather than merely unlikely — the same discipline
+    // the built-in offer grid uses, and for the same reason.
+    const repeats: Record<string, Array<Record<string, string>>> = { ...written.value.repeats };
+    const hasOfferGrid = template.repeaters.some((r) => r.key === 'OFFER_ITEMS');
+    // A template with no offer grid cannot sell a set: there is nowhere to put
+    // the other books' prices and links, so the page would advertise three
+    // books and let a buyer purchase one. Refused rather than half-rendered.
+    if (!hasOfferGrid && products.value.length > 1) {
+      return Result.fail(
+        `This page sells ${products.value.length} products, but the template "${template.name ?? template.sourceUrl}" ` +
+          'has no offer grid — no repeating region was labelled OFFER_ITEMS during extraction. Label one on the ' +
+          'template, or use a template whose page sells a set.',
+      );
+    }
+    if (hasOfferGrid) {
+      repeats['OFFER_ITEMS'] = products.value.map((product) => ({
+        title: product.title,
+        subtitle: product.subtitle,
+        price: formatMoney(product.priceCents ?? undefined, project.options.landingCurrency),
+        // Missing links resolve to an inert `#` rather than an empty href, so a
+        // preview before the products exist on the store still renders.
+        ...(product.checkoutUrl ? { checkoutUrl: product.checkoutUrl } : {}),
+        ...(product.coverSitePath ? { coverSrc: product.coverSitePath } : {}),
+      }));
+    }
+
+    const binding: LandingBinding = { scalars, repeats };
 
     const assembled = this.binder.assemble({
       templateHtml: loaded.value.html,
@@ -286,7 +375,7 @@ export class GenerateClonedLandingPageUseCase {
       accentLiteral: theme.literalFrom && theme.accentHex ? { from: theme.literalFrom, to: theme.accentHex } : null,
       values: {
         scalars,
-        repeats: written.value.repeats,
+        repeats,
         trustedHtml: { FOOTER_LEGAL: legalMarkup(channel?.title ?? title, this.clock.now().getFullYear()) },
       },
       // The checkout URL is deliberately NOT required here: a seller previews
@@ -303,7 +392,12 @@ export class GenerateClonedLandingPageUseCase {
       html: assembled.value.html,
       template,
       assets,
-      checkoutUrl: project.options.landingCheckoutUrl ?? null,
+      // Every product's link, not just the featured book's. On a three-book
+      // page a check that only looked at the first would pass a page whose
+      // other two buttons go nowhere.
+      checkoutUrls: unique(
+        products.value.map((product) => product.checkoutUrl ?? '').filter(Boolean),
+      ),
       unresolved: assembled.value.unresolved,
       themeReason: theme.reason,
     });
@@ -341,13 +435,13 @@ export class GenerateClonedLandingPageUseCase {
     html: string;
     template: StoredLandingTemplate;
     assets: Array<{ sitePath: string; bytes: Uint8Array; contentType: string }>;
-    checkoutUrl: string | null;
+    checkoutUrls: string[];
     unresolved: string[];
     themeReason: string;
   }): Promise<LandingFidelity> {
     const findings: Finding[] = validateBoundPage({
       html: input.html,
-      checkoutUrl: input.checkoutUrl,
+      checkoutUrls: input.checkoutUrls,
       sourceHost: hostOf(input.template.sourceUrl),
       expectedCtaCount: input.template.placeholders.filter((p) => p.placeholder === 'CHECKOUT_URL').length,
     });
@@ -465,6 +559,8 @@ export class GenerateClonedLandingPageUseCase {
     audienceObjections: string[] | undefined;
     slots: PlaceholderEntry[];
     repeaters: Array<{ key: string; count: number; fields: Array<{ name: string; maxChars: number; originalText: string }> }>;
+    /** The other books on the page, with what each one actually covers. */
+    otherBooks: Array<{ title: string; chapterTitles: string[] }>;
   }): Promise<Result<{ slots: Record<string, string>; repeats: Record<string, Array<Record<string, string>>> }>> {
     const prompt = TemplateCopyPrompt.build({
       ...input,
@@ -497,6 +593,107 @@ export class GenerateClonedLandingPageUseCase {
     }
 
     return Result.ok({ slots, repeats: parsed.value.repeats });
+  }
+
+  /**
+   * Every product this page sells: the featured book, its siblings, and the
+   * bundle when the seller has set one up.
+   *
+   * A sibling that cannot be loaded fails the whole generation rather than
+   * being skipped. The user asked for a page selling three specific books;
+   * silently publishing one that sells two is wrong in a way nobody notices
+   * until a reader cannot buy the book the page promised.
+   */
+  private async loadProducts(input: {
+    project: NonNullable<Awaited<ReturnType<ProjectRepository['findById']>>>;
+    book: NonNullable<Awaited<ReturnType<BookRepository['findSummaryByProject']>>>;
+    strategy: Awaited<ReturnType<KnowledgeRepository['getBookStrategy']>>;
+    title: string;
+    projectId: ProjectId;
+  }): Promise<Result<CloneProduct[]>> {
+    const { project } = input;
+    const products: CloneProduct[] = [
+      {
+        index: 0,
+        title: input.title,
+        subtitle: input.strategy?.subtitle ?? '',
+        priceCents: project.options.landingPriceCents ?? null,
+        checkoutUrl: project.options.landingCheckoutUrl ?? null,
+        coverPath: input.book.coverImagePath,
+        coverSitePath: null,
+        chapterTitles: input.book.chapterTitles,
+        kind: 'book',
+        // The book the user came from leads the page.
+        featured: true,
+      },
+    ];
+
+    for (const [i, sibling] of project.options.landingSiblings.entries()) {
+      const siblingId = ProjectId.from(sibling.projectId);
+      const siblingProject = await this.projects.findById(siblingId);
+      if (!siblingProject) return Result.fail(`Selected book ${sibling.projectId} no longer exists`);
+      // A security boundary, not a sanity check: the sibling project id arrives
+      // from the client, so without this anyone could put someone else's book —
+      // cover, title and all — on their own sales page.
+      if (siblingProject.ownerId !== project.ownerId) {
+        return Result.fail(`Selected book ${sibling.projectId} belongs to a different account`);
+      }
+
+      const siblingBook = await this.books.findSummaryByProject(siblingId);
+      if (!siblingBook || !siblingBook.hasChapters) {
+        return Result.fail(`Selected book ${sibling.projectId} is not finished yet`);
+      }
+      const siblingStrategy = await this.knowledge.getBookStrategy(siblingId);
+
+      products.push({
+        index: i + 1,
+        title:
+          normalizeBookTitle(
+            siblingBook.title ?? siblingProject.options.bookTitle ?? siblingStrategy?.title ?? undefined,
+          ) ?? 'Untitled',
+        subtitle: siblingStrategy?.subtitle ?? '',
+        // Price and link come from THIS sibling's own entry, never from the
+        // project it points at — the seller sets them per page.
+        priceCents: sibling.priceCents ?? null,
+        checkoutUrl: sibling.checkoutUrl ?? null,
+        coverPath: siblingBook.coverImagePath,
+        coverSitePath: null,
+        chapterTitles: siblingBook.chapterTitles,
+        kind: 'book',
+        featured: false,
+      });
+    }
+
+    const bundle = this.buildBundle(project.options, products);
+    if (bundle) products.push(bundle);
+
+    return Result.ok(products);
+  }
+
+  /**
+   * The all-books bundle, when the seller has set one up. It is a real product
+   * on their store with its own link, so it exists only when that link or price
+   * was supplied — never synthesised to fill out the grid.
+   */
+  private buildBundle(
+    options: { landingBundlePriceCents?: number | undefined; landingBundleCheckoutUrl?: string | undefined },
+    books: CloneProduct[],
+  ): CloneProduct | null {
+    if (options.landingBundlePriceCents === undefined && !options.landingBundleCheckoutUrl) return null;
+    if (books.length < 2) return null; // a "bundle" of one book is just the book
+    return {
+      index: books.length,
+      title: `The complete set — all ${books.length} books`,
+      subtitle: 'Every book above, in one purchase.',
+      priceCents: options.landingBundlePriceCents ?? null,
+      checkoutUrl: options.landingBundleCheckoutUrl ?? null,
+      // No cover of its own; the card shows its title and price.
+      coverPath: null,
+      coverSitePath: null,
+      chapterTitles: [],
+      kind: 'bundle',
+      featured: false,
+    };
   }
 
   private async loadImage(

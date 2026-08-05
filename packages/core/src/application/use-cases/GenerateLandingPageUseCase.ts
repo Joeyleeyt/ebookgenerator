@@ -638,12 +638,17 @@ export class GenerateLandingPageUseCase {
       // A long chapter list buries the CTA; the first eight make the point.
       // Only used when the model gave no card features.
       contents: chapterTitles.slice(0, 8),
-      // The "what's inside" breakdown comes from the book's own outline — each
-      // chapter with its key points beneath — rather than from the model
-      // re-imagining the contents it was only told the titles of.
+      // The table of contents, from the book's own outline rather than from the
+      // model re-imagining contents it was only told the titles of.
+      //
+      // `items` carries the FULL key-point list because both renderers use it
+      // only for its length — "5 methods" under each chapter. Neither prints
+      // the points themselves: they are the book's substance, and a fourteen-
+      // chapter book put about seventy of them on a free public page. Slicing
+      // to 6 here also under-reported that count on any longer chapter.
       sections: book.outline.map((e) => ({
         title: e.title,
-        items: e.keyPoints.slice(0, 6),
+        items: e.keyPoints,
       })),
       priceCents: project.options.landingPriceCents ?? null,
       compareAtCents: project.options.landingCompareAtCents ?? null,

@@ -33,6 +33,72 @@ describe('validateGeneratedPage', () => {
     expect(validateGeneratedPage(page()).isOk()).toBe(true);
   });
 
+  // A three-book layout that followed the prompt exactly was rejected for
+  // omitting {{COVER}}. The prompt tells the model to use {{COVER_STACK}} for
+  // the set and {{BOOK_BREAKDOWN}} for the per-book section, and describes
+  // {{COVER}} as being for "where the template shows a single book" — which on
+  // a three-book page is nowhere. The repair round could only repeat the demand
+  // that contradicted those instructions, so all three attempts failed the same
+  // way and every three-book page fell back to the built-in template.
+  describe('cover art on a multi-book page', () => {
+    const multiBook = (covers: string) =>
+      page({
+        bodyHtml: `
+          <section data-section="hero"><h1>A headline</h1>${covers}{{CTA_BUTTON}}</section>
+          <section data-section="inside"><h2>Inside</h2>{{BOOK_BREAKDOWN}}</section>
+          <section data-section="order"><h2>Order</h2>{{OFFER_GRID}}</section>
+          <section data-section="faq"><h2>Questions</h2><p>Answers.</p></section>
+          <footer>{{PRICE}}{{FOOTER_LEGAL}}</footer>
+        `,
+      });
+
+    it('accepts {{COVER_STACK}} in place of {{COVER}}', () => {
+      const result = validateGeneratedPage(multiBook('{{COVER_STACK}}'), { productCount: 3 });
+      expect(result.isOk()).toBe(true);
+    });
+
+    it('accepts {{BOOK_BREAKDOWN}} alone as the way the books are shown', () => {
+      const result = validateGeneratedPage(
+        page({
+          bodyHtml: `
+            <section data-section="hero"><h1>A headline</h1>{{CTA_BUTTON}}</section>
+            <section data-section="inside"><h2>Inside</h2>{{BOOK_BREAKDOWN}}</section>
+            <section data-section="order"><h2>Order</h2>{{OFFER_GRID}}</section>
+            <section data-section="faq"><h2>Questions</h2><p>Answers.</p></section>
+            <footer>{{PRICE}}{{FOOTER_LEGAL}}</footer>
+          `,
+        }),
+        { productCount: 3 },
+      );
+      expect(result.isOk()).toBe(true);
+    });
+
+    it('still requires SOME cover art on a multi-book page', () => {
+      const errors = (
+        validateGeneratedPage(
+          page({
+            bodyHtml: `
+              <section data-section="hero"><h1>A headline</h1>{{CTA_BUTTON}}</section>
+              <section data-section="inside"><h2>Inside</h2></section>
+              <section data-section="order"><h2>Order</h2>{{OFFER_GRID}}</section>
+              <section data-section="faq"><h2>Questions</h2><p>Answers.</p></section>
+              <footer>{{PRICE}}{{FOOTER_LEGAL}}</footer>
+            `,
+          }),
+          { productCount: 3 },
+        ) as { error?: string[] }
+      ).error ?? [];
+      expect(errors.join(' ')).toContain('shows no per-book covers');
+    });
+
+    // The relaxation is scoped to multi-book pages. A single-book page has no
+    // other placeholder that shows the product, so {{COVER}} stays mandatory.
+    it('still requires {{COVER}} on a single-book page', () => {
+      const errors = errorsOf(page({ bodyHtml: page().bodyHtml.replace('{{COVER}}', '') }));
+      expect(errors.join(' ')).toContain('Missing required placeholder {{COVER}}');
+    });
+  });
+
   // Every error goes back to the model in one repair round, so it must report
   // all of them rather than stopping at the first.
   it('reports every problem at once', () => {

@@ -1,5 +1,5 @@
 import type { Result } from '../../../domain/shared/Result.js';
-import type { StoredLandingTemplate, TemplateAsset } from '../../../domain/landing/TemplateManifest.js';
+import type { StoredLandingTemplate, TemplateAsset, TypographyTokens } from '../../../domain/landing/TemplateManifest.js';
 import type { CapturedAsset, Shot } from './TemplateCapturer.js';
 
 /**
@@ -25,15 +25,18 @@ export interface StoredArtifacts {
   assets: TemplateAsset[];
   baselineShotPaths: Array<{ width: number; storagePath: string }>;
   /**
-   * `exact` when every declared face was legally embeddable, `degraded` when
-   * some were not and the stack falls back, `none` when the template used only
-   * system fonts.
+   * `exact` when every family the page paints is provided by an embedded face,
+   * `degraded` when any fell back to a substitute stack, `none` when the
+   * template used only system fonts.
    *
-   * Recorded rather than silently accepted: v1 downloaded fonts, base64'd them
-   * into the stored CSS, and then mandated system stacks in the prompt — so
-   * every page carried 100–300 KB of font data that nothing referenced.
+   * Judged on what the page still ASKS FOR rather than on whether embedding
+   * returned anything: a template with eight faces of which one embedded is
+   * degraded, and reporting it as exact told the seller their typography
+   * matched while the headline had visibly changed typeface.
    */
   fontFidelity: 'exact' | 'degraded' | 'none';
+  /** Families that fell back to a substitute, for the report and the review UI. */
+  lostFamilies: string[];
   /** Referenced urls that had no local copy and were dropped from the CSS. */
   unresolvedUrls: string[];
 }
@@ -48,6 +51,8 @@ export interface TemplateArtifactStore {
     baseUrl: string;
     assets: CapturedAsset[];
     baselineShots: Shot[];
+    /** The measured typography, so lost faces can fall back to a near match. */
+    typography?: TypographyTokens | undefined;
   }): Promise<Result<StoredArtifacts>>;
 
   /**

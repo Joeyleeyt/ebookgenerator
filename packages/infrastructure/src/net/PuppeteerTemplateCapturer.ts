@@ -10,6 +10,7 @@ import {
   type Shot,
   type TemplateCapturer,
   type ThemeTokens,
+  type TypographyTokens,
 } from '@yeg/core';
 import { assertPublicUrl } from './HttpReferencePageFetcher.js';
 import {
@@ -20,6 +21,7 @@ import {
   COLLECT_IMAGE_URLS,
   DETECT_REPEATERS,
   INVENTORY,
+  RESTORE_DISCLOSURE,
   MEASURE,
   STAMP,
   UNHIDE_REVEALS,
@@ -114,6 +116,17 @@ export class PuppeteerTemplateCapturer implements TemplateCapturer {
         .join(', ');
       if (removedSummary) notes.push(`Removed: ${removedSummary}.`);
 
+      // Cleaning just removed the script that opened the template's accordions.
+      // Without this the rows survive and their answers never can be read —
+      // the FAQ renders as questions with nothing behind them.
+      const disclosure = (await page.evaluate(RESTORE_DISCLOSURE)) as { restored: number; native: boolean };
+      if (disclosure.restored > 0) {
+        notes.push(
+          `${disclosure.restored} collapsed row(s) were converted to native <details> so they still open ` +
+            'without the template’s JavaScript.',
+        );
+      }
+
       const cleanedShots = await this.shootWidths(page, notes);
 
       // ── address and measure ──
@@ -138,6 +151,7 @@ export class PuppeteerTemplateCapturer implements TemplateCapturer {
         accentToken: string | null;
         isDark: boolean;
         rootTokens: Record<string, string>;
+        typography: TypographyTokens;
         sections: Array<Omit<SectionGeometry, 'width'>>;
         contentImages: Array<{ tplId: string; sourceUrl: string; width: number; height: number }>;
         title: string;
@@ -190,6 +204,9 @@ export class PuppeteerTemplateCapturer implements TemplateCapturer {
         repeaters,
         ctaIds: measured.ctaIds,
         theme,
+        // Defensive: an older cached MEASURE, or a page whose body never
+        // painted, returns no typography rather than a malformed one.
+        typography: measured.typography ?? { heading: null, body: null, familiesUsed: [] },
         sections: measured.sections.map((s) => ({ ...s, width: 1280 })),
         baselineShots,
         cleanedShots,

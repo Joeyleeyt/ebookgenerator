@@ -27,9 +27,33 @@ describe('parseFontFaces', () => {
     expect(faces[0]?.sources[0]?.format).toBe('woff2');
   });
 
-  it('skips italics, which the layout rarely calls for and which double the weight', () => {
+  // Italics were previously dropped to save page weight. That cost more than it
+  // saved: emphasised body copy fell back to a different typeface mid-paragraph,
+  // which reads as a broken page. Weight is now bounded by the byte budget.
+  it('keeps italics, so emphasised copy stays in the same typeface', () => {
     const italic = googleCss.replace('font-style: normal', 'font-style: italic');
-    expect(parseFontFaces(italic)).toHaveLength(0);
+    const faces = parseFontFaces(italic);
+    expect(faces).toHaveLength(1);
+    expect(faces[0]?.style).toBe('italic');
+  });
+
+  it('reads a face nested inside an at-rule without eating its closing brace', () => {
+    // The `[^}]*` body match this replaced consumed the face's own `}`, leaving
+    // the @supports block unbalanced and corrupting every rule after it.
+    const nested = `@supports (font-variation-settings: normal) {
+      @font-face { font-family: 'Inter'; font-style: normal; font-weight: 400;
+        src: url(https://fonts.gstatic.com/s/inter/v13/x.woff2) format('woff2'); }
+    }
+    body { color: red; }`;
+    const faces = parseFontFaces(nested);
+    expect(faces).toHaveLength(1);
+    expect(faces[0]?.family).toBe('Inter');
+  });
+
+  it('reads a quoted family name whole rather than stopping at the quote', () => {
+    const css = `@font-face { font-family: "Playfair Display", serif; font-weight: 400;
+      src: url(https://fonts.gstatic.com/s/p/v1/a.woff2) format('woff2'); }`;
+    expect(parseFontFaces(css)[0]?.family).toBe('Playfair Display');
   });
 
   it('ignores faces already inlined as data URIs', () => {

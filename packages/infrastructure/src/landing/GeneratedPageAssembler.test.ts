@@ -149,6 +149,42 @@ describe('GeneratedPageAssembler — per-book elements', () => {
 
   // The order block shipped a large "$10" stacked directly on a button already
   // labelled "… — $10".
+  // {{CONTENTS}} is the table of contents, not the contents. A fourteen-chapter
+  // book rendered roughly seventy key points — "Buy the $22 Topdon ArtiLink
+  // 200", "Only PEA chemistry dissolves intake deposits" — on a free public
+  // page. Those are the book's substance, so the page selling it was giving it
+  // away, and the wall of text buried the CTA the reference template never had.
+  describe('the contents block', () => {
+    const withOutline = () =>
+      new GeneratedPageAssembler().assemble({
+        page: { css: '', bodyHtml: '<section data-section="hero">{{CONTENTS}}{{FOOTER_LEGAL}}</section>' },
+        model: model([
+          product({
+            featured: true,
+            sections: [
+              { title: 'The $22 Tool That Beats Dealerships', items: ['Buy the $22 Topdon ArtiLink 200', 'Read P0420 codes'] },
+              { title: 'ECU Resets You Do Free', items: ['Disconnect negative terminal 45 minutes'] },
+            ],
+          }),
+        ]),
+      });
+
+    it('lists every chapter with how much is in it', () => {
+      const html = withOutline();
+      expect(html).toContain('The $22 Tool That Beats Dealerships');
+      expect(html).toContain('ECU Resets You Do Free');
+      expect(html).toContain('2 methods');
+      expect(html).toContain('1 method'); // singular
+    });
+
+    it('never prints the key points themselves', () => {
+      const html = withOutline();
+      expect(html).not.toContain('Topdon ArtiLink');
+      expect(html).not.toContain('Disconnect negative terminal');
+      expect(html).not.toContain('Read P0420 codes');
+    });
+  });
+
   it('drops a price that sits directly on top of a buy button', () => {
     const html = assemble('<section>{{PRICE}}{{CTA_BUTTON}}</section>', [product({ priceCents: 1000 })]);
     expect(html).not.toContain('class="price-row"');

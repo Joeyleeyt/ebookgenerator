@@ -36,6 +36,7 @@ interface ProjectRow {
     landingCurrency?: string;
     landingGuaranteeDays?: number;
     landingTemplateUrl?: string;
+    landingTemplateId?: string;
     landingMode?: 'single' | 'triple';
     landingSiblings?: Array<{ projectId: string; priceCents?: number; checkoutUrl?: string }>;
     landingBundlePriceCents?: number;
@@ -88,6 +89,10 @@ export class SupabaseProjectRepository implements ProjectRepository {
         landingCurrency: project.options.landingCurrency,
         landingGuaranteeDays: project.options.landingGuaranteeDays,
         ...(project.options.landingTemplateUrl ? { landingTemplateUrl: project.options.landingTemplateUrl } : {}),
+        // Which CLONED template this page is built from. Omitted when unset, so
+        // a project on the built-in renderer carries no key at all — the same
+        // shape every optional landing field above uses.
+        ...(project.options.landingTemplateId ? { landingTemplateId: project.options.landingTemplateId } : {}),
         landingMode: project.options.landingMode,
         ...(project.options.landingSiblings.length > 0 ? { landingSiblings: project.options.landingSiblings } : {}),
         ...(project.options.landingBundlePriceCents !== undefined

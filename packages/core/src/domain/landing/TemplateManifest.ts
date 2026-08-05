@@ -89,6 +89,34 @@ export interface ThemeTokens {
   rootTokens: Record<string, string>;
 }
 
+/** One role's typeface, as the browser resolved it on the live page. */
+export interface TypefaceRole {
+  /** The first named family, e.g. "Playfair Display". Never a generic keyword. */
+  family: string;
+  /** The full computed stack, kept so the original fallbacks survive. */
+  stack: string;
+  weight: string;
+  /** Whether the resolved face is a serif. Measured, not inferred from the name. */
+  serif: boolean;
+}
+
+/**
+ * The template's measured typography.
+ *
+ * Captured because the clone pipeline otherwise has no idea what typeface a
+ * template uses: `@font-face` rules are stripped before storage and re-added
+ * only when the licence allows, but the `font-family` declarations naming them
+ * survive. Without this, a face that could not be embedded left the page asking
+ * for a font nobody has, and the browser fell back to Times New Roman — which is
+ * why cloned pages matched their template everywhere except the type.
+ */
+export interface TypographyTokens {
+  heading: TypefaceRole | null;
+  body: TypefaceRole | null;
+  /** Every distinct real family the page paints, for the fidelity report. */
+  familiesUsed: string[];
+}
+
 /** Per-width geometry, captured for the visual diff's masking. */
 export interface SectionGeometry {
   tplId: string;
@@ -144,7 +172,15 @@ export interface ExtractionReport {
   cleaningLoss: Array<{ width: number; mismatchRatio: number }>;
   /** Images that were dropped rather than republished, for the seller to replace. */
   droppedImages: Array<{ tplId: string; sourceUrl: string; rect: Rect }>;
+  /**
+   * `exact` only when EVERY declared face embedded. Partial success is
+   * `degraded`, because a page that kept its body text but lost its display
+   * face does not look like its template — and reporting that as exact told the
+   * seller their typography was perfect when the headline had changed typeface.
+   */
   fontFidelity: 'exact' | 'degraded' | 'none';
+  /** Families the page asks for that no embedded face provides. */
+  lostFamilies: string[];
   assetBytes: number;
   sectionCount: number;
   notes: string[];
@@ -176,6 +212,7 @@ export interface StoredLandingTemplate {
   placeholders: PlaceholderEntry[];
   repeaters: RepeaterEntry[];
   theme: ThemeTokens;
+  typography: TypographyTokens;
   responsive: ResponsiveRules;
   baselineShots: Array<{ width: number; storagePath: string }>;
   overrides: PlaceholderOverride[];
@@ -196,4 +233,4 @@ export interface StoredLandingTemplate {
  * such field, which is why every prompt and contract fix to that path appeared
  * to do nothing — a cached row returned before the changed code was reached.
  */
-export const LANDING_PIPELINE_VERSION = 1;
+export const LANDING_PIPELINE_VERSION = 2;

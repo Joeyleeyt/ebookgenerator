@@ -11,6 +11,7 @@ import {
   type StoredLandingTemplate,
   type TemplateAsset,
   type ThemeTokens,
+  type TypographyTokens,
 } from '@yeg/core';
 import { queryError } from './queryError.js';
 
@@ -26,6 +27,7 @@ interface TemplateRow {
   placeholder_map: PlaceholderEntry[] | null;
   repeater_map: RepeaterEntry[] | null;
   theme_tokens: ThemeTokens | null;
+  typography_tokens: TypographyTokens | null;
   responsive_rules: ResponsiveRules | null;
   baseline_shots: Array<{ width: number; storagePath: string }> | null;
   placeholder_overrides: PlaceholderOverride[] | null;
@@ -49,8 +51,8 @@ interface AssetRow {
 
 const COLUMNS =
   'id, owner_id, source_url, state, name, original_html_path, clean_html_path, css_bundle_path, ' +
-  'placeholder_map, repeater_map, theme_tokens, responsive_rules, baseline_shots, placeholder_overrides, ' +
-  'extraction_report, failure_reason, pipeline_version, revision, captured_at';
+  'placeholder_map, repeater_map, theme_tokens, typography_tokens, responsive_rules, baseline_shots, ' +
+  'placeholder_overrides, extraction_report, failure_reason, pipeline_version, revision, captured_at';
 
 const EMPTY_THEME: ThemeTokens = {
   accentToken: null,
@@ -59,6 +61,8 @@ const EMPTY_THEME: ThemeTokens = {
   isDark: false,
   rootTokens: {},
 };
+
+const EMPTY_TYPOGRAPHY: TypographyTokens = { heading: null, body: null, familiesUsed: [] };
 
 const EMPTY_RESPONSIVE: ResponsiveRules = { widths: [], breakpoints: [], sections: [] };
 
@@ -141,6 +145,7 @@ export class SupabaseLandingTemplateRepository implements LandingTemplateReposit
         placeholder_map: template.placeholders,
         repeater_map: template.repeaters,
         theme_tokens: template.theme,
+        typography_tokens: template.typography,
         responsive_rules: template.responsive,
         baseline_shots: template.baselineShots,
         extraction_report: template.report,
@@ -220,6 +225,7 @@ function toDomain(row: TemplateRow): StoredLandingTemplate {
     placeholders: row.placeholder_map ?? [],
     repeaters: row.repeater_map ?? [],
     theme: row.theme_tokens ?? EMPTY_THEME,
+    typography: row.typography_tokens ?? EMPTY_TYPOGRAPHY,
     responsive: row.responsive_rules ?? EMPTY_RESPONSIVE,
     baselineShots: row.baseline_shots ?? [],
     overrides: row.placeholder_overrides ?? [],

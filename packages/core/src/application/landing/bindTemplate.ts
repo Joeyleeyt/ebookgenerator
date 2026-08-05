@@ -150,12 +150,15 @@ function expandRepeaters(html: string, values: BindValues, errors: string[], unr
           // A token from a different region inside this one is a mapping bug,
           // not something to paper over — leave it for the residual-token check.
           if (!field || field.key !== key) return token;
-          const raw = item[field.field];
-          if (raw === undefined) {
-            unresolved.push(tokenKey);
-            return '';
-          }
           const kind = kindFor(tokenKey) ?? 'text';
+          const raw = item[field.field];
+          if (raw === undefined || raw === '') {
+            unresolved.push(tokenKey);
+            // Same treatment a scalar gets: an unresolved href must be inert
+            // rather than empty. `href=""` reloads the page when clicked, which
+            // on an offer card reads as a buy button that silently does nothing.
+            return kind === 'href' ? '#' : '';
+          }
           const value = renderScalar(tokenKey, kind, raw);
           if (value.isFail()) {
             errors.push(value.error);

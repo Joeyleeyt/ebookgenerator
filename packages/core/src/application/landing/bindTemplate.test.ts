@@ -153,6 +153,80 @@ describe('bindTemplate', () => {
     });
   });
 
+  // A three-book page carries up to four different buy links. Every field of a
+  // card comes from ONE product record in a single pass, which is what makes a
+  // link landing under the wrong cover structurally impossible rather than
+  // merely unlikely.
+  describe('the offer grid on a multi-book page', () => {
+    const grid =
+      '<div class="offers"><template data-repeat="OFFER_ITEMS">' +
+      '<div class="offer"><img src="{{OFFER_ITEMS.coverSrc}}"><h3>{{OFFER_ITEMS.title}}</h3>' +
+      '<span>{{OFFER_ITEMS.price}}</span><a href="{{OFFER_ITEMS.checkoutUrl}}">Buy</a></div>' +
+      '</template></div>';
+
+    const three = {
+      ...empty,
+      repeats: {
+        OFFER_ITEMS: [
+          { title: 'Book One', price: '$27', checkoutUrl: 'https://store.example.com/one', coverSrc: 'assets/cover.webp' },
+          { title: 'Book Two', price: '$27', checkoutUrl: 'https://store.example.com/two', coverSrc: 'assets/cover-1.webp' },
+          { title: 'Book Three', price: '$27', checkoutUrl: 'https://store.example.com/three', coverSrc: 'assets/cover-2.webp' },
+        ],
+      },
+    };
+
+    it('gives every book its own cover, price and buy link', () => {
+      const html = bindTemplate(grid, three).value.html;
+      expect(html).toContain('<a href="https://store.example.com/one">');
+      expect(html).toContain('<a href="https://store.example.com/two">');
+      expect(html).toContain('<a href="https://store.example.com/three">');
+      expect(html).toContain('src="assets/cover.webp"');
+      expect(html).toContain('src="assets/cover-1.webp"');
+      expect(html).toContain('src="assets/cover-2.webp"');
+    });
+
+    // Repeating one cover is how a page selling three books came back showing
+    // the first book three times.
+    it('never repeats one book’s cover across the cards', () => {
+      const html = bindTemplate(grid, three).value.html;
+      const covers = [...html.matchAll(/src="(assets\/[^"]+)"/g)].map((m) => m[1]);
+      expect(new Set(covers).size).toBe(3);
+    });
+
+    it('pairs each link with its own card rather than crossing them', () => {
+      const html = bindTemplate(grid, three).value.html;
+      const cards = html.split('<div class="offer">').slice(1);
+      expect(cards[0]).toContain('Book One');
+      expect(cards[0]).toContain('store.example.com/one');
+      expect(cards[2]).toContain('Book Three');
+      expect(cards[2]).toContain('store.example.com/three');
+    });
+
+    it('renders a card inert when its link is not set yet, without failing', () => {
+      const out = bindTemplate(grid, {
+        ...empty,
+        repeats: { OFFER_ITEMS: [{ title: 'Book One', price: '$27', coverSrc: 'assets/cover.webp' }] },
+      });
+      expect(out.isOk()).toBe(true);
+      expect(out.value.html).toContain('<a href="#">');
+    });
+
+    it('carries the bundle card alongside the books', () => {
+      const html = bindTemplate(grid, {
+        ...empty,
+        repeats: {
+          OFFER_ITEMS: [
+            ...three.repeats.OFFER_ITEMS,
+            { title: 'The complete set — all 3 books', price: '$47', checkoutUrl: 'https://store.example.com/bundle' },
+          ],
+        },
+      }).value.html;
+      expect(html).toContain('The complete set');
+      expect(html).toContain('store.example.com/bundle');
+      expect(html.split('<div class="offer">').length - 1).toBe(4);
+    });
+  });
+
   it('strips extraction scaffolding so it never reaches a buyer', () => {
     const out = bindTemplate('<h1 data-tpl="n4" class="x">{{HERO_TITLE}}</h1>', {
       ...empty,

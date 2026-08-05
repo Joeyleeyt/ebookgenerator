@@ -193,6 +193,7 @@ export class ExtractTemplateUseCase {
       baseUrl: page.finalUrl,
       assets: page.assets,
       baselineShots: page.baselineShots,
+      typography: page.typography,
     });
     if (stored.isFail()) return Result.fail(stored.error);
     if (stored.value.unresolvedUrls.length > 0) {
@@ -202,9 +203,16 @@ export class ExtractTemplateUseCase {
       );
     }
     if (stored.value.fontFidelity === 'degraded') {
+      // Named rather than summarised: "typography will differ" gave the seller
+      // nothing to act on, while knowing it is the display face that was lost
+      // tells them whether the page is still worth publishing.
+      const lost = stored.value.lostFamilies;
       notes.push(
-        "The template's webfonts could not be legally re-hosted, so the type falls back to the nearest " +
-          'available faces. Typography will differ from the original.',
+        (lost.length > 0
+          ? `${lost.slice(0, 4).join(', ')}${lost.length > 4 ? ` and ${lost.length - 4} more` : ''} could not be `
+          : 'Some of the template’s webfonts could not be ') +
+          'legally re-hosted, so the type falls back to the nearest available faces. Typography will differ ' +
+          'from the original.',
       );
     }
 
@@ -285,6 +293,7 @@ export class ExtractTemplateUseCase {
           rect: { x: 0, y: 0, width: img.width, height: img.height },
         })),
       fontFidelity: stored.value.fontFidelity,
+      lostFamilies: stored.value.lostFamilies,
       assetBytes: pruned.reduce((total, a) => total + a.byteSize, 0),
       sectionCount: page.sections.length,
       notes,
@@ -303,6 +312,7 @@ export class ExtractTemplateUseCase {
         placeholders: kept,
         repeaters: repeaters.filter((r) => r.key),
         theme: page.theme,
+        typography: page.typography,
         responsive: {
           widths: page.baselineShots.map((s) => s.width),
           breakpoints: stored.value.breakpoints,
@@ -593,6 +603,7 @@ function emptyReport(): ExtractionReport {
     cleaningLoss: [],
     droppedImages: [],
     fontFidelity: 'none',
+    lostFamilies: [],
     assetBytes: 0,
     sectionCount: 0,
     notes: [],
@@ -612,6 +623,7 @@ function blank(id: string, ownerId: string, sourceUrl: string, revision: number)
     placeholders: [],
     repeaters: [],
     theme: { accentToken: null, accentValue: null, onAccentValue: null, isDark: false, rootTokens: {} },
+    typography: { heading: null, body: null, familiesUsed: [] },
     responsive: { widths: [], breakpoints: [], sections: [] },
     baselineShots: [],
     overrides: [],

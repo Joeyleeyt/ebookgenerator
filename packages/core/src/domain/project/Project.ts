@@ -131,6 +131,8 @@ export class Project extends AggregateRoot<ProjectProps, ProjectId> {
       landingCurrency?: string | undefined;
       landingGuaranteeDays?: number | undefined;
       landingTemplateUrl?: string | undefined;
+      /** The cloned template to build this page from; unset → built-in renderer. */
+      landingTemplateId?: string | undefined;
       landingMode?: 'single' | 'triple' | undefined;
       landingSiblings?:
         | Array<{ projectId: string; priceCents?: number | undefined; checkoutUrl?: string | undefined }>

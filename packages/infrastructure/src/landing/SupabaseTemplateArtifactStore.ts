@@ -1,5 +1,6 @@
 import {
   Result,
+  lostFamiliesOf,
   type CapturedAsset,
   type ObjectStorage,
   type Shot,
@@ -7,6 +8,7 @@ import {
   type StoredLandingTemplate,
   type TemplateArtifactStore,
   type TemplateAsset,
+  type TypographyTokens,
   type WebFontFetcher,
 } from '@yeg/core';
 import { AssetRehoster, LANDING_BUCKET } from './AssetRehoster.js';
@@ -40,6 +42,7 @@ export class SupabaseTemplateArtifactStore implements TemplateArtifactStore {
     baseUrl: string;
     assets: CapturedAsset[];
     baselineShots: Shot[];
+    typography?: TypographyTokens | undefined;
   }): Promise<Result<StoredArtifacts>> {
     const originalPath = `${input.templateId}/original.html`;
     const putOriginal = await this.storage.put(
@@ -58,14 +61,27 @@ export class SupabaseTemplateArtifactStore implements TemplateArtifactStore {
     // redistributed is not downloaded at all — not merely not deployed.
     const declaredFaces = /@font-face/i.test(input.css);
     const embedded = await this.fonts.embedFrom(input.css, input.baseUrl);
-    const fontFaceCss = embedded.isOk() ? embedded.value.map((f) => f.fontFaceCss).join('\n') : '';
-    const fontFidelity: StoredArtifacts['fontFidelity'] = !declaredFaces
-      ? 'none'
-      : fontFaceCss
-        ? 'exact'
-        : 'degraded';
+    const embeddedFonts = embedded.isOk() ? embedded.value : [];
+    const fontFaceCss = embeddedFonts.map((f) => f.fontFaceCss).join('\n');
+    const embeddedFamilies = [...new Set(embeddedFonts.map((f) => f.family))];
 
-    const bundled = bundleCss({ css: input.css, baseUrl: input.baseUrl, assetMap, fontFaceCss });
+    const bundled = bundleCss({
+      css: input.css,
+      baseUrl: input.baseUrl,
+      assetMap,
+      fontFaceCss,
+      embeddedFamilies,
+      typography: input.typography,
+    });
+
+    // Judged on what the PAGE still asks for, not on whether any face embedded.
+    // The old test — `fontFaceCss ? 'exact' : 'degraded'` — reported a perfect
+    // clone when one of eight faces survived, so the seller was told the
+    // typography matched while the headline had changed typeface.
+    const measuredLoss = lostFamiliesOf(input.typography?.familiesUsed ?? [], embeddedFamilies);
+    const lostFamilies = [...new Set([...measuredLoss, ...bundled.lostFamilies])];
+    const fontFidelity: StoredArtifacts['fontFidelity'] =
+      !declaredFaces && lostFamilies.length === 0 ? 'none' : lostFamilies.length === 0 ? 'exact' : 'degraded';
 
     const shotPaths: Array<{ width: number; storagePath: string }> = [];
     for (const shot of input.baselineShots) {
@@ -82,6 +98,7 @@ export class SupabaseTemplateArtifactStore implements TemplateArtifactStore {
       assets: rehosted.value,
       baselineShotPaths: shotPaths,
       fontFidelity,
+      lostFamilies,
       unresolvedUrls: bundled.unresolved,
     });
   }

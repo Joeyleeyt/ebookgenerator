@@ -127,7 +127,7 @@ describe('validateBoundPage', () => {
   it('passes a clean bound page', () => {
     const findings = validateBoundPage({
       html: bound,
-      checkoutUrl: 'https://store.example.com/p/1',
+      checkoutUrls: ['https://store.example.com/p/1'],
       sourceHost: 'themechanicbible.com',
       expectedCtaCount: 1,
     });
@@ -139,7 +139,7 @@ describe('validateBoundPage', () => {
   it('blocks a token that survived binding', () => {
     const findings = validateBoundPage({
       html: '<h1>{{HERO_TITLE}}</h1>',
-      checkoutUrl: null,
+      checkoutUrls: [],
       sourceHost: 'x.com',
       expectedCtaCount: 0,
     });
@@ -149,7 +149,7 @@ describe('validateBoundPage', () => {
   it('blocks a page whose buttons never got the checkout URL', () => {
     const findings = validateBoundPage({
       html: '<a href="#">Get it</a>',
-      checkoutUrl: 'https://store.example.com/p/1',
+      checkoutUrls: ['https://store.example.com/p/1'],
       sourceHost: 'x.com',
       expectedCtaCount: 1,
     });
@@ -159,7 +159,7 @@ describe('validateBoundPage', () => {
   it('warns when the checkout link count drifted from the template', () => {
     const findings = validateBoundPage({
       html: bound,
-      checkoutUrl: 'https://store.example.com/p/1',
+      checkoutUrls: ['https://store.example.com/p/1'],
       sourceHost: 'themechanicbible.com',
       expectedCtaCount: 3,
     });
@@ -167,10 +167,54 @@ describe('validateBoundPage', () => {
     expect(drift?.severity).toBe('WARN');
   });
 
+  // A three-book page carries several different links. A check that only looked
+  // at the featured book's would pass a page whose other two buttons go nowhere.
+  describe('multi-book pages', () => {
+    const urls = [
+      'https://store.example.com/one',
+      'https://store.example.com/two',
+      'https://store.example.com/three',
+    ];
+    const page = (present: string[]) =>
+      `<h1>x</h1>${present.map((u) => `<a href="${u}">Buy</a>`).join('')}`;
+
+    it('passes when every product has its own link', () => {
+      const findings = validateBoundPage({
+        html: page(urls),
+        checkoutUrls: urls,
+        sourceHost: 'themechanicbible.com',
+        expectedCtaCount: 3,
+      });
+      expect(findings.filter((f) => f.severity === 'BLOCKER')).toEqual([]);
+    });
+
+    it('blocks when one book’s buy link never got bound', () => {
+      const findings = validateBoundPage({
+        html: page(urls.slice(0, 2)),
+        checkoutUrls: urls,
+        sourceHost: 'themechanicbible.com',
+        expectedCtaCount: 3,
+      });
+      const finding = findings.find((f) => f.code === 'CHECKOUT_INCOMPLETE');
+      expect(finding?.severity).toBe('BLOCKER');
+      expect(finding?.message).toContain('1 of 3 products');
+    });
+
+    it('does not report count drift when the links legitimately differ', () => {
+      const findings = validateBoundPage({
+        html: page(urls),
+        checkoutUrls: urls,
+        sourceHost: 'themechanicbible.com',
+        expectedCtaCount: 1,
+      });
+      expect(findings.map((f) => f.code)).not.toContain('CHECKOUT_COUNT_DRIFT');
+    });
+  });
+
   it('blocks an empty href, which reloads the page when clicked', () => {
     const findings = validateBoundPage({
       html: '<a href="">Buy</a>',
-      checkoutUrl: null,
+      checkoutUrls: [],
       sourceHost: 'x.com',
       expectedCtaCount: 0,
     });
@@ -180,7 +224,7 @@ describe('validateBoundPage', () => {
   it('warns on accessibility problems without blocking', () => {
     const findings = validateBoundPage({
       html: '<h1>a</h1><h1>b</h1><img src="assets/x.webp">',
-      checkoutUrl: null,
+      checkoutUrls: [],
       sourceHost: 'x.com',
       expectedCtaCount: 0,
     });

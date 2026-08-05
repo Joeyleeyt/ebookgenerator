@@ -185,13 +185,36 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   }
 
   // ── placeholders ──
+  const productCount = options.productCount ?? 1;
   for (const token of REQUIRED_PLACEHOLDERS) {
-    if (!bodyHtml.includes(token)) errors.push(`Missing required placeholder ${token}.`);
+    if (bodyHtml.includes(token)) continue;
+    // {{COVER}} is required because a sales page must show the product. On a
+    // MULTI-BOOK page it is not the only way to do that, and not the best one:
+    // {{COVER}} always renders the featured book, so the prompt tells the model
+    // to use {{COVER_STACK}} for the set and {{BOOK_BREAKDOWN}} for the
+    // per-book section, and describes {{COVER}} as being for "where the
+    // template shows a single book" — which on a three-book page is nowhere.
+    //
+    // A layout that followed those instructions exactly was then rejected for
+    // omitting {{COVER}}, and the repair round could only repeat the demand
+    // that contradicted them. All three attempts failed the same way and every
+    // three-book page fell back to the built-in template, which is how a page
+    // with no relationship to the client's template reached them.
+    //
+    // The requirement is that a buyer SEES THE BOOKS. Either of these does that
+    // for a set, and the rule below already forces at least one of them to be
+    // present when productCount > 1.
+    const coveredByASet =
+      token === PLACEHOLDERS.cover &&
+      productCount > 1 &&
+      (bodyHtml.includes(PLACEHOLDERS.coverStack) || bodyHtml.includes(PLACEHOLDERS.bookBreakdown));
+    if (coveredByASet) continue;
+    errors.push(`Missing required placeholder ${token}.`);
   }
   if (occurrences(bodyHtml, PLACEHOLDERS.legal) > 1) {
     errors.push(`${PLACEHOLDERS.legal} must appear exactly once, in the footer.`);
   }
-  if ((options.productCount ?? 1) > 1 && !bodyHtml.includes(PLACEHOLDERS.offerGrid)) {
+  if (productCount > 1 && !bodyHtml.includes(PLACEHOLDERS.offerGrid)) {
     errors.push(
       `This page sells ${options.productCount} books; ${PLACEHOLDERS.offerGrid} is required — it is the only ` +
         "element carrying each book's own buy link.",
@@ -240,7 +263,7 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   // placeholders do that; without either, every book on the page is
   // represented by the featured book's cover.
   if (
-    (options.productCount ?? 1) > 1 &&
+    productCount > 1 &&
     !bodyHtml.includes(PLACEHOLDERS.bookBreakdown) &&
     !bodyHtml.includes(PLACEHOLDERS.coverStack)
   ) {
@@ -252,7 +275,7 @@ export function validateGeneratedPage(page: GeneratedPage, options: ValidateOpti
   }
   // On a multi-book page, repeated {{COVER}} is how the same book ends up
   // displayed as if it were three different ones.
-  if ((options.productCount ?? 1) > 1 && occurrences(bodyHtml, PLACEHOLDERS.cover) > 2) {
+  if (productCount > 1 && occurrences(bodyHtml, PLACEHOLDERS.cover) > 2) {
     errors.push(
       `${PLACEHOLDERS.cover} always renders the SAME (featured) book, so repeating it cannot show a set. ` +
         `On a page selling ${options.productCount} books use ${PLACEHOLDERS.coverStack} where the reference ` +
