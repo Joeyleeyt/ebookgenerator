@@ -13,6 +13,7 @@ import {
   Outline,
   ProjectId,
   type BookRepository,
+  type BookSummary,
   type SharedChapterContext,
 } from '@yeg/core';
 
@@ -30,6 +31,42 @@ export class SupabaseBookRepository implements BookRepository {
     if (error) throw new Error(error.message);
     if (!data) return null;
     return this.toDomain(data);
+  }
+
+  /**
+   * The landing page's view of a book: no chapter content, no sections, no
+   * illustrations. Selecting `chapters(*)` here would drag every chapter's
+   * prose across the wire — which is what timed out the statement once a
+   * three-book page started loading three of them.
+   */
+  async findSummaryByProject(projectId: ProjectId): Promise<BookSummary | null> {
+    const { data, error } = await this.db
+      .from('books')
+      .select('title, cover_image_path, outlines(structure), chapters(position, title)')
+      .eq('project_id', projectId.value)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) return null;
+
+    const row = data as {
+      title: string | null;
+      cover_image_path: string | null;
+      outlines: Array<{ structure: Array<{ title: string; keyPoints?: string[] }> }> | null;
+      chapters: Array<{ position: number; title: string }> | null;
+    };
+    // Postgres returns embedded rows unordered; reading order is the position.
+    const chapters = [...(row.chapters ?? [])].sort((a, b) => a.position - b.position);
+
+    return {
+      title: row.title,
+      coverImagePath: row.cover_image_path,
+      chapterTitles: chapters.map((c) => c.title),
+      outline: (row.outlines?.[0]?.structure ?? []).map((e) => ({
+        title: e.title,
+        keyPoints: e.keyPoints ?? [],
+      })),
+      hasChapters: chapters.length > 0,
+    };
   }
 
   async findById(id: BookId): Promise<Book | null> {

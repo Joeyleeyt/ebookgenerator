@@ -268,14 +268,17 @@ export class GenerateLandingPageUseCase {
     const configError = project.options.landingConfigError();
     if (configError) return Result.fail(configError);
 
-    const book = await this.books.findByProject(projectId);
+    // Summary, not the whole aggregate: this use case reads four fields and no
+    // chapter prose, and loading the full book three times over on a three-book
+    // page is what exceeded the database's statement timeout.
+    const book = await this.books.findSummaryByProject(projectId);
     if (!book) return Result.fail('Book not found');
     const strategy = await this.knowledge.getBookStrategy(projectId);
     // Older projects stored the title in raw filename form; normalize on the
     // way out so the page never shows THE_DIY_REPAIR_BIBLE_… in its masthead.
     const title =
       normalizeBookTitle(book.title ?? project.options.bookTitle ?? strategy?.title ?? undefined) ?? 'Untitled';
-    const chapterTitles = book.chapters.map((c) => c.title);
+    const chapterTitles = book.chapterTitles;
     if (chapterTitles.length === 0) return Result.fail('Book has no chapters yet');
 
     const now = this.clock.now();
@@ -430,7 +433,7 @@ export class GenerateLandingPageUseCase {
       // The "what's inside" breakdown comes from the book's own outline — each
       // chapter with its key points beneath — rather than from the model
       // re-imagining the contents it was only told the titles of.
-      sections: (book.outline?.entries ?? []).map((e) => ({
+      sections: book.outline.map((e) => ({
         title: e.title,
         items: e.keyPoints.slice(0, 6),
       })),
@@ -774,8 +777,8 @@ export class GenerateLandingPageUseCase {
       return Result.fail(`Selected book ${sibling.projectId} belongs to a different account`);
     }
 
-    const siblingBook = await this.books.findByProject(siblingId);
-    if (!siblingBook || siblingBook.chapters.length === 0) {
+    const siblingBook = await this.books.findSummaryByProject(siblingId);
+    if (!siblingBook || !siblingBook.hasChapters) {
       return Result.fail(`Selected book ${sibling.projectId} is not finished yet`);
     }
 
@@ -798,8 +801,8 @@ export class GenerateLandingPageUseCase {
       // sibling's card is built from its own chapter titles instead.
       categoryLabel: null,
       features: [],
-      contents: siblingBook.chapters.map((c) => c.title).slice(0, 8),
-      sections: (siblingBook.outline?.entries ?? []).map((e) => ({
+      contents: siblingBook.chapterTitles.slice(0, 8),
+      sections: siblingBook.outline.map((e) => ({
         title: e.title,
         items: e.keyPoints.slice(0, 6),
       })),

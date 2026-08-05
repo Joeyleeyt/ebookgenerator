@@ -15,8 +15,30 @@ export interface SharedChapterContext {
   bookTitle?: string | undefined;
 }
 
+/**
+ * Just enough of a book to sell it: what a landing page card shows.
+ *
+ * Exists because `findByProject` loads the whole aggregate — every chapter's
+ * full prose, its sections and its illustrations, tens of megabytes for a
+ * finished book. The landing page reads four fields and none of the text, and
+ * a three-book page multiplied that waste by three until the database killed
+ * the query.
+ */
+export interface BookSummary {
+  title: string | null;
+  coverImagePath: string | null;
+  /** Chapter titles in reading order. */
+  chapterTitles: string[];
+  /** Outline entries, for the "what's inside" breakdown. */
+  outline: Array<{ title: string; keyPoints: string[] }>;
+  /** True when the book has chapters — i.e. it is finished enough to sell. */
+  hasChapters: boolean;
+}
+
 export interface BookRepository {
   findByProject(projectId: ProjectId): Promise<Book | null>;
+  /** The selling-relevant fields only, without loading any chapter prose. */
+  findSummaryByProject(projectId: ProjectId): Promise<BookSummary | null>;
   findById(id: BookId): Promise<Book | null>;
   save(book: Book): Promise<void>;
   /**

@@ -49,6 +49,18 @@ function makeBook(): Book {
   return book;
 }
 
+
+/** The landing page reads a summary, not the whole book aggregate. */
+function makeBookSummary(over: { title?: string; hasChapters?: boolean } = {}) {
+  return {
+    title: over.title ?? 'The Mechanic Bible',
+    coverImagePath: 'covers/book-1.png',
+    chapterTitles: over.hasChapters === false ? [] : ['Reading the dashboard'],
+    outline: [],
+    hasChapters: over.hasChapters ?? true,
+  };
+}
+
 class FakeLandingRepo implements LandingPageRepository {
   saves = 0;
   constructor(private page: LandingPage | null = null) {}
@@ -99,7 +111,7 @@ function buildGenerate(options: {
 
   const useCase = new GenerateLandingPageUseCase(
     { findById: async () => project } as never,
-    { findByProject: async () => book } as never,
+    { findByProject: async () => book, findSummaryByProject: async () => makeBookSummary() } as never,
     {
       getBookStrategy: async () =>
         BookStrategy.create({
@@ -219,14 +231,12 @@ function buildTriple(opts: {
   };
 
   const books = {
-    findByProject: async (id: ProjectId) => {
+    findSummaryByProject: async (id: ProjectId) => {
       const raw = id.toString();
-      if (opts.unfinishedIds?.includes(raw)) {
-        return Book.create({ id: BookId.from(`book-${raw}`), projectId: raw, targetPages: 100 });
-      }
-      const book = makeBook();
-      if (raw !== root.id.toString()) book.setTitle(`Sibling Book ${raw.slice(0, 1)}`);
-      return book;
+      if (opts.unfinishedIds?.includes(raw)) return makeBookSummary({ hasChapters: false });
+      return makeBookSummary(
+        raw === root.id.toString() ? {} : { title: `Sibling Book ${raw.slice(0, 1)}` },
+      );
     },
   };
 
@@ -539,7 +549,7 @@ function buildWithReference(
 
   const useCase = new GenerateLandingPageUseCase(
     { findById: async () => project } as never,
-    { findByProject: async () => makeBook() } as never,
+    { findByProject: async () => makeBook(), findSummaryByProject: async () => makeBookSummary() } as never,
     { getBookStrategy: async () => null } as never,
     { getChannel: async () => null } as never,
     { listByProject: async () => [] } as never,
@@ -715,7 +725,7 @@ function buildPublish(project: Project, page: LandingPage | null, publisher: Sit
   const pages = new FakeLandingRepo(page);
   const useCase = new PublishLandingPageUseCase(
     { findById: async () => project } as never,
-    { findByProject: async () => makeBook() } as never,
+    { findByProject: async () => makeBook(), findSummaryByProject: async () => makeBookSummary() } as never,
     pages,
     publisher,
     { now: () => now },
