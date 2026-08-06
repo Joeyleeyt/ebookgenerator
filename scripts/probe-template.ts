@@ -12,8 +12,10 @@
  * What it CANNOT tell you: whether the annotation model labels the right nodes.
  * That needs the key and the queue. Everything before it is here.
  */
+import puppeteer from 'puppeteer';
 import { PuppeteerTemplateCapturer } from '../packages/infrastructure/src/net/PuppeteerTemplateCapturer.js';
 import { SharpPageDiffer } from '../packages/infrastructure/src/landing/SharpPageDiffer.js';
+import { AUTOSCROLL, DETECT_COLLAPSIBLES, STAMP } from '../packages/infrastructure/src/landing/browserScripts.js';
 
 const url = process.argv[2];
 const asJson = process.argv.includes('--json');
@@ -27,7 +29,34 @@ function pct(n: number): string {
   return `${(n * 100).toFixed(3)}%`;
 }
 
+/**
+ * Reports the page's collapsible regions without capturing anything else.
+ *
+ * A separate, much faster pass: converting an accordion so it works without
+ * JavaScript needs its exact shape first, and guessing at that from screenshots
+ * is how you write a converter for markup that is not there.
+ */
+async function inspectCollapsibles(): Promise<void> {
+  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.goto(url as string, { waitUntil: 'networkidle2', timeout: 45_000 });
+    await page.evaluate(AUTOSCROLL);
+    await page.evaluate(STAMP);
+    const found = (await page.evaluate(DETECT_COLLAPSIBLES)) as {
+      native: number;
+      aria: Array<Record<string, unknown>>;
+      candidates: Array<Record<string, unknown>>;
+    };
+    console.log(JSON.stringify(found, null, 2));
+  } finally {
+    await browser.close().catch(() => undefined);
+  }
+}
+
 async function main(): Promise<void> {
+  if (process.argv.includes('--collapsibles')) return inspectCollapsibles();
   if (!asJson) console.error(`capturing ${url} …`);
 
   const captured = await new PuppeteerTemplateCapturer().capture(url);

@@ -227,6 +227,97 @@ describe('bindTemplate', () => {
     });
   });
 
+  /**
+   * The shape the reference template actually uses: three book cards, each with
+   * its own bullet list. The expander used to resolve the INNER region first,
+   * against the page-level list, so all three cards showed book one's bullets —
+   * the same "one book's content three times" defect the rest of the system
+   * exists to prevent, reproduced inside the binder.
+   */
+  describe('nested repeating regions', () => {
+    const cards =
+      '<div class="books"><template data-repeat="OFFER_ITEMS">' +
+      '<div class="book"><h3>{{OFFER_ITEMS.title}}</h3>' +
+      '<ul><template data-repeat="BENEFITS"><li>{{BENEFITS.title}}</li></template></ul>' +
+      '</div></template></div>';
+
+    it('gives each card its own nested list', () => {
+      const html = bindTemplate(cards, {
+        ...empty,
+        repeats: {
+          OFFER_ITEMS: [
+            { title: 'Book One', BENEFITS: [{ title: 'one-a' }, { title: 'one-b' }] },
+            { title: 'Book Two', BENEFITS: [{ title: 'two-a' }] },
+            { title: 'Book Three', BENEFITS: [{ title: 'three-a' }, { title: 'three-b' }] },
+          ],
+        },
+      }).value.html;
+
+      const books = html.split('<div class="book">').slice(1);
+      expect(books).toHaveLength(3);
+      expect(books[0]).toContain('one-a');
+      expect(books[0]).toContain('one-b');
+      expect(books[0]).not.toContain('two-a');
+      expect(books[1]).toContain('two-a');
+      expect(books[1]).not.toContain('one-a');
+      expect(books[2]).toContain('three-b');
+      expect(books[2]).not.toContain('one-a');
+    });
+
+    it('never repeats one card’s bullets under the others', () => {
+      const html = bindTemplate(cards, {
+        ...empty,
+        repeats: {
+          OFFER_ITEMS: [
+            { title: 'Book One', BENEFITS: [{ title: 'only-book-one' }] },
+            { title: 'Book Two', BENEFITS: [{ title: 'only-book-two' }] },
+          ],
+        },
+      }).value.html;
+      expect(html.split('only-book-one').length - 1).toBe(1);
+      expect(html.split('only-book-two').length - 1).toBe(1);
+    });
+
+    // Silence beats a lie: a card with no list of its own renders none, rather
+    // than borrowing the page-level one and showing another book's content.
+    it('leaves a card empty rather than borrowing a shared list', () => {
+      const html = bindTemplate(cards, {
+        ...empty,
+        repeats: {
+          OFFER_ITEMS: [{ title: 'Book One' }, { title: 'Book Two' }],
+          BENEFITS: [{ title: 'page-level' }],
+        },
+      }).value.html;
+      expect(html).not.toContain('page-level');
+    });
+
+    // With ONE card there is no ambiguity about whose content it is.
+    it('uses the page-level list when the outer region has a single item', () => {
+      const html = bindTemplate(cards, {
+        ...empty,
+        repeats: { OFFER_ITEMS: [{ title: 'The Book' }], BENEFITS: [{ title: 'page-level' }] },
+      }).value.html;
+      expect(html).toContain('page-level');
+    });
+
+    it('escapes nested values by their own kind', () => {
+      const html = bindTemplate(cards, {
+        ...empty,
+        repeats: { OFFER_ITEMS: [{ title: 'A & B', BENEFITS: [{ title: '<em>x</em>' }] }] },
+      }).value.html;
+      expect(html).toContain('<h3>A &amp; B</h3>');
+      expect(html).toContain('<li>&lt;em&gt;x&lt;/em&gt;</li>');
+    });
+
+    it('does not hang on an unbalanced template tag', () => {
+      const out = bindTemplate('<div><template data-repeat="FAQ_ITEMS"><li>{{FAQ_ITEMS.question}}</li></div>', {
+        ...empty,
+        repeats: { FAQ_ITEMS: [{ question: 'A?' }] },
+      });
+      expect(out.isOk()).toBe(true);
+    });
+  });
+
   it('strips extraction scaffolding so it never reaches a buyer', () => {
     const out = bindTemplate('<h1 data-tpl="n4" class="x">{{HERO_TITLE}}</h1>', {
       ...empty,

@@ -21,11 +21,22 @@ import {
  * context with it.
  */
 
+/**
+ * One item in a repeating region.
+ *
+ * A field is normally a string. It may instead be a NESTED list, for a region
+ * whose items each contain their own repeating region — three book cards, each
+ * with its own bullet list, which is how the reference template presents a set.
+ * The nested list is keyed by the inner region's own name, e.g.
+ * `{ title: 'Book One', BENEFITS: [{ title: '…' }] }`.
+ */
+export type RepeatItem = Record<string, string | Array<Record<string, string>>>;
+
 export interface BindValues {
   /** Single-value tokens, by key. */
   scalars: Record<string, string>;
   /** Repeating regions: one record per item, keyed by field name. */
-  repeats: Record<string, Array<Record<string, string>>>;
+  repeats: Record<string, RepeatItem[]>;
   /**
    * Values for `html`-kind tokens.
    *
@@ -117,46 +128,103 @@ function renderScalar(key: string, kind: PlaceholderKind, raw: string): Result<s
   }
 }
 
-/**
- * Matches one repeater's markup. Deliberately refuses to match across a nested
- * `<template>`, so a repeater inside a repeater is expanded innermost-first by
- * the loop in `expandRepeaters` rather than swallowed whole by a greedy match.
- */
-const REPEAT_RE = /<template\s+data-repeat="([^"]+)"\s*>((?:(?!<\/?template\b)[\s\S])*)<\/template>/;
+/** Opens a repeating region. */
+const REPEAT_OPEN = /<template\s+data-repeat="([^"]+)"\s*>/;
+/** Either side of a template tag, for depth counting. */
+const TEMPLATE_TAG = /<template[\s>][^>]*>|<\/template\s*>/g;
 
-function expandRepeaters(html: string, values: BindValues, errors: string[], unresolved: string[]): string {
+/**
+ * Finds the OUTERMOST repeating region, with its matching close tag.
+ *
+ * Outermost, not innermost — and that distinction is the whole bug this
+ * replaced. The previous matcher deliberately refused to span a nested
+ * `<template>`, so an inner region was expanded FIRST, against the page-level
+ * list, and every card of the outer region then received the same inner list.
+ * On the reference template that is three book cards showing book one's bullets
+ * three times: the exact "one book's content shown three times" defect the rest
+ * of the system is built to prevent.
+ *
+ * Expanding outermost-first is what lets each item carry its own nested list.
+ */
+function findOutermostRepeat(html: string): { key: string; inner: string; start: number; end: number } | null {
+  const first = REPEAT_OPEN.exec(html);
+  if (!first) return null;
+
+  const key = first[1] ?? '';
+  const innerStart = first.index + first[0].length;
+
+  // Walk forward counting nested templates, so the close we stop at is OURS.
+  TEMPLATE_TAG.lastIndex = innerStart;
+  let depth = 1;
+  for (let m = TEMPLATE_TAG.exec(html); m; m = TEMPLATE_TAG.exec(html)) {
+    depth += m[0].startsWith('</') ? -1 : 1;
+    if (depth === 0) {
+      return { key, inner: html.slice(innerStart, m.index), start: first.index, end: m.index + m[0].length };
+    }
+  }
+  // Unbalanced markup: take the rest of the document rather than looping.
+  return { key, inner: html.slice(innerStart), start: first.index, end: html.length };
+}
+
+/** The nested list an item carries for an inner region, if it carries one. */
+function nestedListOf(item: RepeatItem, key: string): RepeatItem[] | null {
+  const value = item[key];
+  return Array.isArray(value) ? value : null;
+}
+
+function expandRepeaters(
+  html: string,
+  repeats: Record<string, RepeatItem[]>,
+  errors: string[],
+  unresolved: string[],
+  /**
+   * Set while expanding ONE item of an outer region. An inner region then reads
+   * that item's own list; falling back to the page-level list is only safe when
+   * the outer region has a single item, because with more than one that is
+   * exactly how the same content ends up under every card.
+   */
+  parent?: { item: RepeatItem; siblings: number } | undefined,
+): string {
   let out = html;
-  // Bounded: each pass removes at least one <template>, and a template that
-  // somehow survived would otherwise spin here forever.
-  for (let guard = 0; guard < 200; guard++) {
-    const match = REPEAT_RE.exec(out);
-    if (!match) break;
-    const [whole, key = '', inner = ''] = match;
-    const items = values.repeats[key];
+  // Bounded: each pass consumes one region, and unbalanced markup that somehow
+  // survived would otherwise spin here forever.
+  for (let guard = 0; guard < 500; guard++) {
+    const region = findOutermostRepeat(out);
+    if (!region) break;
+
+    const fromParent = parent ? nestedListOf(parent.item, region.key) : null;
+    const items =
+      fromParent ?? (parent && parent.siblings > 1 ? null : (repeats[region.key] ?? null));
 
     if (!items || items.length === 0) {
-      // No content for this region: the region disappears rather than rendering
-      // an empty card. Recorded so the fidelity report can say a section came
-      // back thinner than the template's.
-      unresolved.push(key);
-      out = out.replace(whole, '');
+      // The region disappears rather than rendering an empty card. Recorded so
+      // the fidelity report can say a section came back thinner than the
+      // template's, instead of it being found on the published page.
+      unresolved.push(region.key);
+      out = out.slice(0, region.start) + out.slice(region.end);
       continue;
     }
 
     const rendered = items
-      .map((item) =>
-        inner.replace(TOKEN_RE, (token: string, tokenKey = '') => {
+      .map((item) => {
+        // Nested regions first, against THIS item, before its own fields are
+        // substituted — an inner token must not be taken for an outer one.
+        const withNested = region.inner.includes('<template')
+          ? expandRepeaters(region.inner, repeats, errors, unresolved, { item, siblings: items.length })
+          : region.inner;
+
+        return withNested.replace(TOKEN_RE, (token: string, tokenKey = '') => {
           const field = splitRepeaterField(tokenKey);
           // A token from a different region inside this one is a mapping bug,
           // not something to paper over — leave it for the residual-token check.
-          if (!field || field.key !== key) return token;
+          if (!field || field.key !== region.key) return token;
           const kind = kindFor(tokenKey) ?? 'text';
           const raw = item[field.field];
-          if (raw === undefined || raw === '') {
+          if (typeof raw !== 'string' || raw === '') {
             unresolved.push(tokenKey);
             // Same treatment a scalar gets: an unresolved href must be inert
-            // rather than empty. `href=""` reloads the page when clicked, which
-            // on an offer card reads as a buy button that silently does nothing.
+            // rather than empty. An empty href reloads the page when clicked,
+            // which on an offer card reads as a buy button that does nothing.
             return kind === 'href' ? '#' : '';
           }
           const value = renderScalar(tokenKey, kind, raw);
@@ -165,11 +233,11 @@ function expandRepeaters(html: string, values: BindValues, errors: string[], unr
             return '';
           }
           return value.value;
-        }),
-      )
+        });
+      })
       .join('');
 
-    out = out.replace(whole, rendered);
+    out = out.slice(0, region.start) + rendered + out.slice(region.end);
   }
   return out;
 }
@@ -194,7 +262,7 @@ export function bindTemplate(html: string, values: BindValues, options: BindOpti
   const removedOptional: string[] = [];
   const required = new Set(options.required ?? []);
 
-  let out = expandRepeaters(html, values, errors, unresolved);
+  let out = expandRepeaters(html, values.repeats, errors, unresolved);
 
   // Optional images with no value are removed BEFORE substitution, so their
   // src token never has to resolve to a placeholder image.

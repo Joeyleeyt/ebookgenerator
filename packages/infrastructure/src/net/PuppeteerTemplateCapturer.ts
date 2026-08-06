@@ -17,6 +17,7 @@ import {
   applyMapScript,
   AUTOSCROLL,
   CLEAN,
+  OPEN_DISCLOSURES,
   COLLECT_CSS,
   COLLECT_IMAGE_URLS,
   DETECT_REPEATERS,
@@ -100,6 +101,14 @@ export class PuppeteerTemplateCapturer implements TemplateCapturer {
 
       // ── the fidelity target, before anything is removed ──
       const baselineShots = await this.shootWidths(page, notes);
+
+      // Open the accordions BEFORE the scripts go, so their content mounts and
+      // can be measured. The baseline shots above already recorded the page as
+      // a visitor first sees it, with everything closed.
+      const opened = (await page.evaluate(OPEN_DISCLOSURES)) as number;
+      if (opened > 0) {
+        notes.push(`${opened} collapsed row(s) were opened so their content could be captured.`);
+      }
 
       // ── clean ──
       const forced = (await page.evaluate(UNHIDE_REVEALS)) as number;

@@ -102,6 +102,36 @@ export const UNHIDE_REVEALS = `(function () {
 })()`;
 
 /**
+ * Opens every collapsed disclosure, while the script that manages it is alive.
+ *
+ * Must run BEFORE cleaning, and that ordering is the whole point. Modern
+ * accordion libraries UNMOUNT a closed panel rather than hiding it: the
+ * reference template's six FAQ answers were not hidden in the captured DOM,
+ * they were absent — six triggers and six empty divs. Capturing that gives a
+ * template whose answers can never be filled, because there is no node to fill.
+ *
+ * Clicking each trigger first makes React mount the content, so the answer text
+ * is present to be measured and labelled. The disclosure is put back into a
+ * closed <details> afterwards, so the published page still opens on click.
+ */
+export const OPEN_DISCLOSURES = `(async function () {
+  const triggers = document.querySelectorAll('[aria-controls][aria-expanded="false"]');
+  let opened = 0;
+  for (let i = 0; i < triggers.length && i < 40; i++) {
+    try {
+      triggers[i].click();
+      opened++;
+      // Let the framework mount and paint before the next one — several kits
+      // close the previous panel when another opens, and a batch of synchronous
+      // clicks would leave only the last one mounted.
+      await new Promise((r) => setTimeout(r, 60));
+    } catch (e) { /* a trigger that refuses to be clicked is not fatal */ }
+  }
+  await new Promise((r) => setTimeout(r, 250));
+  return opened;
+})()`;
+
+/**
  * Removes everything that must not be republished: executable content, the
  * template owner's identity, trackers and overlays.
  *
@@ -223,6 +253,57 @@ export const RESTORE_DISCLOSURE = `(function () {
   if (document.querySelector('details')) return { restored: 0, native: true };
 
   let restored = 0;
+
+  /**
+   * The ACCESSIBLE construction, tried first: a button declares whether its
+   * panel is open and names it by id.
+   *
+   * This is what every headless UI kit emits — Radix, Headless UI, Reach — and
+   * it is what the reference template uses. The structural heuristic below
+   * cannot see it, because the trigger and the panel are not siblings under a
+   * shared row: the button carries aria-controls and the panel lives wherever
+   * the library put it. Six collapsed FAQ rows were missed that way, and the
+   * cloned page rendered every answer expanded beneath its question.
+   */
+  const triggers = document.querySelectorAll('[aria-controls][aria-expanded]');
+  for (let i = 0; i < triggers.length && restored < 40; i++) {
+    const trigger = triggers[i];
+    if (!trigger.isConnected) continue;
+    const panelId = trigger.getAttribute('aria-controls');
+    const panel = panelId ? document.getElementById(panelId) : null;
+    if (!panel || !panel.isConnected || panel === trigger || panel.contains(trigger)) continue;
+    // The panel may legitimately be EMPTY: a library that unmounts closed
+    // content leaves the container behind. That container is still the right
+    // place for the answer, so it is converted rather than skipped.
+    if (!(trigger.textContent || '').trim()) continue;
+
+    const details = document.createElement('details');
+    // Open when the template had it open — a "what you get" panel is sometimes
+    // expanded by default, and closing it would hide content a reader was
+    // meant to see without clicking.
+    if (trigger.getAttribute('aria-expanded') === 'true') details.setAttribute('open', '');
+
+    const summary = document.createElement('summary');
+    // The trigger's own classes and children, so the row keeps the template's
+    // styling. A <button> cannot stay inside <summary> — it would swallow the
+    // click that opens the disclosure.
+    summary.setAttribute('class', String(trigger.getAttribute('class') || ''));
+    while (trigger.firstChild) summary.appendChild(trigger.firstChild);
+
+    // The library's state attributes go with the script that managed them.
+    panel.removeAttribute('hidden');
+    panel.removeAttribute('aria-hidden');
+    if (panel.getAttribute('data-state') === 'closed') panel.setAttribute('data-state', 'open');
+    panel.style.removeProperty('display');
+    panel.style.removeProperty('max-height');
+    panel.style.removeProperty('height');
+
+    trigger.replaceWith(details);
+    details.appendChild(summary);
+    details.appendChild(panel);
+    restored++;
+  }
+
   const rows = document.querySelectorAll('div, li, article, section');
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -921,6 +1002,12 @@ export function applyMapScript(payload: {
       el.textContent = tokenText;
     } else if (entry.kind === 'src') {
       el.setAttribute('src', tokenText);
+      // The slot was sized for the TEMPLATE's own artwork. A book cover is
+      // 2:3 flat art; the template's product shots are 3D mockups at a
+      // different ratio, and the template's CSS crops to fill — so the cover's
+      // title ran off both edges. Marked here so the bound page can fit rather
+      // than crop it. A letterboxed cover reads; a cropped title does not.
+      el.setAttribute('data-fit', 'contain');
       // srcset would override src entirely, leaving the original image on the
       // page with a token sitting unused beside it.
       el.removeAttribute('srcset');
@@ -948,3 +1035,74 @@ export function applyMapScript(payload: {
   };
 })()`;
 }
+
+/**
+ * Finds collapsible regions — accordions, FAQ toggles, "read more" panels.
+ *
+ * These are the one piece of JavaScript-driven behaviour worth reproducing
+ * rather than accepting the loss of. A sales page's FAQ is almost always an
+ * accordion, and the usual construction ships every answer OPEN in the HTML and
+ * lets a script collapse them on load. Strip the scripts and every answer is
+ * expanded — which is what happened: the template shows six collapsed questions
+ * and the cloned page showed six questions with all their prose beneath.
+ *
+ * Reported rather than converted here, because the conversion needs to know the
+ * exact shape first: which node is the question, which is the answer, and
+ * whether the pair is already a <details>.
+ */
+export const DETECT_COLLAPSIBLES = `(function () {
+  const out = { native: 0, aria: [], candidates: [] };
+
+  // Already native: nothing to do, these survive cleaning intact.
+  out.native = document.querySelectorAll('details').length;
+
+  // The accessible construction: a button says whether its panel is open.
+  const controls = document.querySelectorAll('[aria-controls], [aria-expanded]');
+  for (let i = 0; i < controls.length && out.aria.length < 12; i++) {
+    const el = controls[i];
+    const panelId = el.getAttribute('aria-controls');
+    const panel = panelId ? document.getElementById(panelId) : null;
+    out.aria.push({
+      tplId: el.getAttribute('data-tpl'),
+      tag: el.tagName.toLowerCase(),
+      expanded: el.getAttribute('aria-expanded'),
+      controls: panelId,
+      panelFound: Boolean(panel),
+      panelTag: panel ? panel.tagName.toLowerCase() : null,
+      panelVisible: panel ? getComputedStyle(panel).display !== 'none' : null,
+      text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 70),
+    });
+  }
+
+  // The unlabelled construction, which is the common one: a repeated card whose
+  // first child is a short line ending in "?" and whose sibling is the prose.
+  const all = document.querySelectorAll('div, li, article, section');
+  for (let i = 0; i < all.length && out.candidates.length < 12; i++) {
+    const el = all[i];
+    if (el.children.length < 2) continue;
+    const head = el.children[0];
+    const body = el.children[1];
+    const headText = (head.textContent || '').replace(/\s+/g, ' ').trim();
+    const bodyText = (body.textContent || '').replace(/\s+/g, ' ').trim();
+    if (headText.length < 8 || headText.length > 120) continue;
+    if (headText.indexOf('?') === -1) continue;
+    if (bodyText.length < 40) continue;
+
+    const bodyStyle = getComputedStyle(body);
+    out.candidates.push({
+      tplId: el.getAttribute('data-tpl'),
+      tag: el.tagName.toLowerCase(),
+      cls: String(el.className || '').slice(0, 80),
+      headTag: head.tagName.toLowerCase(),
+      bodyTag: body.tagName.toLowerCase(),
+      // Whether the answer is currently painted. All-visible on a page whose
+      // template shows them closed is the signature of a script that collapses
+      // on load and is no longer there to do it.
+      bodyVisible: bodyStyle.display !== 'none' && parseFloat(bodyStyle.opacity) > 0.05,
+      bodyMaxHeight: bodyStyle.maxHeight,
+      question: headText.slice(0, 70),
+    });
+  }
+
+  return out;
+})()`;

@@ -3,6 +3,22 @@ import { esc } from './shared.js';
 import { DISCLOSURE_CSS } from './restoreDisclosure.js';
 
 /**
+ * Fits a bound image inside the slot the template sized for its own artwork.
+ *
+ * The only styling this system imposes on a cloned page, and it earns its place:
+ * the template's product shots and a generated book cover are different shapes,
+ * and the template's CSS crops to fill. That cut the book's title off at both
+ * edges. Contain letterboxes slightly instead, which is the lesser cost — a
+ * cover a buyer cannot read is not doing its job.
+ *
+ * Scoped to nodes the parameteriser marked, so nothing the template ships is
+ * touched.
+ */
+const BOUND_IMAGE_CSS = `
+img[data-fit="contain"] { object-fit: contain; object-position: center; }
+`;
+
+/**
  * Assembles a parameterised template into the finished, self-contained page.
  *
  * The document shell is deliberately NOT rebuilt — that is the entire
@@ -55,7 +71,7 @@ export class TemplateBinder {
       `<meta property="og:title" content="${esc(input.documentTitle)}">` +
       `<meta property="og:description" content="${esc(input.metaDescription)}">` +
       `<meta property="og:type" content="website">` +
-      `<style>\n${input.css}\n${input.themeOverrideCss}${accentCss}${DISCLOSURE_CSS}</style>`;
+      `<style>\n${input.css}\n${input.themeOverrideCss}${accentCss}${DISCLOSURE_CSS}${BOUND_IMAGE_CSS}</style>`;
 
     // The identity cleaning removed, rebuilt for the new product. Injected at
     // the END of <head> so the bundled stylesheet still wins over anything the
