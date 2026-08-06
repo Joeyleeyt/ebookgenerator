@@ -191,6 +191,16 @@ export interface ExtractionReport {
    * stored row, and the first extraction could not distinguish them.
    */
   detectedRepeaters: Array<{ containerTplId: string; itemCount: number; flexibleCount: boolean }>;
+  /**
+   * Price-like strings left in the template with no {{PRICE}} label.
+   *
+   * Recorded rather than judged. On a page about saving money on airfare,
+   * "$1,400" is the copy's subject, not the product's price — treating every
+   * currency string as a leaked price failed a template that cloned perfectly.
+   * Which of them matters can only be decided once the seller's own price is
+   * known, so the decision moves to bind time and these are what it checks.
+   */
+  residualPrices: string[];
   notes: string[];
 }
 

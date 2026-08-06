@@ -22,6 +22,21 @@ import type { Finding, PlaceholderEntry, RepeaterEntry } from '../../domain/land
  * buy buttons all survive" — had no equivalent in v1 at all.
  */
 
+/**
+ * Currency-looking text in rendered markup.
+ *
+ * Exported so the recorded list and the human-readable warning come from ONE
+ * definition. They did not: the warning named only the first three for
+ * readability, and the record was parsed back out of that message — so the
+ * publish-time gate silently checked three of eleven figures.
+ */
+export function findPriceLikeText(html: string): string[] {
+  const matches = html.replace(/<[^>]+>/g, ' ').match(PRICE_LIKE) ?? [];
+  return [...new Set(matches.map((v) => v.trim()))];
+}
+
+const PRICE_LIKE = /[$£€]\s?\d[\d.,]*|(?:^|\s)\d[\d.,]*\s?(?:USD|EUR|GBP)/g;
+
 function blocker(code: string, message: string): Finding {
   return { severity: 'BLOCKER', code, message };
 }
@@ -164,14 +179,16 @@ export function validateTemplate(input: TemplateValidationInput): Result<void, F
   // price the seller did not set, left on a page that takes money. A buyer who
   // reads $47 and is charged $27 is the good case; the reverse is a complaint.
   if (!html.includes(token('PRICE'))) {
-    const leftover = html.replace(/<[^>]+>/g, ' ').match(/[$£€]\s?\d[\d.,]*|(?:^|\s)\d[\d.,]*\s?(?:USD|EUR|GBP)/g);
-    if (leftover && leftover.length > 0) {
+    const leftover = findPriceLikeText(html);
+    if (leftover.length > 0) {
       findings.push(
-        blocker(
+        warn(
           'PRICE_NOT_LABELLED',
           `No node was labelled ${token('PRICE')}, but the page still shows ${leftover.length} price-like ` +
-            `value(s) (${[...new Set(leftover)].slice(0, 3).join(', ')}). Those are the template owner's ` +
-            "figures and would be published as the seller's own.",
+            `value(s) (${leftover.slice(0, 3).join(', ')}…). Those are the template owner's ` +
+            "figures. Whether any of them is the PRODUCT'S price cannot be told from the text alone — on a " +
+            'page about saving money, most are the subject of the copy — so this is checked again at publish ' +
+            "time against the seller's actual price.",
         ),
       );
     }
@@ -209,6 +226,15 @@ export interface BoundValidationInput {
   sourceHost: string;
   /** From the template — how many buy buttons this page must have. */
   expectedCtaCount: number;
+  /**
+   * Price-like strings the template carried that were never labelled.
+   *
+   * Checked HERE rather than at extraction, because only here is the seller's
+   * own price known. A figure that is merely the copy's subject survives
+   * harmlessly; one sitting where a price belongs is a page advertising an
+   * amount the seller never set.
+   */
+  templatePrices?: string[] | undefined;
 }
 
 /**
@@ -263,6 +289,26 @@ export function validateBoundPage(input: BoundValidationInput): Finding[] {
   // pointing at the site the template came from.
   findings.push(...residualSourceLinks(html, input.sourceHost));
   findings.push(...safetyFindings(html));
+
+  // ── the template owner's price must not be what a buyer reads ─────────────
+  // Only the ones adjacent to a buy button matter. A savings figure in a
+  // paragraph is the copy talking; the same string beside the checkout link is
+  // the page quoting a price nobody set.
+  for (const price of input.templatePrices ?? []) {
+    if (!html.includes(price)) continue;
+    const at = html.indexOf(price);
+    const nearby = html.slice(Math.max(0, at - 600), at + 600);
+    const nearCheckout = input.checkoutUrls.some((url) => nearby.includes(url));
+    if (nearCheckout) {
+      findings.push(
+        blocker(
+          'TEMPLATE_PRICE_BESIDE_CTA',
+          `"${price}" came from the template and still sits beside a buy button. A buyer would read it as ` +
+            'the price and be charged something else.',
+        ),
+      );
+    }
+  }
 
   // ── accessibility ─────────────────────────────────────────────────────────
   const h1s = occurrences(html, '<h1');

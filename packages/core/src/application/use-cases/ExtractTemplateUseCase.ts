@@ -15,7 +15,7 @@ import {
   type RepeaterEntry,
   type StoredLandingTemplate,
 } from '../../domain/landing/TemplateManifest.js';
-import { validateTemplate } from '../landing/templateContract.js';
+import { findPriceLikeText, validateTemplate } from '../landing/templateContract.js';
 import { TemplateAnnotationPrompt } from '../prompts/TemplateAnnotationPrompt.js';
 import { parseJsonCompletion } from '../prompts/parse.js';
 import type { AiTextGenerator } from '../ports/services/AiTextGenerator.js';
@@ -217,6 +217,8 @@ export class ExtractTemplateUseCase {
 
     const findings: Finding[] = [];
     const notes = [...page.notes];
+    /** Price-like strings the template kept; judged at bind time, not here. */
+    let residualPrices: string[] = [];
 
     /**
      * What was measured so far, for a run that does not reach the end.
@@ -241,6 +243,7 @@ export class ExtractTemplateUseCase {
         itemCount: r.originalCount,
         flexibleCount: r.flexibleCount,
       })),
+      residualPrices,
     });
 
     // What cleaning cost, measured rather than assumed.
@@ -337,6 +340,12 @@ export class ExtractTemplateUseCase {
       sectionCount: page.sections.length,
     });
     if (contract.isFail()) findings.push(...contract.error);
+    // Every figure, not the three the warning names. The publish-time gate
+    // checks this list, and a truncated one would wave through the very figure
+    // that mattered.
+    if (!parameterised.value.html.includes('{{PRICE}}')) {
+      residualPrices = findPriceLikeText(parameterised.value.html);
+    }
 
     findings.push(...brandLeakFindings(parameterised.value.html, host, page.title));
 
@@ -378,6 +387,7 @@ export class ExtractTemplateUseCase {
           rect: { x: 0, y: 0, width: img.width, height: img.height },
         })),
       fontFidelity: stored.value.fontFidelity,
+      residualPrices,
       detectedRepeaters: page.repeaters.map((r) => ({
         containerTplId: r.containerTplId,
         itemCount: r.originalCount,
@@ -697,6 +707,7 @@ function emptyReport(): ExtractionReport {
     assetBytes: 0,
     sectionCount: 0,
     detectedRepeaters: [],
+    residualPrices: [],
     notes: [],
   };
 }

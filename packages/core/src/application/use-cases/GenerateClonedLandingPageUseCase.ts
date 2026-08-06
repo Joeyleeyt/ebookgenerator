@@ -444,6 +444,10 @@ export class GenerateClonedLandingPageUseCase {
       checkoutUrls: input.checkoutUrls,
       sourceHost: hostOf(input.template.sourceUrl),
       expectedCtaCount: input.template.placeholders.filter((p) => p.placeholder === 'CHECKOUT_URL').length,
+      // Judged here rather than at extraction: only now is the seller's own
+      // price known, so a figure that is merely the copy's subject can be told
+      // from one sitting where a price belongs.
+      templatePrices: input.template.report?.residualPrices ?? [],
     });
 
     findings.push({ severity: 'INFO', code: 'THEME', message: input.themeReason });

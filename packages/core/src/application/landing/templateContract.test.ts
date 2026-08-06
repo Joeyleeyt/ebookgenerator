@@ -66,17 +66,14 @@ describe('validateTemplate', () => {
       expect(result.isOk()).toBe(true);
     });
 
-    // What actually matters is narrower and more serious: a price the seller
-    // never set, left on a page that takes money.
-    it("blocks when the template's OWN price survived unlabelled", () => {
+    // A leftover price is recorded, not refused. On a page about saving money
+    // on airfare, "$1,400" is the subject of the copy — refusing the template
+    // rejected one that cloned perfectly. Which figure matters can only be
+    // decided once the seller's own price is known, so the decision moves to
+    // bind time.
+    it("only warns when the template's own price survived unlabelled", () => {
       const result = validateTemplate(baseInput({ html: COMPLETE_HTML.replace('{{PRICE}}', '$47') }));
-      const finding = rejected(result).find((f: Finding) => f.code === 'PRICE_NOT_LABELLED');
-      expect(finding?.message).toContain('$47');
-    });
-
-    it('recognises a currency code as well as a symbol', () => {
-      const result = validateTemplate(baseInput({ html: COMPLETE_HTML.replace('{{PRICE}}', '47 USD') }));
-      expect(rejected(result).map((f: Finding) => f.code)).toContain('PRICE_NOT_LABELLED');
+      expect(result.isOk()).toBe(true);
     });
   });
 
@@ -272,6 +269,45 @@ describe('validateBoundPage', () => {
         expectedCtaCount: 1,
       });
       expect(findings.map((f) => f.code)).not.toContain('CHECKOUT_COUNT_DRIFT');
+    });
+  });
+
+  describe("the template owner's price on the finished page", () => {
+    const checkout = 'https://store.example.com/p/1';
+
+    it('blocks a template price sitting beside a buy button', () => {
+      const findings = validateBoundPage({
+        html: `<div><span>$47</span><a href="${checkout}">Buy</a></div>`,
+        checkoutUrls: [checkout],
+        sourceHost: 'x.com',
+        expectedCtaCount: 1,
+        templatePrices: ['$47'],
+      });
+      const finding = findings.find((f) => f.code === 'TEMPLATE_PRICE_BESIDE_CTA');
+      expect(finding?.severity).toBe('BLOCKER');
+    });
+
+    // The airfare case: a figure the copy is ABOUT, far from any buy button.
+    it('leaves a figure alone when it is the copy talking, not a price tag', () => {
+      const findings = validateBoundPage({
+        html: `<p>Readers save $1,400 a year on airfare.</p>${'<p>x</p>'.repeat(80)}<a href="${checkout}">Buy</a>`,
+        checkoutUrls: [checkout],
+        sourceHost: 'x.com',
+        expectedCtaCount: 1,
+        templatePrices: ['$1,400'],
+      });
+      expect(findings.map((f) => f.code)).not.toContain('TEMPLATE_PRICE_BESIDE_CTA');
+    });
+
+    it('ignores a recorded price the bound page no longer contains', () => {
+      const findings = validateBoundPage({
+        html: `<span>$27</span><a href="${checkout}">Buy</a>`,
+        checkoutUrls: [checkout],
+        sourceHost: 'x.com',
+        expectedCtaCount: 1,
+        templatePrices: ['$47'],
+      });
+      expect(findings.filter((f) => f.severity === 'BLOCKER')).toEqual([]);
     });
   });
 
