@@ -54,19 +54,30 @@ export const CORE_PLACEHOLDERS: Record<string, PlaceholderSpec> = {
   HERO_SUBTITLE: {
     kind: 'text',
     source: 'copy',
-    required: true,
+    // Not every template has one. A page whose hero is a single line is a
+    // design choice, not a broken extraction.
+    required: false,
     purpose: 'The supporting line under the headline.',
   },
   BOOK_COVER: { kind: 'src', source: 'system', required: true, purpose: "The book's cover artwork." },
   BOOK_COVER_ALT: { kind: 'alt', source: 'system', required: false, purpose: 'Alt text for the cover image.' },
-  CTA_TEXT: { kind: 'text', source: 'copy', required: true, purpose: 'The buy button label.' },
+  // Unlabelled, the button keeps the template's own wording ("Get instant
+  // access"), which is generic enough to be harmless. Not worth failing over.
+  CTA_TEXT: { kind: 'text', source: 'copy', required: false, purpose: 'The buy button label.' },
   CHECKOUT_URL: {
     kind: 'href',
     source: 'system',
     required: true,
     purpose: "The seller's payment link. Never composed or rewritten — written in verbatim.",
   },
-  PRICE: { kind: 'text', source: 'system', required: true, purpose: 'The price, formatted with its currency.' },
+  /**
+   * Not structurally required — a template may not show a price at all — but its
+   * absence is checked separately and much more carefully than a missing label.
+   * If the template DOES show a price and no node was labelled, the page ships
+   * the template owner's price, which is a commercial defect rather than a
+   * cosmetic one. See the residual-price check in templateContract.
+   */
+  PRICE: { kind: 'text', source: 'system', required: false, purpose: 'The price, formatted with its currency.' },
   COMPARE_AT_PRICE: {
     kind: 'text',
     source: 'system',

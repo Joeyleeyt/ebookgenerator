@@ -44,9 +44,40 @@ describe('validateTemplate', () => {
     expect(validateTemplate(baseInput()).isOk()).toBe(true);
   });
 
-  it('blocks when a required token was never assigned to a node', () => {
-    const result = validateTemplate(baseInput({ html: COMPLETE_HTML.replace('{{PRICE}}', '$27') }));
+  it('blocks when a genuinely required token was never assigned to a node', () => {
+    const result = validateTemplate(baseInput({ html: COMPLETE_HTML.replace('{{BRAND_NAME}}', 'The Mechanic Bible') }));
     expect(rejected(result).map((f: Finding) => f.code)).toContain('MISSING_REQUIRED_PLACEHOLDER');
+  });
+
+  /**
+   * Requirements describe what the SELLER needs, not what one template happens
+   * to contain. Demanding a {{PRICE}} label outright meant a lead-magnet page
+   * with no price element could never be extracted, however cleanly it cloned —
+   * a real template failed exactly that way with 31 placeholders labelled.
+   */
+  describe('a template that simply does not have one of the optional parts', () => {
+    it('extracts fine when it shows no price at all', () => {
+      const result = validateTemplate(baseInput({ html: COMPLETE_HTML.replace('<span>{{PRICE}}</span>', '') }));
+      expect(result.isOk()).toBe(true);
+    });
+
+    it('extracts fine with no hero subtitle', () => {
+      const result = validateTemplate(baseInput({ html: COMPLETE_HTML.replace('<p>{{HERO_SUBTITLE}}</p>', '') }));
+      expect(result.isOk()).toBe(true);
+    });
+
+    // What actually matters is narrower and more serious: a price the seller
+    // never set, left on a page that takes money.
+    it("blocks when the template's OWN price survived unlabelled", () => {
+      const result = validateTemplate(baseInput({ html: COMPLETE_HTML.replace('{{PRICE}}', '$47') }));
+      const finding = rejected(result).find((f: Finding) => f.code === 'PRICE_NOT_LABELLED');
+      expect(finding?.message).toContain('$47');
+    });
+
+    it('recognises a currency code as well as a symbol', () => {
+      const result = validateTemplate(baseInput({ html: COMPLETE_HTML.replace('{{PRICE}}', '47 USD') }));
+      expect(rejected(result).map((f: Finding) => f.code)).toContain('PRICE_NOT_LABELLED');
+    });
   });
 
   /**

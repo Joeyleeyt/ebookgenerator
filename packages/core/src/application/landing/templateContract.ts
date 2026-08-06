@@ -157,6 +157,26 @@ export function validateTemplate(input: TemplateValidationInput): Result<void, F
     );
   }
 
+  // ── the template owner's PRICE must not survive ───────────────────────────
+  // Requiring a {{PRICE}} label outright was wrong: a template may legitimately
+  // show no price, and a lead-magnet page could then never be extracted however
+  // cleanly it cloned. What actually matters is narrower and more serious — a
+  // price the seller did not set, left on a page that takes money. A buyer who
+  // reads $47 and is charged $27 is the good case; the reverse is a complaint.
+  if (!html.includes(token('PRICE'))) {
+    const leftover = html.replace(/<[^>]+>/g, ' ').match(/[$£€]\s?\d[\d.,]*|(?:^|\s)\d[\d.,]*\s?(?:USD|EUR|GBP)/g);
+    if (leftover && leftover.length > 0) {
+      findings.push(
+        blocker(
+          'PRICE_NOT_LABELLED',
+          `No node was labelled ${token('PRICE')}, but the page still shows ${leftover.length} price-like ` +
+            `value(s) (${[...new Set(leftover)].slice(0, 3).join(', ')}). Those are the template owner's ` +
+            "figures and would be published as the seller's own.",
+        ),
+      );
+    }
+  }
+
   // ── nothing may still belong to the template's owner ──────────────────────
   findings.push(...residualSourceLinks(html, input.sourceHost));
 
